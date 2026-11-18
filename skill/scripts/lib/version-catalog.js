@@ -14,6 +14,20 @@ function stripComment(line) {
   return line;
 }
 
+// Net bracket depth change of a line, ignoring brackets inside quoted strings.
+function depthDelta(line) {
+  let d = 0, inStr = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (c === '"' && line[i - 1] !== '\\') inStr = !inStr;
+    else if (!inStr) {
+      if (c === '[' || c === '{') d++;
+      else if (c === ']' || c === '}') d--;
+    }
+  }
+  return d;
+}
+
 function splitTop(s, sep) {
   const parts = [];
   let depth = 0, inStr = false, cur = '';
@@ -60,7 +74,7 @@ function versionOf(entry, versions) {
   if (v === undefined && entry['version.ref'] !== undefined) v = { ref: entry['version.ref'] };
   if (typeof v === 'string') return v;
   if (v && typeof v === 'object') {
-    if (typeof v.ref === 'string') return versions[v.ref] ?? null;
+    if (typeof v.ref === 'string') return (Object.hasOwn(versions, v.ref) ? versions[v.ref] : null);
     for (const k of ['strictly', 'prefer', 'require']) {
       if (typeof v[k] === 'string') return v[k];
     }
@@ -78,7 +92,7 @@ export function parseVersionCatalog(text) {
     const line = stripComment(rawLine).trim();
     if (!line) continue;
     if (skipDepth > 0) {
-      skipDepth += (line.match(/[[{]/g) || []).length - (line.match(/[\]}]/g) || []).length;
+      skipDepth += depthDelta(line);
       if (skipDepth < 0) skipDepth = 0;
       continue;
     }
@@ -89,7 +103,7 @@ export function parseVersionCatalog(text) {
     const key = line.slice(0, i).trim().replace(/^"|"$/g, '');
     const valText = line.slice(i + 1).trim();
     if (!key) continue;
-    const open = (valText.match(/[[{]/g) || []).length - (valText.match(/[\]}]/g) || []).length;
+    const open = depthDelta(valText);
     if (open > 0) { skipDepth = open; continue; }
     const val = parseValue(valText);
     if (val === undefined) continue;
@@ -134,10 +148,10 @@ export function resolveAlias(vc, accessor) {
   if (parts[1] === 'versions' || parts[1] === 'bundles') return null;
   if (parts[1] === 'plugins') {
     const alias = norm(parts.slice(2).join('.'));
-    const p = vc.plugins[alias];
+    const p = Object.hasOwn(vc.plugins, alias) ? vc.plugins[alias] : null;
     return p ? { kind: 'plugin', id: p.id, version: p.version, alias } : null;
   }
   const alias = norm(parts.slice(1).join('.'));
-  const l = vc.libraries[alias];
+  const l = Object.hasOwn(vc.libraries, alias) ? vc.libraries[alias] : null;
   return l ? { kind: 'library', group: l.group, name: l.name, version: l.version, alias } : null;
 }

@@ -64,3 +64,27 @@ test('never throws on garbage', () => {
   assert.doesNotThrow(() => parseVersionCatalog('[libraries\nx = {\n= =\n"'));
   assert.doesNotThrow(() => parseVersionCatalog(undefined));
 });
+
+test('brackets inside quoted strings do not break parsing', () => {
+  const vc = parseVersionCatalog(`[libraries]
+a = { module = "x:a", version = { strictly = "[1.0,2.0)" } }
+c = { module = "x:c", version = { prefer = "[1.+,)" } }
+b = "x:b:1"
+
+[plugins]
+p = { id = "pl.p", version = "2" }
+`);
+  assert.equal(vc.libraries.a.version, '[1.0,2.0)');
+  assert.equal(vc.libraries.c.version, '[1.+,)');
+  assert.equal(vc.libraries.b.version, '1');
+  assert.deepEqual(vc.plugins.p, { id: 'pl.p', version: '2' });
+});
+
+test('prototype keys are not resolved', () => {
+  const vc = parseVersionCatalog(`[libraries]
+x = { module = "g:n", version.ref = "constructor" }
+`);
+  assert.equal(vc.libraries.x.version, null);
+  assert.equal(resolveAlias(vc, 'libs.constructor'), null);
+  assert.equal(resolveAlias(vc, 'libs.plugins.toString'), null);
+});
