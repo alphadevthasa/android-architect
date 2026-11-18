@@ -224,3 +224,33 @@ test('bundles stay a visible unresolved row', () => {
   assert.equal(d[0].unresolved, true);
   assert.equal(d[0].alias, 'bundles.net');
 });
+
+test('I2: numeric ext values resolve SDK levels', () => {
+  const ext = parseExtBlocks('ext {\n  targetSdkVersion = 33\n  compileSdkVersion = 34\n  versions = [minSdk: 21]\n}\next.minSdk = 21\n');
+  assert.equal(ext.targetSdkVersion, '33');
+  assert.equal(ext.compileSdkVersion, '34');
+  assert.equal(ext.minSdk, '21');
+  assert.equal(ext['versions.minSdk'], '21');
+  const a = parseBuildFile('android {\n  compileSdkVersion rootProject.ext.compileSdkVersion\n  defaultConfig {\n    minSdkVersion rootProject.ext.versions.minSdk\n    targetSdkVersion rootProject.targetSdkVersion\n  }\n}\n', 'groovy', { ext }).android;
+  assert.equal(a.compileSdk, 34);
+  assert.equal(a.minSdk, 21);
+  assert.equal(a.targetSdk, 33);
+});
+
+test('I2: libs.versions accessors resolve SDK levels', () => {
+  const vc = parseVersionCatalog('[versions]\ntargetSdk = "35"\ncompile-sdk = "36"\nminSdk = "24"\n');
+  const a = parseBuildFile([
+    'android {',
+    '  compileSdk = libs.versions.compile.sdk.get().toInt()',
+    '  defaultConfig {',
+    '    targetSdk = libs.versions.targetSdk.get().toInt()',
+    '    minSdk = libs.versions.minSdk.get().toInt()',
+    '  }',
+    '}',
+  ].join('\n'), 'kts', { versionCatalog: vc }).android;
+  assert.equal(a.compileSdk, 36);
+  assert.equal(a.targetSdk, 35);
+  assert.equal(a.minSdk, 24);
+  const g = parseBuildFile('android {\n  defaultConfig {\n    targetSdkVersion libs.versions.targetSdk.get().toInteger()\n  }\n}\n', 'groovy', { versionCatalog: vc }).android;
+  assert.equal(g.targetSdk, 35);
+});

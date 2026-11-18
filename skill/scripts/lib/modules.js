@@ -21,9 +21,11 @@ function normalizePath(p) {
  * `kind` is accepted for symmetry with parseBuildFile; both syntaxes share one grammar here.
  */
 export function parseSettings(text, kind) { // eslint-disable-line no-unused-vars
-  const src = stripComments(text);
+  let src = stripComments(text);
   const includes = [];
   const projectDirs = {};
+  // A Groovy include may continue on the next line after a trailing comma.
+  src = src.replace(/,[ \t]*\r?\n[ \t]*/g, ', ');
   const incRe = /(?:^|[\s;])include(?!\w)\s*(\(([^)]*)\)|([^\n;]*))/g;
   for (const m of src.matchAll(incRe)) {
     const args = m[2] ?? m[3] ?? '';
@@ -39,9 +41,14 @@ export function parseSettings(text, kind) { // eslint-disable-line no-unused-var
   return { includes, projectDirs };
 }
 
+const MAX_READ_BYTES = 1024 * 1024;
+
+/** Read a settings/build/catalog file as text; files over 1 MB are skipped like in detect. */
 function readText(root, rel) {
   try {
-    return fs.readFileSync(path.join(root, rel), 'utf8').replace(/^\uFEFF/, '');
+    const abs = path.join(root, rel);
+    if (fs.statSync(abs).size > MAX_READ_BYTES) return null;
+    return fs.readFileSync(abs, 'utf8').replace(/^\uFEFF/, '');
   } catch {
     return null;
   }

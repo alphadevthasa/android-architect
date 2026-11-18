@@ -312,3 +312,27 @@ test('M3: multi-activity ignores <activity-alias>', () => {
     assert.equal(e.evidence.length, 3);
   });
 });
+
+test('I2: unresolvable targetSdk yields an unknown compliance row', () => {
+  withProject({
+    'settings.gradle': "include ':app'\n",
+    'app/build.gradle': 'android {\n  defaultConfig {\n    targetSdkVersion computeTarget()\n  }\n}\n',
+  }, (p) => {
+    assert.equal(p.sdk.targetSdk, null);
+    assert.deepEqual(p.compliance, [{ id: 'target-sdk-36', status: 'unknown', detail: 'targetSdk not statically resolvable' }]);
+    assert.match(renderProfileMarkdown(p), /: unknown \(targetSdk not statically resolvable\)/);
+  });
+});
+
+test('I2: targetSdk from root ext and from libs.versions reaches the profile', () => {
+  withProject({
+    'settings.gradle': "include ':app'\n",
+    'build.gradle': 'ext {\n  targetSdkVersion = 36\n}\n',
+    'app/build.gradle': 'android {\n  defaultConfig {\n    targetSdkVersion rootProject.ext.targetSdkVersion\n  }\n}\n',
+  }, (p) => assert.deepEqual(p.compliance.map((c) => [c.id, c.status]), [['target-sdk-36', 'ok']]));
+  withProject({
+    'settings.gradle.kts': 'include(":app")\n',
+    'gradle/libs.versions.toml': '[versions]\ntargetSdk = "34"\n',
+    'app/build.gradle.kts': 'android {\n  defaultConfig {\n    targetSdk = libs.versions.targetSdk.get().toInt()\n  }\n}\n',
+  }, (p) => assert.equal(p.sdk.targetSdk, 34));
+});

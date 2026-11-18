@@ -48,3 +48,24 @@ test('version catalog feeds module parse', () => {
   assert.equal(nav.version, '2.8.4');
   assert.equal(app.build.android.targetSdk, 35);
 });
+
+test('I3: groovy multi-line include keeps continuation lines', () => {
+  const s = parseSettings("include ':a',\n        ':b',\n  ':c'\ninclude ':d'\n", 'groovy');
+  assert.deepEqual(s.includes, [':a', ':b', ':c', ':d']);
+});
+
+test('M4: build files over 1 MB are not read', async () => {
+  const fs = await import('node:fs');
+  const os = await import('node:os');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'aa-mod-'));
+  try {
+    fs.writeFileSync(path.join(tmp, 'settings.gradle'), "include ':app'\n");
+    fs.mkdirSync(path.join(tmp, 'app'));
+    const big = "dependencies {\n  implementation 'a:b:1'\n}\n" + '// pad\n'.repeat(200000);
+    fs.writeFileSync(path.join(tmp, 'app/build.gradle'), big);
+    const [app] = discoverModules(tmp, listFiles(tmp));
+    assert.deepEqual(app.build.dependencies, []);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});

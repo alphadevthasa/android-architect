@@ -73,10 +73,13 @@ function matchingBrace(s, open) {
 }
 
 function mapEntries(body, prefix, out) {
-  const re = /([A-Za-z_]\w*)\s*:\s*(?:"([^"]*)"|'([^']*)')/g;
+  const re = /([A-Za-z_]\w*)\s*:\s*(?:"([^"]*)"|'([^']*)'|(\d+)\b(?!\s*[.\w]))/g;
   let m;
-  while ((m = re.exec(body))) out[`${prefix}.${m[1]}`] = m[2] ?? m[3];
+  while ((m = re.exec(body))) out[`${prefix}.${m[1]}`] = m[2] ?? m[3] ?? m[4];
 }
+
+// Integer literal assigned as a whole value (`= 33`, not `= 33.toString()`).
+const NUM = String.raw`(\d+)(?![\w.])`;
 
 function parseExtFromStripped(s) {
   const out = {};
@@ -92,6 +95,8 @@ function parseExtFromStripped(s) {
     while ((m = mapRe.exec(body))) mapEntries(m[2], m[1], out);
     const strRe = new RegExp(String.raw`([A-Za-z_]\w*)\s*=\s*${lit}`, 'g');
     while ((m = strRe.exec(body))) out[m[1]] = m[2] ?? m[3];
+    const numRe = new RegExp(String.raw`(?:^|[\s;{])([A-Za-z_]\w*)\s*=\s*${NUM}`, 'g');
+    while ((m = numRe.exec(body))) out[m[1]] = m[2];
     const setRe = new RegExp(String.raw`\bset\s*\(\s*(?:"([^"]*)"|'([^']*)')\s*,\s*${lit}`, 'g');
     while ((m = setRe.exec(body))) out[m[1] ?? m[2]] = m[3] ?? m[4];
   }
@@ -99,6 +104,9 @@ function parseExtFromStripped(s) {
   // ext.k = 'v' / rootProject.ext.k = 'v'
   const dotRe = new RegExp(String.raw`\b(?:ext|extra)\.([A-Za-z_]\w*)\s*=\s*${lit}`, 'g');
   while ((m = dotRe.exec(s))) out[m[1]] = m[2] ?? m[3];
+  // ext.k = 21
+  const dotNumRe = new RegExp(String.raw`\b(?:ext|extra)\.([A-Za-z_]\w*)\s*=\s*${NUM}`, 'g');
+  while ((m = dotNumRe.exec(s))) out[m[1]] = m[2];
   // ext.versions = [a: 'b']
   const dotMapRe = /\b(?:ext|extra)\.([A-Za-z_]\w*)\s*=\s*\[([^\]]*)\]/g;
   while ((m = dotMapRe.exec(s))) mapEntries(m[2], m[1], out);
@@ -128,8 +136,9 @@ function localVars(s) {
 
 function lookupVar(lookup, expr) {
   let k = expr.trim()
-    .replace(/\[\s*["']([^"']*)["']\s*\]/g, '.$1')
-    .replace(/\.get\(\)$/, '');
+    .replace(/\[\s*["']([^"']*)["']\s*\]/g, '.$1');
+  // Provider and conversion suffixes: .get(), .toInt(), .toInteger(), in any order.
+  for (let n = k.replace(/\.(?:get|toInt|toInteger)\(\)$/, ''); n !== k; n = k.replace(/\.(?:get|toInt|toInteger)\(\)$/, '')) k = n;
   for (;;) {
     const n = k.replace(/^(?:rootProject|project|ext|extra|getRootProject\(\))\./, '');
     if (n === k) break;
@@ -270,7 +279,8 @@ function parseSdk(raw, lookup) {
   if (m) return Number(m[1]);
   m = /^release\s*\(\s*(\d+)/.exec(t);
   if (m) return Number(m[1]);
-  const v = lookupVar(lookup, t.replace(/[)\s]+$/, ''));
+  let v = lookupVar(lookup, t);
+  if (v === undefined) v = lookupVar(lookup, t.replace(/[)\s]+$/, ''));
   return v !== undefined && /^\d+$/.test(v) ? Number(v) : undefined;
 }
 
@@ -330,8 +340,14 @@ export function parseBuildFile(text, kind, ctx = {}) {
     const stripped = stripComments(text);
     const own = parseExtFromStripped(stripped);
     result.ext = own;
-    const lookup = { ...(ctx?.ext ?? {}), ...localVars(stripped), ...own };
     const vc = ctx?.versionCatalog ?? null;
+    // libs.versions.<key> accessors; TOML `a-b` / `a_b` keys are `a.b` accessors.
+    const catalogVersions = {};
+    for (const [key, value] of Object.entries(vc?.versions ?? {})) {
+      catalogVersions[`libs.versions.${key}`] = value;
+      catalogVersions[`libs.versions.${key.replace(/[-_]/g, '.')}`] = value;
+    }
+    const lookup = { ...catalogVersions, ...(ctx?.ext ?? {}), ...localVars(stripped), ...own };
     const android = result.android;
     const stack = [];
 
