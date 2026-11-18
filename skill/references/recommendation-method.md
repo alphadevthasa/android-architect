@@ -4,7 +4,7 @@ Every recommendation goes through four stages: **Detect → Assess → Recommend
 
 ## 1. Detect
 
-`scan.js` maps each module onto each stack dimension and reports mixes as shares (for example "UI: 60% XML, 40% Compose"). Entries with `share: null` are computed presence flags and mean "present". `candidates.js` then derives, from the catalog's `successors` and `prerequisites`, what each dimension can legally move to.
+`scan.js` maps each module onto each stack dimension and reports mixes as shares (for example "UI: 60% XML, 40% Compose"). Entries with `share: null` are computed presence flags and mean "present"; an entry with `units > 0` is present even when its share rounds to 0 (shown as `<1%`). `candidates.js` then derives, from the catalog's `successors` and `prerequisites`, what each dimension can legally move to.
 
 The dimensions are: language, build, ui, presentation, navigation, async, di, networking, serialization, persistence, keyvalue, image, background, modularization, testing, static-analysis, compliance, build-performance.
 

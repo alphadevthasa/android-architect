@@ -4,7 +4,7 @@
 
 ## Tool
 
-- `android-architect install|uninstall|doctor|version` CLI with `--claude`, `--codex`, `--home`, `--force` and `--json`. Installs from a staged copy and removes only directories it installed.
+- `android-architect install|uninstall|doctor|version` CLI with `--claude`, `--codex`, `--home`, `--force`, and `--json` for `doctor`. Installs from a staged copy and removes only directories it installed.
 - Offline, read-only scripts: `scan.js` (stack profile), `candidates.js` (catalog-legal targets), `recommend-check.js` (guardrail validation R1-R6).
 - Skill with `audit` and `recommend` commands, persona, method, rubrics and output templates.
 - Detection for Java/Kotlin, Groovy/KTS, version catalogs, multi-module, XML/Compose/mixed UI. Kotlin Multiplatform projects are recognized by the Kotlin Multiplatform Gradle plugin.

@@ -12,13 +12,13 @@ Scale severity with reach: the same smell in one rarely touched screen is lower 
 
 ## 1. Layering and the dependency rule
 
-Expected shape: UI (Activities, Fragments, composables, ViewModels) depends on data (repositories, data sources), optionally through a domain layer (use cases). Dependencies point inward: data and domain know nothing about Android UI classes.
+Baseline (Google's guide to app architecture): a UI layer (Activities, Fragments, composables, ViewModels) and a data layer (repositories, data sources). The UI layer must not depend on data sources directly; it goes through repositories. The domain layer (use cases) is optional: its absence is not a finding. Data and domain know nothing about Android UI classes.
 
 Signals in code:
-- Activities, Fragments or composables calling Retrofit services, DAOs, `SharedPreferences` or `SQLiteDatabase` directly.
+- Activities, Fragments, composables or ViewModels calling Retrofit services, DAOs, `SharedPreferences` or `SQLiteDatabase` directly instead of a repository.
 - Repositories or use cases importing `android.view.*`, `android.widget.*`, `Activity`, `Fragment`, or holding a `Context` for UI work.
 - Domain or model classes annotated with Room `@Entity` or Gson/Moshi annotations and used straight in the UI (persistence and transport models leaking upward).
-- A `domain` package or module that imports from `data` implementation classes rather than interfaces.
+- Only when the project claims Clean Architecture or dependency inversion (a `domain` module, docs or ADRs saying so): a `domain` package or module that imports `data` implementation classes rather than interfaces. Without that claim, do not flag domain-to-data imports.
 - Package names suggest layers (`ui`, `data`, `domain`) but imports cross them freely.
 
 Severity guidance:

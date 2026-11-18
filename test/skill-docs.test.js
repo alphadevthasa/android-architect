@@ -116,3 +116,31 @@ test('C1: from:null is documented as only for a dimension with no detected entry
     assert.match(text, /`from: null`[^\n]*justification/);
   }
 });
+
+test('I7: SKILL.md ground rules, recommend loop and profile notes', () => {
+  const { fields, body } = parseFrontmatter(readSkill());
+  assert.doesNotMatch(fields.description, /Retrofit to Ktor/);
+  assert.match(fields.description, /Dagger to Hilt/);
+  const rule4 = /4\. \*\*Read only[^\n]*/.exec(body)[0];
+  for (const t of ['mktemp', 'grep', 'rg', 'cat']) assert.match(rule4, new RegExp('`' + t + '`'), t);
+  const rule5 = /5\. \*\*Leave secrets alone[^\n]*/.exec(body)[0];
+  assert.match(rule5, /\[REDACTED:<kind>\]/);
+  assert.match(rule5, /signingConfigs/);
+  assert.match(rule5, /git-ignored/);
+  const rec = body.slice(body.indexOf('## Command: recommend'), body.indexOf('## Not yet available'));
+  assert.match(rec, /If `<tmp>` does not exist yet, create it as in audit step 1/);
+  assert.match(rec, /Exit 2 because your own recommendations JSON is malformed[^\n]*counts as an attempt/);
+  assert.match(rec, /more than 5 times in total/);
+  assert.match(body, /`profile\.compliance`[^\n]*`ok`, `gap` or `unknown`/);
+  assert.doesNotMatch(body, /`compliance` checks\)/);
+});
+
+test('I7: README scopes --json to doctor; architecture rubric follows the Google baseline', () => {
+  const readme = fs.readFileSync(path.join(here, '..', 'README.md'), 'utf8');
+  assert.match(readme, /`--json`[^\n]*`doctor`/);
+  const rubric = fs.readFileSync(path.join(skillDir, 'references', 'rubric-architecture.md'), 'utf8');
+  const s1 = rubric.slice(rubric.indexOf('## 1.'), rubric.indexOf('## 2.'));
+  assert.match(s1, /UI layer must not depend on data sources directly/);
+  assert.match(s1, /domain layer[^\n]*optional/i);
+  assert.match(s1, /Only when the project claims Clean Architecture or dependency inversion/);
+});

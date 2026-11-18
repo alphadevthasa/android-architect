@@ -17,7 +17,7 @@ By default the skill is installed into the harnesses that already exist in your 
 - `--claude` / `--codex`: install into that harness, creating its directory if needed.
 - `--home <dir>`: use another home directory.
 - `--force`: replace or remove a directory that was not installed by this tool.
-- `--json`: machine-readable output.
+- `--json`: machine-readable output for `doctor` (the only command it applies to).
 
 Other commands: `uninstall`, `version`, and `doctor`, which reports which harnesses have the skill installed, with its version and catalog version, and flags a partial or foreign directory.
 
@@ -45,7 +45,7 @@ Run it from, or point it at, the Android project root. The skill runs `scan.js`,
 
 ## How recommendations are validated
 
-Every recommendation is checked against a versioned catalog (18 dimensions) by `recommend-check.js` before it is shown. The guardrail rules are: R1 each step must be a direct successor in the catalog (a longer hop needs a written justification), R2 prerequisites must already exist in the project or be produced by an earlier step, R3 steps are ordered and acyclic, R4 every id must exist in the catalog, R5 the output has the required shape and catalog version, and R6 a chain must start from something the project actually uses. See [skill/catalog/recommendations.schema.md](skill/catalog/recommendations.schema.md).
+Every recommendation is checked against a versioned catalog (18 dimensions) by `recommend-check.js` before it is shown. The guardrail rules are: R1 each step must be a direct successor in the catalog (a longer hop, or a new capability with `from: null`, needs a written justification), R2 prerequisites must already exist in the project or be produced by an earlier step, R3 steps are ordered and acyclic, R4 every id must exist in the catalog, R5 the output has the required shape and catalog version, and R6 a chain must start from something the project actually uses (`from: null` only where the dimension has no detected entry). See [skill/catalog/recommendations.schema.md](skill/catalog/recommendations.schema.md).
 
 ## No telemetry
 
