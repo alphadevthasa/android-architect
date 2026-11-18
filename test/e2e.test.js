@@ -20,14 +20,20 @@ test('npm pack contains the skill and CLI, excludes tests and docs', () => {
 
 test('installed scan.js works on every fixture', () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'aa-e2e-'));
-  node([path.join(root, 'bin/cli.js'), 'install', '--claude', '--home', home]);
-  const scan = path.join(home, '.claude/skills/android-architect/scripts/scan.js');
-  const fx = path.join(root, 'test/fixtures');
-  const dirs = fs.readdirSync(fx);
-  assert.ok(dirs.length >= 3);
-  for (const d of dirs) {
-    const profile = JSON.parse(node([scan, path.join(fx, d), '--format', 'json']));
-    assert.equal(typeof profile, 'object', d);
+  try {
+    node([path.join(root, 'bin/cli.js'), 'install', '--claude', '--home', home]);
+    const scan = path.join(home, '.claude/skills/android-architect/scripts/scan.js');
+    const fx = path.join(root, 'test/fixtures');
+    const dirs = fs.readdirSync(fx);
+    assert.ok(dirs.length >= 3);
+    for (const d of dirs) {
+      const profile = JSON.parse(node([scan, path.join(fx, d), '--format', 'json']));
+      assert.equal(profile.schemaVersion, 1, d);
+      assert.equal(typeof profile.dimensions, 'object', d);
+      assert.ok(profile.dimensions !== null && !Array.isArray(profile.dimensions), d);
+    }
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
   }
 });
 

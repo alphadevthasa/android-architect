@@ -19,7 +19,7 @@ By default the skill is installed into the harnesses that already exist in your 
 - `--force`: replace or remove a directory that was not installed by this tool.
 - `--json`: machine-readable output.
 
-Other commands: `uninstall`, `version`, and `doctor`, which checks that the installed copy is intact and matches the package version.
+Other commands: `uninstall`, `version`, and `doctor`, which reports which harnesses have the skill installed, with its version and catalog version, and flags a partial or foreign directory.
 
 ```
 npx android-architect@0.1.0 doctor
@@ -41,7 +41,7 @@ Run it from, or point it at, the Android project root. The skill runs `scan.js`,
 - Gradle version catalogs (`libs.versions.toml`).
 - Single-module and multi-module projects.
 - XML views, Jetpack Compose, or a mix.
-- Kotlin Multiplatform is detected and reported.
+- Kotlin Multiplatform projects are recognized by the Kotlin Multiplatform Gradle plugin.
 
 ## How recommendations are validated
 
