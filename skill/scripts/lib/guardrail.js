@@ -136,6 +136,9 @@ export function checkRecommendations(recs, catalog, profile) {
       if (catalog.entry(s.dimension, s.to).status !== 'current') {
         add('R1-hop', `${label}: entry "${s.to}" in "${s.dimension}" is not current, so it cannot be a fresh target`, { ...ref, dimension: s.dimension });
       }
+      if (typeof s.justification !== 'string' || s.justification.trim().length < MIN_JUSTIFICATION) {
+        add('R1-hop', `${label}: a new capability (from: null) needs a justification of at least ${MIN_JUSTIFICATION} characters`, { ...ref, dimension: s.dimension });
+      }
     } else if (!(catalog.entry(s.dimension, s.from).successors ?? []).includes(s.to)) {
       if (!reachableFrom(catalog, s.dimension, s.from).has(s.to)) {
         add('R1-hop', `${label}: "${s.to}" is not reachable from "${s.from}" in "${s.dimension}"`, { ...ref, dimension: s.dimension });
@@ -145,6 +148,17 @@ export function checkRecommendations(recs, catalog, profile) {
     }
 
     const deps = ancestors(s);
+    // R6: from:null is only for a dimension with no detected entry that no
+    // ancestor step has already moved into; otherwise the chain must start
+    // from a present entry.
+    if (s.from === null) {
+      const present = [...presentIds(profile, s.dimension)];
+      if (present.length > 0) {
+        add('R6-anchor', `${label}: "${s.dimension}" already has detected entries [${present.join(', ')}]; start from one of them instead of from: null`, { ...ref, dimension: s.dimension });
+      } else if (deps.some((d) => d.dimension === s.dimension)) {
+        add('R6-anchor', `${label}: a step in dependsOn already targets "${s.dimension}"; chain from its "to" instead of from: null`, { ...ref, dimension: s.dimension });
+      }
+    }
     // R6: from must be present in the profile or produced by an ancestor step.
     if (s.from !== null) {
       const anchored = presentIds(profile, s.dimension).has(s.from)

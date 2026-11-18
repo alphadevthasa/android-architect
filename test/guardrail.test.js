@@ -172,3 +172,39 @@ test('recommend-check CLI exit codes', () => {
   const cand = execFileSync(process.execPath, [fileURLToPath(new URL('../skill/scripts/candidates.js', import.meta.url)), fixture], { encoding: 'utf8', cwd: dir });
   assert.deepEqual(JSON.parse(cand).presentation.current, ['mvp']);
 });
+
+test('C1: from:null cannot bypass a dimension that already has detected entries', () => {
+  const just = 'x'.repeat(40);
+  const steps = [
+    { id: 'l', dimension: 'language', from: null, to: 'kotlin', dependsOn: [], justification: just },
+    { id: 'a', dimension: 'async', from: null, to: 'coroutines-flow', dependsOn: ['l'], justification: just },
+    { id: 'u', dimension: 'ui', from: null, to: 'compose', dependsOn: ['l'], justification: just },
+    { id: 'p', dimension: 'presentation', from: null, to: 'circuit-decompose', dependsOn: ['a'], justification: just },
+  ];
+  const r = checkRecommendations(rec(steps, { dimensions: [] }), catalog, profile);
+  assert.equal(r.ok, false);
+  const anchored = r.violations.filter((v) => v.rule === 'R6-anchor').map((v) => v.step).sort();
+  assert.deepEqual(anchored, ['a', 'l', 'p', 'u']);
+});
+
+test('C1: from:null is rejected when an ancestor step already targets the dimension', () => {
+  const just = 'x'.repeat(40);
+  const empty = { ...profile, dimensions: { ...profile.dimensions, image: { entries: [] } } };
+  const steps = [
+    { id: 'i1', dimension: 'image', from: null, to: 'coil', dependsOn: [], justification: just },
+    { id: 'i2', dimension: 'image', from: null, to: 'coil', dependsOn: ['i1'], justification: just },
+  ];
+  const r = checkRecommendations(rec(steps, { dimensions: [] }), catalog, empty);
+  assert.deepEqual(r.violations.filter((v) => v.rule === 'R6-anchor').map((v) => v.step), ['i2']);
+});
+
+test('C1: from:null on an empty dimension needs a justification of 20+ characters', () => {
+  const empty = { ...profile, dimensions: { ...profile.dimensions, image: { entries: [] } } };
+  const base = { id: 'i1', dimension: 'image', from: null, to: 'coil', dependsOn: [] };
+  const missing = checkRecommendations(rec([base], { dimensions: [] }), catalog, empty);
+  assert.ok(missing.violations.some((v) => v.rule === 'R1-hop' && v.step === 'i1' && /justification/.test(v.message)));
+  const short = checkRecommendations(rec([{ ...base, justification: 'too short' }], { dimensions: [] }), catalog, empty);
+  assert.ok(rules(short).includes('R1-hop'));
+  const ok = checkRecommendations(rec([{ ...base, justification: 'No image loading yet; the new gallery screen needs it.' }], { dimensions: [] }), catalog, empty);
+  assert.deepEqual(ok, { ok: true, violations: [] });
+});

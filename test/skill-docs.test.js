@@ -108,3 +108,11 @@ test('no file under skill/ contains TODO or TBD', () => {
     assert.doesNotMatch(text, /\bTODO\b|\bTBD\b/, `${path.relative(skillDir, file)} contains TODO or TBD`);
   }
 });
+
+test('C1: from:null is documented as only for a dimension with no detected entry, with justification', () => {
+  const schema = fs.readFileSync(path.join(skillDir, 'catalog', 'recommendations.schema.md'), 'utf8');
+  for (const text of [readSkill(), schema]) {
+    assert.match(text, /`from: null`[^\n]*no detected entry/);
+    assert.match(text, /`from: null`[^\n]*justification/);
+  }
+});
