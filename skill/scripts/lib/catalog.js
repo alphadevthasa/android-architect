@@ -9,7 +9,7 @@ const DETECT_LISTS = ['gradle', 'plugins', 'imports', 'files', 'content', 'manif
 // `detect.computed` marks signals derived by the scanner (module graph, policy
 // evaluation), not by file/gradle matching. Accepted only where listed here.
 const COMPUTED_DIMENSIONS = ['modularization', 'compliance', 'build-performance'];
-const COMPUTED_ENTRIES = ['language.kotlin-k2', 'presentation.god-activity'];
+const COMPUTED_ENTRIES = ['language.kotlin-k2', 'presentation.god-activity', 'navigation.multi-activity'];
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const DEFAULT_DIR = new URL('../../catalog/', import.meta.url);
 

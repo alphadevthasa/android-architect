@@ -139,10 +139,10 @@ test('presentation successors form the documented chain', () => {
   assert.deepEqual([1, 2, 3, 4, 4, 5, 6], ['god-activity', 'mvp', 'mvvm-livedata', 'mvvm-clean', 'mvi', 'udf-stateflow', 'circuit-decompose'].map((id) => c.entry('presentation', id).era));
 });
 
-test('computed detect is accepted only on modularization, compliance, build-performance, language.kotlin-k2, presentation.god-activity', () => {
+test('computed detect is accepted only on modularization, compliance, build-performance, language.kotlin-k2, presentation.god-activity, navigation.multi-activity', () => {
   const c = loadCatalog();
   const allowedDims = ['modularization', 'compliance', 'build-performance'];
-  const allowedEntries = ['language.kotlin-k2', 'presentation.god-activity'];
+  const allowedEntries = ['language.kotlin-k2', 'presentation.god-activity', 'navigation.multi-activity'];
   for (const d of c.dimensions) for (const e of d.entries) {
     const key = `${d.id}.${e.id}`;
     if (e.detect.computed) assert.ok(allowedDims.includes(d.id) || allowedEntries.includes(key), `${key} must not be computed`);
@@ -191,4 +191,29 @@ test('shipped regexes and globs are well formed', () => {
   assert.ok(re.test('org.gradle.configuration-cache=true'));
   assert.ok(!re.test('org.gradle.configuration-cache=false'));
   assert.ok(new RegExp(c.entry('presentation', 'udf-stateflow').detect.content[0].regex).test('MutableStateFlow<HomeUiState>(HomeUiState())'));
+});
+
+test('multi-activity is computed and documents the manifest rule', () => {
+  const e = loadCatalog().entry('navigation', 'multi-activity');
+  assert.deepEqual(e.detect, { computed: true });
+  assert.match(e.notes, /AndroidManifest\.xml/);
+  assert.deepEqual(validateCatalog(rawDim('navigation', [entry('multi-activity', { detect: { computed: true } })])), []);
+});
+
+test('roborazzi import prefix is the real package', () => {
+  assert.deepEqual(loadCatalog().entry('testing', 'roborazzi').detect.imports, ['io.github.takahirom.roborazzi']);
+});
+
+test('gradle.properties regexes are line-anchored and whitespace tolerant', () => {
+  const c = loadCatalog();
+  const keys = { 'config-cache': 'org.gradle.configuration-cache', 'build-cache': 'org.gradle.caching',
+    'non-transitive-r': 'android.nonTransitiveRClass', parallel: 'org.gradle.parallel' };
+  for (const [id, key] of Object.entries(keys)) {
+    const re = new RegExp(c.entry('build-performance', id).detect.content[0].regex);
+    assert.ok(!re.test(`# ${key}=true`), `${id} commented`);
+    assert.ok(!re.test(`#${key}=true`), `${id} commented tight`);
+    assert.ok(re.test(`${key}=true`), `${id} tight`);
+    assert.ok(re.test(`${key} = true`), `${id} spaced`);
+    assert.ok(!re.test(`${key}=false`), `${id} false`);
+  }
 });

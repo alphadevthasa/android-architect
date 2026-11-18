@@ -202,7 +202,7 @@
           "io.github.takahirom.roborazzi"
         ],
         "imports": [
-          "com.github.takahirom.roborazzi"
+          "io.github.takahirom.roborazzi"
         ]
       }
     },

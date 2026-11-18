@@ -8,17 +8,13 @@
       "era": 1,
       "status": "legacy",
       "since": "2008",
+      "notes": "Computed by the scanner from AndroidManifest.xml: 3 or more <activity> declarations in one manifest.",
       "successors": [
         "fragment-manual",
         "jetpack-nav-xml"
       ],
       "detect": {
-        "content": [
-          {
-            "glob": "**/*.{java,kt}",
-            "regex": "startActivity(ForResult)?\\("
-          }
-        ]
+        "computed": true
       }
     },
     {

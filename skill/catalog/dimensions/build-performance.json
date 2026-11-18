@@ -13,7 +13,7 @@
         "content": [
           {
             "glob": "**/gradle.properties",
-            "regex": "org\\.gradle\\.(unsafe\\.)?configuration-cache=true"
+            "regex": "^\\s*org\\.gradle\\.(unsafe\\.)?configuration-cache\\s*=\\s*true\\s*$"
           }
         ]
       }
@@ -29,7 +29,7 @@
         "content": [
           {
             "glob": "**/gradle.properties",
-            "regex": "org\\.gradle\\.caching=true"
+            "regex": "^\\s*org\\.gradle\\.caching\\s*=\\s*true\\s*$"
           }
         ]
       }
@@ -45,7 +45,7 @@
         "content": [
           {
             "glob": "**/gradle.properties",
-            "regex": "android\\.nonTransitiveRClass=true"
+            "regex": "^\\s*android\\.nonTransitiveRClass\\s*=\\s*true\\s*$"
           }
         ]
       }
@@ -61,7 +61,7 @@
         "content": [
           {
             "glob": "**/gradle.properties",
-            "regex": "org\\.gradle\\.parallel=true"
+            "regex": "^\\s*org\\.gradle\\.parallel\\s*=\\s*true\\s*$"
           }
         ]
       }
