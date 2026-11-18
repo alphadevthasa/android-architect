@@ -1,0 +1,19 @@
+buildscript {
+    ext {
+        retrofit_version = '2.3.0'
+    }
+    repositories {
+        google()
+        jcenter()
+    }
+    dependencies {
+        classpath 'com.android.tools.build:gradle:3.5.4'
+    }
+}
+
+allprojects {
+    repositories {
+        google()
+        jcenter()
+    }
+}
