@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "catalogVersion": "2026.11.0",
+  "asOf": "2026-11-19",
+  "dimensions": [
+    "language",
+    "build",
+    "ui"
+  ]
+}

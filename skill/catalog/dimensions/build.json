@@ -1,0 +1,135 @@
+{
+  "id": "build",
+  "name": "Build system",
+  "entries": [
+    {
+      "id": "ant-eclipse",
+      "name": "Ant / Eclipse ADT build",
+      "era": 1,
+      "status": "deprecated",
+      "since": "2008",
+      "deprecatedSince": "2015-01",
+      "successors": [
+        "gradle-groovy"
+      ],
+      "detect": {
+        "files": [
+          "build.xml",
+          "project.properties"
+        ]
+      }
+    },
+    {
+      "id": "gradle-groovy",
+      "name": "Gradle with Groovy DSL",
+      "era": 2,
+      "status": "legacy",
+      "since": "2013",
+      "successors": [
+        "gradle-kts",
+        "buildsrc"
+      ],
+      "detect": {
+        "files": [
+          "**/build.gradle"
+        ]
+      }
+    },
+    {
+      "id": "buildsrc",
+      "name": "buildSrc shared build logic",
+      "era": 3,
+      "status": "legacy",
+      "successors": [
+        "convention-plugins"
+      ],
+      "detect": {
+        "files": [
+          "buildSrc/**"
+        ]
+      }
+    },
+    {
+      "id": "gradle-kts",
+      "name": "Gradle with Kotlin DSL",
+      "era": 3,
+      "status": "current",
+      "since": "2018",
+      "successors": [
+        "version-catalog"
+      ],
+      "detect": {
+        "files": [
+          "**/build.gradle.kts"
+        ]
+      }
+    },
+    {
+      "id": "version-catalog",
+      "name": "Gradle version catalog",
+      "era": 4,
+      "status": "current",
+      "since": "2022-07",
+      "successors": [
+        "convention-plugins"
+      ],
+      "detect": {
+        "files": [
+          "gradle/libs.versions.toml"
+        ]
+      }
+    },
+    {
+      "id": "convention-plugins",
+      "name": "Convention plugins (build-logic)",
+      "era": 5,
+      "status": "current",
+      "successors": [],
+      "detect": {
+        "files": [
+          "build-logic/**"
+        ]
+      }
+    },
+    {
+      "id": "kapt",
+      "name": "Kotlin annotation processing (kapt)",
+      "era": 2,
+      "status": "legacy",
+      "since": "2015",
+      "deprecatedSince": "2023-05",
+      "successors": [
+        "ksp"
+      ],
+      "detect": {
+        "plugins": [
+          "kotlin-kapt",
+          "org.jetbrains.kotlin.kapt"
+        ]
+      }
+    },
+    {
+      "id": "ksp",
+      "name": "Kotlin Symbol Processing (KSP)",
+      "era": 4,
+      "status": "current",
+      "since": "2021-09",
+      "prerequisites": [
+        {
+          "dimension": "language",
+          "anyOf": [
+            "kotlin",
+            "kotlin-k2",
+            "kmp"
+          ]
+        }
+      ],
+      "successors": [],
+      "detect": {
+        "plugins": [
+          "com.google.devtools.ksp"
+        ]
+      }
+    }
+  ]
+}

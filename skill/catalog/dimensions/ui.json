@@ -1,0 +1,149 @@
+{
+  "id": "ui",
+  "name": "UI toolkit",
+  "entries": [
+    {
+      "id": "xml-findviewbyid",
+      "name": "XML layouts with findViewById",
+      "era": 1,
+      "status": "legacy",
+      "since": "2008",
+      "successors": [
+        "butterknife",
+        "viewbinding"
+      ],
+      "detect": {
+        "content": [
+          {
+            "glob": "**/*.{java,kt}",
+            "regex": "findViewById\\("
+          }
+        ]
+      }
+    },
+    {
+      "id": "butterknife",
+      "name": "ButterKnife view injection",
+      "era": 2,
+      "status": "deprecated",
+      "since": "2013",
+      "deprecatedSince": "2020-01",
+      "successors": [
+        "viewbinding"
+      ],
+      "detect": {
+        "gradle": [
+          {
+            "coord": "com.jakewharton:butterknife"
+          }
+        ]
+      }
+    },
+    {
+      "id": "kotlin-synthetics",
+      "name": "Kotlin synthetic view accessors",
+      "era": 2,
+      "status": "deprecated",
+      "since": "2017-05",
+      "deprecatedSince": "2020-11",
+      "successors": [
+        "viewbinding"
+      ],
+      "detect": {
+        "imports": [
+          "kotlinx.android.synthetic"
+        ]
+      }
+    },
+    {
+      "id": "databinding",
+      "name": "Data Binding",
+      "era": 3,
+      "status": "legacy",
+      "since": "2015-05",
+      "successors": [
+        "viewbinding",
+        "compose"
+      ],
+      "detect": {
+        "content": [
+          {
+            "glob": "**/build.gradle*",
+            "regex": "dataBinding\\s*(\\{|=)\\s*.*true|dataBinding\\s*\\{"
+          }
+        ]
+      }
+    },
+    {
+      "id": "viewbinding",
+      "name": "View Binding",
+      "era": 3,
+      "status": "current",
+      "since": "2019-09",
+      "successors": [
+        "compose"
+      ],
+      "detect": {
+        "content": [
+          {
+            "glob": "**/build.gradle*",
+            "regex": "viewBinding\\s*(=\\s*true|\\{|true)"
+          }
+        ]
+      }
+    },
+    {
+      "id": "compose",
+      "name": "Jetpack Compose",
+      "era": 4,
+      "status": "current",
+      "since": "2021-07",
+      "prerequisites": [
+        {
+          "dimension": "language",
+          "anyOf": [
+            "kotlin",
+            "kotlin-k2",
+            "kmp"
+          ]
+        }
+      ],
+      "successors": [
+        "compose-multiplatform"
+      ],
+      "detect": {
+        "imports": [
+          "androidx.compose."
+        ]
+      }
+    },
+    {
+      "id": "compose-multiplatform",
+      "name": "Compose Multiplatform",
+      "era": 5,
+      "status": "current",
+      "since": "2021-12",
+      "successors": [],
+      "detect": {
+        "plugins": [
+          "org.jetbrains.compose"
+        ]
+      }
+    },
+    {
+      "id": "xml-layouts",
+      "name": "XML layouts",
+      "era": 1,
+      "status": "legacy",
+      "since": "2008",
+      "successors": [
+        "compose"
+      ],
+      "detect": {
+        "files": [
+          "**/res/layout*/*.xml"
+        ]
+      }
+    }
+  ]
+}

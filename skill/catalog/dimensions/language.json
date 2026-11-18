@@ -1,0 +1,86 @@
+{
+  "id": "language",
+  "name": "Language",
+  "entries": [
+    {
+      "id": "java",
+      "name": "Java",
+      "era": 1,
+      "status": "legacy",
+      "since": "2008",
+      "successors": [
+        "java8-desugar"
+      ],
+      "detect": {
+        "files": [
+          "**/*.java"
+        ]
+      }
+    },
+    {
+      "id": "java8-desugar",
+      "name": "Java 8+ with core library desugaring",
+      "era": 2,
+      "status": "legacy",
+      "since": "2018",
+      "successors": [
+        "kotlin"
+      ],
+      "detect": {
+        "gradle": [
+          {
+            "coord": "com.android.tools:desugar_jdk_libs"
+          }
+        ]
+      }
+    },
+    {
+      "id": "kotlin",
+      "name": "Kotlin",
+      "era": 3,
+      "status": "current",
+      "since": "2017-05",
+      "successors": [
+        "kotlin-k2"
+      ],
+      "detect": {
+        "plugins": [
+          "org.jetbrains.kotlin.android",
+          "kotlin-android"
+        ],
+        "files": [
+          "**/*.kt"
+        ]
+      }
+    },
+    {
+      "id": "kotlin-k2",
+      "name": "Kotlin K2 compiler (Kotlin 2.x)",
+      "era": 4,
+      "status": "current",
+      "since": "2024-05",
+      "policy": {
+        "minKotlinVersion": "2.0"
+      },
+      "successors": [
+        "kmp"
+      ],
+      "detect": {
+        "computed": true
+      }
+    },
+    {
+      "id": "kmp",
+      "name": "Kotlin Multiplatform",
+      "era": 5,
+      "status": "current",
+      "since": "2023-11",
+      "successors": [],
+      "detect": {
+        "plugins": [
+          "org.jetbrains.kotlin.multiplatform"
+        ]
+      }
+    }
+  ]
+}
