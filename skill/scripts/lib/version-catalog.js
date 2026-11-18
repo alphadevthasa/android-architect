@@ -4,37 +4,53 @@
 
 const norm = (k) => String(k).replace(/[-_.]/g, '-');
 
+// For each char of s, true when it is inside (or delimits) a quoted string.
+// Basic strings use "..." with backslash escapes; literal strings use '...'
+// with no escapes. The other quote kind inside a string is literal.
+function stringMask(s) {
+  const mask = new Array(s.length).fill(false);
+  let quote = null;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (quote === null) {
+      if (c === '"' || c === "'") { quote = c; mask[i] = true; }
+    } else {
+      mask[i] = true;
+      if (quote === '"' && c === '\\') { if (i + 1 < s.length) mask[++i] = true; }
+      else if (c === quote) quote = null;
+    }
+  }
+  return mask;
+}
+
 function stripComment(line) {
-  let inStr = false;
+  const q = stringMask(line);
   for (let i = 0; i < line.length; i++) {
-    const c = line[i];
-    if (c === '"' && line[i - 1] !== '\\') inStr = !inStr;
-    else if (c === '#' && !inStr) return line.slice(0, i);
+    if (line[i] === '#' && !q[i]) return line.slice(0, i);
   }
   return line;
 }
 
 // Net bracket depth change of a line, ignoring brackets inside quoted strings.
 function depthDelta(line) {
-  let d = 0, inStr = false;
+  const q = stringMask(line);
+  let d = 0;
   for (let i = 0; i < line.length; i++) {
+    if (q[i]) continue;
     const c = line[i];
-    if (c === '"' && line[i - 1] !== '\\') inStr = !inStr;
-    else if (!inStr) {
-      if (c === '[' || c === '{') d++;
-      else if (c === ']' || c === '}') d--;
-    }
+    if (c === '[' || c === '{') d++;
+    else if (c === ']' || c === '}') d--;
   }
   return d;
 }
 
 function splitTop(s, sep) {
+  const q = stringMask(s);
   const parts = [];
-  let depth = 0, inStr = false, cur = '';
+  let depth = 0, cur = '';
   for (let i = 0; i < s.length; i++) {
     const c = s[i];
-    if (c === '"' && s[i - 1] !== '\\') inStr = !inStr;
-    if (!inStr) {
+    if (!q[i]) {
       if (c === '{' || c === '[') depth++;
       else if (c === '}' || c === ']') depth--;
       else if (c === sep && depth === 0) { parts.push(cur); cur = ''; continue; }
@@ -100,7 +116,7 @@ export function parseVersionCatalog(text) {
     if (h) { section = h[1]; continue; }
     const i = line.indexOf('=');
     if (i < 0 || !section) continue;
-    const key = line.slice(0, i).trim().replace(/^"|"$/g, '');
+    const key = line.slice(0, i).trim().replace(/^["']|["']$/g, '');
     const valText = line.slice(i + 1).trim();
     if (!key) continue;
     const open = depthDelta(valText);

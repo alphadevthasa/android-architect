@@ -88,3 +88,16 @@ x = { module = "g:n", version.ref = "constructor" }
   assert.equal(resolveAlias(vc, 'libs.constructor'), null);
   assert.equal(resolveAlias(vc, 'libs.plugins.toString'), null);
 });
+
+test('single-quoted literal strings are string-aware', () => {
+  const vc = parseVersionCatalog(`[libraries]
+a = { module = 'x:a', version = { strictly = '[1.0,2.0)' } }
+'q' = "x:q:3"
+y = 'a:b#c'
+b = "x:b:1"
+`);
+  assert.equal(vc.libraries.a.version, '[1.0,2.0)');
+  assert.equal(vc.libraries.q.version, '3');
+  assert.deepEqual(vc.libraries.y, { group: 'a', name: 'b#c', version: null });
+  assert.equal(vc.libraries.b.version, '1');
+});
