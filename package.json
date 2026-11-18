@@ -1,0 +1,20 @@
+{
+  "name": "android-architect",
+  "version": "0.1.0",
+  "description": "Android architecture advisor skill for Claude Code and Codex",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "android-architect": "bin/cli.js"
+  },
+  "files": [
+    "bin",
+    "skill"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test --import ./test/helpers/no-network.mjs "
+  }
+}
