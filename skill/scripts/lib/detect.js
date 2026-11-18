@@ -94,22 +94,25 @@ function buildUnits(root, modules, files, read) {
   return units;
 }
 
-function addEvidence(acc, unitKey, kind, ev) {
-  if (!acc.units.has(kind)) acc.units.set(kind, new Set());
-  acc.units.get(kind).add(unitKey);
-  acc.evidence.push(ev);
+// `gradle` (optional) records which dependency a gradle signal matched:
+// { dep: 'group:name', viaMin: whether the signal carried a minVersion }.
+function addEvidence(acc, unitKey, kind, ev, gradle = null) {
+  acc.matches.push({ kind, unitKey, ev, gradle });
 }
 
 function evaluateEntry(entry, ctx) {
   const d = entry.detect;
   // Units: a module (build file) for gradle/plugins signals, a file for
   // imports/content/files/manifest signals.
-  const acc = { units: new Map(), evidence: [] };
+  const acc = { matches: [] };
   for (const g of d.gradle ?? []) {
     for (const u of ctx.buildUnits) {
       for (const dep of u.build.dependencies) {
         if (coordMatches(g.coord, dep) && satisfiesMin(dep.version, g.minVersion)) {
-          addEvidence(acc, u.key, 'module', { file: u.file, line: dep.line, signal: `gradle ${g.coord}` });
+          addEvidence(acc, u.key, 'module', { file: u.file, line: dep.line, signal: `gradle ${g.coord}` }, {
+            dep: `${dep.group}:${dep.name}`,
+            viaMin: Boolean(g.minVersion),
+          });
         }
       }
     }
@@ -169,7 +172,7 @@ function moduleSegments(m) {
 
 /** Computed entries evaluated in M1. Returns an accumulator, or null if not evaluated. */
 function evaluateComputed(dimId, entryId, ctx) {
-  const acc = { units: new Map(), evidence: [] };
+  const acc = { matches: [] };
   const key = `${dimId}.${entryId}`;
   const modEv = (m, signal) => ({ file: m.buildFile ?? 'settings.gradle', line: null, signal });
   if (dimId === 'modularization') {
@@ -243,8 +246,50 @@ function evaluateComputed(dimId, entryId, ctx) {
  * one entry. Evidence from all signals is kept.
  */
 function unitCount(acc) {
-  const files = acc.units.get('file')?.size ?? 0;
-  return files > 0 ? files : acc.units.get('module')?.size ?? 0;
+  const units = (kind) => new Set(acc.matches.filter((m) => m.kind === kind).map((m) => m.unitKey)).size;
+  const files = units('file');
+  return files > 0 ? files : units('module');
+}
+
+/**
+ * Supersede rule. Within one dimension, entry X is dropped for a module when
+ * one of X's direct successors Y matched in that module through a gradle
+ * signal with `minVersion`, and X matched only through gradle signals on the
+ * same dependency coordinates (group:name) in that module. Example: a
+ * `navigation-compose` 2.8+ dependency is type-safe navigation, not the
+ * string-route entry that matches any version of the same artifact. X keeps
+ * any module where it has other evidence, and is kept entirely when it also
+ * matched through any non-gradle signal. Decisions use the original matches,
+ * so the result does not depend on entry order.
+ */
+function applySupersede(dim, accs) {
+  const out = new Map();
+  for (const entry of dim.entries) {
+    const acc = accs.get(entry.id);
+    if (!acc) continue;
+    const onlyGradle = acc.matches.every((m) => m.gradle);
+    const minKeys = new Set();
+    for (const y of entry.successors ?? []) {
+      for (const m of accs.get(y)?.matches ?? []) {
+        if (m.gradle?.viaMin) minKeys.add(`${m.unitKey}\0${m.gradle.dep}`);
+      }
+    }
+    if (!onlyGradle || minKeys.size === 0) {
+      out.set(entry.id, acc);
+      continue;
+    }
+    const byUnit = new Map();
+    for (const m of acc.matches) {
+      if (!byUnit.has(m.unitKey)) byUnit.set(m.unitKey, []);
+      byUnit.get(m.unitKey).push(m);
+    }
+    const kept = [];
+    for (const ms of byUnit.values()) {
+      if (!ms.every((m) => minKeys.has(`${m.unitKey}\0${m.gradle.dep}`))) kept.push(...ms);
+    }
+    out.set(entry.id, { matches: kept });
+  }
+  return out;
 }
 
 function sortEvidence(evidence) {
@@ -318,12 +363,15 @@ export function detectStack(root, catalog) {
   const dimensions = {};
   for (const dim of catalog.dimensions) {
     if (dim.id === COMPLIANCE_DIM) continue; // reported in profile.compliance
-    const rows = [];
+    const accs = new Map();
     for (const entry of dim.entries) {
       const acc = entry.detect.computed ? evaluateComputed(dim.id, entry.id, ctx) : evaluateEntry(entry, ctx);
-      if (!acc) continue;
+      if (acc) accs.set(entry.id, acc);
+    }
+    const rows = [];
+    for (const [id, acc] of applySupersede(dim, accs)) {
       const units = unitCount(acc);
-      if (units > 0) rows.push({ id: entry.id, units, evidence: sortEvidence(acc.evidence) });
+      if (units > 0) rows.push({ id, units, evidence: sortEvidence(acc.matches.map((m) => m.ev)) });
     }
     const total = rows.reduce((s, r) => s + r.units, 0);
     const entries = rows

@@ -70,6 +70,30 @@ test('modern-compose profile', () => {
   assert.deepEqual(p.modules.map((m) => m.path), [':app', ':core:data', ':feature:home']);
 });
 
+test('supersede: navigation-compose 2.8+ is type-safe only', () => {
+  const p = scan('modern-compose');
+  assert.deepEqual(p.dimensions.navigation.entries.map(({ id, share }) => ({ id, share })), [{ id: 'nav-compose-typesafe', share: 1 }]);
+});
+
+test('supersede: navigation-compose 2.7.0 stays string routes', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'aa-detect-'));
+  try {
+    fs.writeFileSync(path.join(tmp, 'settings.gradle'), "include ':app'\n");
+    fs.mkdirSync(path.join(tmp, 'app'));
+    fs.writeFileSync(
+      path.join(tmp, 'app/build.gradle'),
+      "dependencies {\n    implementation 'androidx.navigation:navigation-compose:2.7.0'\n}\n",
+    );
+    const p = detectStack(tmp, catalog);
+    assert.deepEqual(
+      p.dimensions.navigation.entries.map(({ id, share, evidence }) => ({ id, share, evidence })),
+      [{ id: 'nav-compose-string', share: 1, evidence: [{ file: 'app/build.gradle', line: 2, signal: 'gradle androidx.navigation:navigation-compose' }] }],
+    );
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('mixed profile: ui shares and coexisting patterns', () => {
   const p = scan('mixed');
   assert.deepEqual(
