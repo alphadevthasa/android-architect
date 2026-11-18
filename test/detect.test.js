@@ -50,7 +50,7 @@ test('legacy-java-mvp profile', () => {
   assert.deepEqual(ids(p, 'modularization'), ['single-module']);
   assert.equal(p.sdk.targetSdk, 28);
   assert.equal(p.sdk.minSdk, 19);
-  assert.ok(p.compliance.some((c) => c.id === 'target-sdk-35' && c.status === 'gap'));
+  assert.ok(p.compliance.some((c) => c.id === 'target-sdk-36' && c.status === 'gap'));
 });
 
 test('modern-compose profile', () => {
@@ -69,7 +69,7 @@ test('modern-compose profile', () => {
   has(p, 'modularization', 'feature-modules');
   has(p, 'build-performance', 'config-cache', 'kapt-free');
   assert.ok(!ids(p, 'build').includes('kapt'));
-  assert.equal(p.compliance.find((c) => c.id === 'target-sdk-35').status, 'ok');
+  assert.equal(p.compliance.find((c) => c.id === 'target-sdk-36').status, 'gap');
   assert.deepEqual(p.modules.map((m) => m.path), [':app', ':core:data', ':feature:home']);
 });
 
@@ -213,4 +213,102 @@ test('renderProfileMarkdown lists entries with percentages and evidence', () => 
   assert.match(md, /^## UI toolkit$/m);
   assert.match(md, /^- XML layouts: 60% \(evidence: app\/src\/main\/res\/layout\/activity_main\.xml/m);
   assert.match(md, /^- Jetpack Compose: 40% \(evidence: app\/src\/main\/java\/com\/example\/mixed\/ProfileScreen\.kt:3/m);
+});
+
+test('I1: a dimension minority that rounds to 0% is still present and renders as <1%', async () => {
+  const { presentIds, candidatePaths } = await import('../skill/scripts/lib/candidates.js');
+  const files = { 'settings.gradle': "include ':app'\n", 'app/build.gradle': '' };
+  for (let i = 0; i < 250; i++) files[`app/src/main/res/layout/l${i}.xml`] = '<LinearLayout/>\n';
+  files['app/src/main/java/Screen.kt'] = 'import androidx.compose.runtime.Composable\n';
+  withProject(files, (p) => {
+    const compose = p.dimensions.ui.entries.find((e) => e.id === 'compose');
+    assert.equal(compose.share, 0);
+    assert.equal(compose.units, 1);
+    assert.ok(presentIds(p, 'ui').has('compose'));
+    assert.ok(candidatePaths(p, catalog).ui.current.includes('compose'));
+    assert.match(renderProfileMarkdown(p), /^- Jetpack Compose: <1% /m);
+  });
+});
+
+test('I4: udf-stateflow matches StateFlow<UiState> and MutableStateFlow(UiState(...))', () => {
+  const files = {
+    'settings.gradle': "include ':app'\n",
+    'app/build.gradle': '',
+    'app/src/main/java/A.kt': 'class A {\n  val state: StateFlow<HomeUiState> = s\n}\n',
+    'app/src/main/java/B.kt': 'class B {\n  private val s = MutableStateFlow(\n    DetailUiState())\n  val t = MutableStateFlow( DetailUiState())\n}\n',
+  };
+  withProject(files, (p) => {
+    const udf = p.dimensions.presentation.entries.find((e) => e.id === 'udf-stateflow');
+    assert.ok(udf, JSON.stringify(p.dimensions.presentation));
+    assert.equal(udf.units, 2);
+  });
+});
+
+test('I4: plain Jetpack ViewModel is mvvm-viewmodel, not mvvm-livedata', () => {
+  const vm = 'import androidx.lifecycle.ViewModel\nclass HomeViewModel : ViewModel()\n';
+  withProject({ 'settings.gradle': "include ':app'\n", 'app/build.gradle': '', 'app/src/main/java/HomeViewModel.kt': vm }, (p) => {
+    assert.deepEqual(ids(p, 'presentation'), ['mvvm-viewmodel']);
+  });
+  // A ViewModel file that already uses LiveData counts as mvvm-livedata only.
+  const lv = 'import androidx.lifecycle.LiveData\nimport androidx.lifecycle.ViewModel\nclass V : ViewModel()\n';
+  withProject({ 'settings.gradle': "include ':app'\n", 'app/build.gradle': '', 'app/src/main/java/V.kt': lv }, (p) => {
+    assert.deepEqual(ids(p, 'presentation'), ['mvvm-livedata']);
+  });
+});
+
+test('I5: feature module names and top-level-only layer modules', () => {
+  const settings = "include ':app', ':features:login', ':feature-home', ':feature_cart', ':core:data', ':data', ':featureflags'\n";
+  withProject({ 'settings.gradle': settings }, (p) => {
+    const ev = (id) => p.dimensions.modularization.entries.find((e) => e.id === id);
+    assert.deepEqual(ev('feature-modules').units, 3);
+    assert.deepEqual(ev('layer-modules').units, 1);
+    assert.ok(ev('layer-modules').evidence.every((e) => /computed layer module :data$/.test(e.signal)));
+  });
+  assert.deepEqual(ids(scan('modern-compose'), 'modularization'), ['feature-modules']);
+});
+
+test('I6: compliance uses the highest targetSdkMin policy effective by catalog asOf', () => {
+  const legacy = scan('legacy-java-mvp').compliance;
+  assert.deepEqual(legacy.map((c) => [c.id, c.status]), [['target-sdk-36', 'gap']]);
+  assert.match(legacy[0].detail, /max targetSdk is 28/);
+  assert.match(legacy[0].detail, /36/);
+  assert.deepEqual(scan('modern-compose').compliance.map((c) => [c.id, c.status]), [['target-sdk-36', 'gap']]);
+  const older = { ...catalog, asOf: '2026-01-01' };
+  const p = detectStack(fx('modern-compose'), older);
+  assert.deepEqual(p.compliance.map((c) => [c.id, c.status]), [['target-sdk-35', 'ok']]);
+  assert.doesNotMatch(renderProfileMarkdown(scan('modern-compose')), /requires 35/);
+});
+
+test('M2: ktlint needs ktlint_ keys in .editorconfig; android-lint ignores ktlint {', () => {
+  withProject({
+    'settings.gradle': "include ':app'\n",
+    'app/build.gradle': 'ktlint {\n  android = true\n}\n',
+    '.editorconfig': 'root = true\n[*]\nindent_size = 4\n',
+  }, (p) => {
+    assert.ok(!ids(p, 'static-analysis').includes('android-lint'));
+    assert.ok(!ids(p, 'static-analysis').includes('ktlint'));
+  });
+  withProject({
+    'settings.gradle': "include ':app'\n",
+    'app/build.gradle': 'android {\n  lint {\n    abortOnError false\n  }\n}\n',
+    '.editorconfig': '[*.{kt,kts}]\nktlint_standard_no-wildcard-imports = disabled\n',
+  }, (p) => {
+    assert.ok(ids(p, 'static-analysis').includes('android-lint'));
+    assert.ok(ids(p, 'static-analysis').includes('ktlint'));
+  });
+});
+
+test('M3: multi-activity ignores <activity-alias>', () => {
+  const manifest = (n, aliases) => '<manifest>\n<application>\n'
+    + Array.from({ length: n }, (_, i) => `<activity android:name=".A${i}"/>\n`).join('')
+    + Array.from({ length: aliases }, (_, i) => `<activity-alias android:name=".L${i}"/>\n`).join('')
+    + '</application>\n</manifest>\n';
+  const base = { 'settings.gradle': "include ':app'\n", 'app/build.gradle': '' };
+  withProject({ ...base, 'app/src/main/AndroidManifest.xml': manifest(2, 3) }, (p) => {
+    assert.ok(!ids(p, 'navigation').includes('multi-activity'));
+  });
+  withProject({ ...base, 'app/src/main/AndroidManifest.xml': manifest(3, 1) }, (p) => {
+    const e = p.dimensions.navigation.entries.find((x) => x.id === 'multi-activity');
+    assert.equal(e.evidence.length, 3);
+  });
 });

@@ -4,7 +4,7 @@
   "entries": [
     {
       "id": "target-sdk-35",
-      "name": "Target API level 35 (Google Play requirement)",
+      "name": "Target API level 35 (Google Play minimum from 2025-08-31)",
       "era": 5,
       "status": "current",
       "since": "2025-08",
@@ -12,6 +12,22 @@
         "kind": "targetSdkMin",
         "value": 35,
         "effective": "2025-08-31"
+      },
+      "successors": [],
+      "detect": {
+        "computed": true
+      }
+    },
+    {
+      "id": "target-sdk-36",
+      "name": "Target API level 36 (Google Play minimum from 2026-08-31)",
+      "era": 5,
+      "status": "current",
+      "since": "2026-08",
+      "policy": {
+        "kind": "targetSdkMin",
+        "value": 36,
+        "effective": "2026-08-31"
       },
       "successors": [],
       "detect": {

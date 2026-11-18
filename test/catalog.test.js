@@ -126,7 +126,10 @@ test('presentation successors form the documented chain', () => {
   const c = loadCatalog();
   const succ = (id) => c.entry('presentation', id).successors;
   assert.deepEqual(succ('god-activity'), ['mvp']);
-  assert.deepEqual(succ('mvp'), ['mvvm-livedata']);
+  assert.deepEqual(succ('mvp'), ['mvvm-livedata', 'mvvm-viewmodel']);
+  assert.deepEqual(succ('mvvm-viewmodel'), ['udf-stateflow', 'mvvm-clean']);
+  assert.equal(c.entry('presentation', 'mvvm-viewmodel').status, 'current');
+  assert.deepEqual(c.entry('presentation', 'mvvm-viewmodel').detect, { imports: ['androidx.lifecycle.ViewModel'] });
   assert.deepEqual(succ('mvvm-livedata'), ['mvvm-clean', 'udf-stateflow']);
   assert.deepEqual(succ('mvvm-clean'), ['udf-stateflow']);
   assert.deepEqual(succ('mvi'), ['udf-stateflow']);
@@ -136,7 +139,7 @@ test('presentation successors form the documented chain', () => {
     assert.equal(c.entry('presentation', id).status, 'legacy');
     assert.deepEqual(succ(id), []);
   }
-  assert.deepEqual([1, 2, 3, 4, 4, 5, 6], ['god-activity', 'mvp', 'mvvm-livedata', 'mvvm-clean', 'mvi', 'udf-stateflow', 'circuit-decompose'].map((id) => c.entry('presentation', id).era));
+  assert.deepEqual([1, 2, 3, 3, 4, 4, 5, 6], ['god-activity', 'mvp', 'mvvm-livedata', 'mvvm-viewmodel', 'mvvm-clean', 'mvi', 'udf-stateflow', 'circuit-decompose'].map((id) => c.entry('presentation', id).era));
 });
 
 test('computed detect is accepted only on modularization, compliance, build-performance, language.kotlin-k2, presentation.god-activity, navigation.multi-activity', () => {
@@ -170,13 +173,14 @@ test('required entry ids exist per dimension', () => {
     modularization: 'single-module layer-modules feature-modules api-impl-modules dynamic-features polyrepo-aar monorepo-convention',
     testing: 'instrumentation-robotium junit4 mockito espresso mockk turbine robolectric compose-ui-test paparazzi roborazzi junit5 kotest',
     'static-analysis': 'android-lint checkstyle pmd findbugs-spotbugs ktlint detekt spotless',
-    compliance: 'target-sdk-35 page-size-16kb edge-to-edge predictive-back fgs-types',
+    compliance: 'target-sdk-35 target-sdk-36 page-size-16kb edge-to-edge predictive-back fgs-types',
     'build-performance': 'config-cache build-cache non-transitive-r parallel kapt-free',
   };
   for (const [dim, ids] of Object.entries(want)) {
     assert.deepEqual(c.dimensions.find((d) => d.id === dim).entries.map((e) => e.id).sort(), ids.split(' ').sort(), dim);
   }
   assert.deepEqual(c.entry('compliance', 'target-sdk-35').policy, { kind: 'targetSdkMin', value: 35, effective: '2025-08-31' });
+  assert.deepEqual(c.entry('compliance', 'target-sdk-36').policy, { kind: 'targetSdkMin', value: 36, effective: '2026-08-31' });
   assert.deepEqual(c.entry('navigation', 'nav-compose-typesafe').detect.gradle, [{ coord: 'androidx.navigation:navigation-compose', minVersion: '2.8' }]);
   assert.deepEqual(c.entry('keyvalue', 'datastore').prerequisites, [{ dimension: 'async', anyOf: ['coroutines-livedata', 'coroutines-flow'] }]);
   assert.deepEqual(c.entry('async', 'coroutines-flow').prerequisites, [{ dimension: 'language', anyOf: ['kotlin', 'kotlin-k2', 'kmp'] }]);
@@ -191,6 +195,10 @@ test('shipped regexes and globs are well formed', () => {
   assert.ok(re.test('org.gradle.configuration-cache=true'));
   assert.ok(!re.test('org.gradle.configuration-cache=false'));
   assert.ok(new RegExp(c.entry('presentation', 'udf-stateflow').detect.content[0].regex).test('MutableStateFlow<HomeUiState>(HomeUiState())'));
+  const lint = new RegExp(c.entry('static-analysis', 'android-lint').detect.content[0].regex);
+  for (const t of ['lint {', '    lintOptions {', 'android.lint {']) assert.ok(lint.test(t), t);
+  for (const t of ['ktlint {', 'detektlint {']) assert.ok(!lint.test(t), t);
+  assert.equal(c.entry('static-analysis', 'ktlint').detect.files, undefined);
 });
 
 test('multi-activity is computed and documents the manifest rule', () => {

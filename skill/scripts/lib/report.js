@@ -1,6 +1,6 @@
 import { loadCatalog } from './catalog.js';
 
-const pct = (share) => `${Math.round(share * 100)}%`;
+const pct = (share, units) => (Math.round(share * 100) === 0 && units > 0 ? '<1%' : `${Math.round(share * 100)}%`);
 const where = (e) => (e.line === null || e.line === undefined ? e.file : `${e.file}:${e.line}`);
 
 /**
@@ -24,7 +24,7 @@ export function renderProfileMarkdown(profile, catalog = loadCatalog()) {
     }
     for (const e of entries) {
       const ev = e.evidence.length ? ` (evidence: ${e.evidence.map(where).join(', ')})` : '';
-      out.push(`- ${entryName(dimId, e.id)}: ${e.share === null ? 'present' : pct(e.share)}${ev}`);
+      out.push(`- ${entryName(dimId, e.id)}: ${e.share === null ? 'present' : pct(e.share, e.units)}${ev}`);
     }
   }
   if (profile.compliance.length) {

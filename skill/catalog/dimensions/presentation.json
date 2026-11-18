@@ -22,7 +22,8 @@
       "status": "legacy",
       "since": "2011",
       "successors": [
-        "mvvm-livedata"
+        "mvvm-livedata",
+        "mvvm-viewmodel"
       ],
       "detect": {
         "files": [
@@ -58,6 +59,23 @@
         "imports": [
           "androidx.lifecycle.LiveData",
           "androidx.lifecycle.MutableLiveData"
+        ]
+      }
+    },
+    {
+      "id": "mvvm-viewmodel",
+      "name": "MVVM (Jetpack ViewModel)",
+      "era": 3,
+      "status": "current",
+      "since": "2017-05",
+      "successors": [
+        "udf-stateflow",
+        "mvvm-clean"
+      ],
+      "notes": "Counted only for files that do not also match mvvm-livedata or udf-stateflow.",
+      "detect": {
+        "imports": [
+          "androidx.lifecycle.ViewModel"
         ]
       }
     },
@@ -121,7 +139,11 @@
         "content": [
           {
             "glob": "**/*.kt",
-            "regex": "MutableStateFlow<\\w*UiState>"
+            "regex": "StateFlow<\\w*UiState>"
+          },
+          {
+            "glob": "**/*.kt",
+            "regex": "MutableStateFlow\\(\\s*\\w*UiState\\b"
           }
         ]
       }

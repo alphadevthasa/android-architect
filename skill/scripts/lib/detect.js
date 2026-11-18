@@ -8,12 +8,21 @@ export const PROFILE_SCHEMA_VERSION = 1;
 const MAX_EVIDENCE = 5;
 const MAX_READ_BYTES = 1024 * 1024;
 const READABLE_EXT = new Set(['.java', '.kt', '.kts', '.gradle', '.xml', '.toml', '.properties', '.pro']);
+const READABLE_NAMES = new Set(['.editorconfig']);
 const SOURCE_EXT = new Set(['.java', '.kt']);
 const LAYOUT_RE = globToRegExp('**/res/layout*/*.xml');
 const MANIFEST_RE = globToRegExp('**/AndroidManifest.xml');
 const IMPORT_RE = /^\s*import\s+(?:static\s+)?([\w.]+)/;
 const KAPT_PLUGINS = new Set(['kotlin-kapt', 'org.jetbrains.kotlin.kapt']);
+// Layer modules are top-level :data / :domain / :presentation only; a nested
+// :core:data is a shared library module, not layer-based modularization.
 const LAYER_NAMES = new Set(['data', 'domain', 'presentation']);
+const FEATURE_SEGMENT = /^features?([-_].+)?$/;
+// An entry whose file units are dropped where a more specific entry of the
+// same dimension matched the same file (a plain ViewModel that already uses
+// LiveData or a StateFlow UI state is that pattern, not plain MVVM).
+const FILE_EXCLUSIONS = { 'presentation.mvvm-viewmodel': ['mvvm-livedata', 'udf-stateflow'] };
+const TARGET_SDK_MIN = 'targetSdkMin';
 // Computed entries not handled by evaluateComputed() are not evaluated in M1
 // and never emitted. Compliance is reported separately in profile.compliance.
 const COMPLIANCE_DIM = 'compliance';
@@ -26,7 +35,7 @@ function makeReader(root) {
   return (rel) => {
     if (cache.has(rel)) return cache.get(rel);
     let lines = null;
-    if (READABLE_EXT.has(extOf(rel))) {
+    if (READABLE_EXT.has(extOf(rel)) || READABLE_NAMES.has(path.posix.basename(rel))) {
       try {
         const abs = path.join(root, rel);
         if (fs.statSync(abs).size <= MAX_READ_BYTES) lines = readLines(abs);
@@ -181,11 +190,12 @@ function evaluateComputed(dimId, entryId, ctx) {
       if (mods.length === 1) addEvidence(acc, mods[0].path, 'module', modEv(mods[0], 'computed single module'));
     } else if (entryId === 'layer-modules') {
       for (const m of mods) {
-        if (moduleSegments(m).some((s) => LAYER_NAMES.has(s))) addEvidence(acc, m.path, 'module', modEv(m, `computed layer module ${m.path}`));
+        const segs = moduleSegments(m);
+        if (segs.length === 1 && LAYER_NAMES.has(segs[0])) addEvidence(acc, m.path, 'module', modEv(m, `computed layer module ${m.path}`));
       }
     } else if (entryId === 'feature-modules') {
       for (const m of mods) {
-        if (moduleSegments(m).includes('feature')) addEvidence(acc, m.path, 'module', modEv(m, `computed feature module ${m.path}`));
+        if (moduleSegments(m).some((s) => FEATURE_SEGMENT.test(s))) addEvidence(acc, m.path, 'module', modEv(m, `computed feature module ${m.path}`));
       }
     } else if (entryId === 'api-impl-modules') {
       const paths = new Set(mods.map((m) => m.path));
@@ -222,7 +232,7 @@ function evaluateComputed(dimId, entryId, ctx) {
       if (!lines) continue;
       const hits = [];
       lines.forEach((text, i) => {
-        if (/<activity\b/.test(text)) hits.push(i + 1);
+        if (/<activity(?![-\w])/.test(text)) hits.push(i + 1);
       });
       if (hits.length >= 3) for (const line of hits) addEvidence(acc, f, 'file', { file: f, line, signal: 'manifest <activity>' });
     }
@@ -335,16 +345,37 @@ function sizeSummary(files, read) {
   return size;
 }
 
-function evaluateCompliance(sdk) {
-  const out = [];
-  if (sdk.targetSdk !== null) {
-    out.push({
-      id: 'target-sdk-35',
-      status: sdk.targetSdk >= 35 ? 'ok' : 'gap',
-      detail: `max targetSdk is ${sdk.targetSdk}; Google Play requires 35`,
-    });
+/**
+ * The applied targetSdk policy is the targetSdkMin entry with the highest value
+ * whose effective date is on or before the catalog's asOf date.
+ */
+function evaluateCompliance(sdk, catalog) {
+  const asOf = String(catalog.asOf ?? '');
+  const policies = (catalog.dimensions.find((d) => d.id === COMPLIANCE_DIM)?.entries ?? [])
+    .filter((e) => e.policy?.kind === TARGET_SDK_MIN && typeof e.policy.effective === 'string' && e.policy.effective <= asOf)
+    .sort((a, b) => b.policy.value - a.policy.value);
+  const applied = policies[0];
+  if (!applied) return [];
+  const { value, effective } = applied.policy;
+  if (sdk.targetSdk === null) {
+    return [{ id: applied.id, status: 'unknown', detail: 'targetSdk not statically resolvable' }];
   }
-  return out;
+  return [{
+    id: applied.id,
+    status: sdk.targetSdk >= value ? 'ok' : 'gap',
+    detail: `max targetSdk is ${sdk.targetSdk}; Google Play minimum is ${value} since ${effective}, per catalog asOf ${asOf}`,
+  }];
+}
+
+/** Drop file units of an entry where an excluding entry matched the same file. */
+function applyFileExclusions(dimId, accs) {
+  for (const [entryId, acc] of accs) {
+    const by = FILE_EXCLUSIONS[`${dimId}.${entryId}`];
+    if (!by) continue;
+    const taken = new Set();
+    for (const other of by) for (const m of accs.get(other)?.matches ?? []) if (m.kind === 'file') taken.add(m.unitKey);
+    accs.set(entryId, { matches: acc.matches.filter((m) => m.kind !== 'file' || !taken.has(m.unitKey)) });
+  }
 }
 
 /** Map an Android project onto every catalog dimension. */
@@ -376,6 +407,7 @@ export function detectStack(root, catalog) {
       const acc = entry.detect.computed ? evaluateComputed(dim.id, entry.id, ctx) : evaluateEntry(entry, ctx);
       if (acc) accs.set(entry.id, acc);
     }
+    applyFileExclusions(dim.id, accs);
     const computed = new Set(dim.entries.filter((e) => e.detect.computed).map((e) => e.id));
     const rows = [];
     for (const [id, acc] of applySupersede(dim, accs, moduleOf)) {
@@ -408,6 +440,6 @@ export function detectStack(root, catalog) {
     size: sizeSummary(files, read),
     modules: modules.map((m) => ({ path: m.path, dir: m.dir, projectDeps: m.projectDeps })),
     dimensions,
-    compliance: evaluateCompliance(sdk),
+    compliance: evaluateCompliance(sdk, catalog),
   };
 }

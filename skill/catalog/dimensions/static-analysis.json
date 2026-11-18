@@ -16,7 +16,7 @@
         "content": [
           {
             "glob": "**/build.gradle*",
-            "regex": "lint(Options)?\\s*\\{"
+            "regex": "(^|[^\\w])lint(Options)?\\s*\\{"
           }
         ]
       }
@@ -97,8 +97,11 @@
             "coord": "com.pinterest.ktlint:"
           }
         ],
-        "files": [
-          "**/.editorconfig"
+        "content": [
+          {
+            "glob": "**/.editorconfig",
+            "regex": "^\\s*ktlint_"
+          }
         ]
       }
     },

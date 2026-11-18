@@ -1,9 +1,11 @@
 // Computes catalog-legal migration targets for each dimension of a StackProfile.
 
-// An entry is present when it has a positive share, or share === null (a computed presence flag).
+// An entry is present when it has detected units, a positive share, or
+// share === null (a computed presence flag). A share that rounds to 0 with
+// units > 0 is a small minority, not absence.
 export function presentEntries(profile, dimId) {
   const entries = profile?.dimensions?.[dimId]?.entries ?? [];
-  return entries.filter((e) => e.share === null || e.share > 0);
+  return entries.filter((e) => e.share === null || e.share > 0 || e.units > 0);
 }
 
 export function presentIds(profile, dimId) {
