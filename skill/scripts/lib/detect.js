@@ -252,44 +252,51 @@ function unitCount(acc) {
 }
 
 /**
- * Supersede rule. Within one dimension, entry X is dropped for a module when
- * one of X's direct successors Y matched in that module through a gradle
- * signal with `minVersion`, and X matched only through gradle signals on the
- * same dependency coordinates (group:name) in that module. Example: a
+ * Supersede rule, evaluated per module. Within one dimension, entry X is
+ * dropped for a module M when one of X's direct successors Y matched in M
+ * through a gradle signal with `minVersion`, and every match of X in M is a
+ * gradle match on one of those same coordinates (group:name). Example: a
  * `navigation-compose` 2.8+ dependency is type-safe navigation, not the
- * string-route entry that matches any version of the same artifact. X keeps
- * any module where it has other evidence, and is kept entirely when it also
- * matched through any non-gradle signal. Decisions use the original matches,
- * so the result does not depend on entry order.
+ * string-route entry that matches any version of the same artifact. A match
+ * belongs to the module whose directory most specifically contains its
+ * evidence file. X is kept in every module where it has any other evidence.
+ * Decisions use the original matches, so the result does not depend on entry
+ * order.
  */
-function applySupersede(dim, accs) {
+function applySupersede(dim, accs, moduleOf) {
   const out = new Map();
   for (const entry of dim.entries) {
     const acc = accs.get(entry.id);
     if (!acc) continue;
-    const onlyGradle = acc.matches.every((m) => m.gradle);
     const minKeys = new Set();
     for (const y of entry.successors ?? []) {
       for (const m of accs.get(y)?.matches ?? []) {
-        if (m.gradle?.viaMin) minKeys.add(`${m.unitKey}\0${m.gradle.dep}`);
+        if (m.gradle?.viaMin) minKeys.add(`${moduleOf(m.ev.file)}\0${m.gradle.dep}`);
       }
     }
-    if (!onlyGradle || minKeys.size === 0) {
+    if (minKeys.size === 0) {
       out.set(entry.id, acc);
       continue;
     }
-    const byUnit = new Map();
+    const byModule = new Map();
     for (const m of acc.matches) {
-      if (!byUnit.has(m.unitKey)) byUnit.set(m.unitKey, []);
-      byUnit.get(m.unitKey).push(m);
+      const mod = moduleOf(m.ev.file);
+      if (!byModule.has(mod)) byModule.set(mod, []);
+      byModule.get(mod).push(m);
     }
     const kept = [];
-    for (const ms of byUnit.values()) {
-      if (!ms.every((m) => minKeys.has(`${m.unitKey}\0${m.gradle.dep}`))) kept.push(...ms);
+    for (const [mod, ms] of byModule) {
+      if (!ms.every((m) => m.gradle && minKeys.has(`${mod}\0${m.gradle.dep}`))) kept.push(...ms);
     }
     out.set(entry.id, { matches: kept });
   }
   return out;
+}
+
+/** Module directory ('' = root) that most specifically contains a relative path. */
+function makeModuleOf(modules) {
+  const dirs = [...new Set(['', ...modules.map((m) => m.dir)])].sort((a, b) => b.length - a.length);
+  return (file) => dirs.find((d) => d === '' || file === d || file.startsWith(d + '/'));
 }
 
 function sortEvidence(evidence) {
@@ -359,6 +366,7 @@ export function detectStack(root, catalog) {
     },
   };
 
+  const moduleOf = makeModuleOf(modules);
   const sdk = sdkSummary(modules);
   const dimensions = {};
   for (const dim of catalog.dimensions) {
@@ -368,15 +376,27 @@ export function detectStack(root, catalog) {
       const acc = entry.detect.computed ? evaluateComputed(dim.id, entry.id, ctx) : evaluateEntry(entry, ctx);
       if (acc) accs.set(entry.id, acc);
     }
+    const computed = new Set(dim.entries.filter((e) => e.detect.computed).map((e) => e.id));
     const rows = [];
-    for (const [id, acc] of applySupersede(dim, accs)) {
+    for (const [id, acc] of applySupersede(dim, accs, moduleOf)) {
       const units = unitCount(acc);
-      if (units > 0) rows.push({ id, units, evidence: sortEvidence(acc.matches.map((m) => m.ev)) });
+      if (units > 0) rows.push({ id, units, evidence: sortEvidence(acc.matches.map((m) => m.ev)), flag: computed.has(id) });
     }
-    const total = rows.reduce((s, r) => s + r.units, 0);
+    // Computed entries are presence flags: they carry `share: null` and stay
+    // out of the share pool, which only holds the non-computed entries.
+    const total = rows.filter((r) => !r.flag).reduce((s, r) => s + r.units, 0);
+    const byId = (a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
     const entries = rows
-      .map((r) => ({ id: r.id, share: Math.round((r.units / total) * 100) / 100, units: r.units, evidence: r.evidence }))
-      .sort((a, b) => b.share - a.share || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+      .map((r) => ({
+        id: r.id,
+        share: r.flag ? null : Math.round((r.units / total) * 100) / 100,
+        units: r.units,
+        evidence: r.evidence,
+      }))
+      .sort((a, b) => {
+        if ((a.share === null) !== (b.share === null)) return a.share === null ? 1 : -1;
+        return (b.share ?? 0) - (a.share ?? 0) || byId(a, b);
+      });
     dimensions[dim.id] = { entries };
   }
 

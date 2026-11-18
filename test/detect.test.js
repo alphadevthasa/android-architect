@@ -55,7 +55,10 @@ test('legacy-java-mvp profile', () => {
 
 test('modern-compose profile', () => {
   const p = scan('modern-compose');
-  has(p, 'language', 'kotlin-k2');
+  assert.deepEqual(p.dimensions.language.entries.map(({ id, share }) => ({ id, share })), [
+    { id: 'kotlin', share: 1 },
+    { id: 'kotlin-k2', share: null },
+  ]);
   has(p, 'build', 'gradle-kts', 'version-catalog', 'convention-plugins', 'ksp');
   has(p, 'presentation', 'udf-stateflow', 'mvvm-clean');
   has(p, 'ui', 'compose');
@@ -94,6 +97,58 @@ test('supersede: navigation-compose 2.7.0 stays string routes', () => {
   }
 });
 
+const withProject = (files, fn) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'aa-detect-'));
+  try {
+    for (const [rel, text] of Object.entries(files)) {
+      fs.mkdirSync(path.dirname(path.join(tmp, rel)), { recursive: true });
+      fs.writeFileSync(path.join(tmp, rel), text);
+    }
+    return fn(detectStack(tmp, catalog));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+};
+
+test('computed entries are presence flags: many .kt files do not dilute kotlin-k2', () => {
+  const files = {
+    'settings.gradle.kts': 'include(":app")\n',
+    'app/build.gradle.kts': 'plugins {\n    id("org.jetbrains.kotlin.android") version "2.0.21"\n}\n',
+  };
+  for (let i = 0; i < 200; i++) files[`app/src/main/kotlin/F${i}.kt`] = `class F${i}\n`;
+  withProject(files, (p) => {
+    const lang = p.dimensions.language.entries;
+    assert.deepEqual(lang.map(({ id, share }) => ({ id, share })), [
+      { id: 'kotlin', share: 1 },
+      { id: 'kotlin-k2', share: null },
+    ]);
+    assert.equal(lang[1].units, 1);
+    assert.deepEqual(lang[1].evidence, [{ file: 'app/build.gradle.kts', line: 2, signal: 'kotlin plugin 2.0.21' }]);
+    assert.match(renderProfileMarkdown(p), /^- Kotlin K2 compiler \(Kotlin 2\.x\): present \(evidence: app\/build\.gradle\.kts:2\)$/m);
+  });
+});
+
+test('supersede is per module: other evidence keeps X only in its own module', () => {
+  const nav = "dependencies {\n    implementation 'androidx.navigation:navigation-compose:2.8.0'\n}\n";
+  withProject(
+    {
+      'settings.gradle': "include ':a', ':b'\n",
+      'a/build.gradle': nav,
+      'b/build.gradle': nav,
+      'a/src/main/kotlin/Nav.kt': 'fun g() {\n    composable("home") {}\n}\n',
+    },
+    (p) => {
+      const navEntries = p.dimensions.navigation.entries;
+      const str = navEntries.find((e) => e.id === 'nav-compose-string');
+      const typed = navEntries.find((e) => e.id === 'nav-compose-typesafe');
+      assert.ok(str, 'string routes kept for module a');
+      assert.ok(str.evidence.every((e) => e.file.startsWith('a/')), JSON.stringify(str.evidence));
+      assert.deepEqual(str.evidence.map((e) => `${e.file}:${e.line}`), ['a/build.gradle:2', 'a/src/main/kotlin/Nav.kt:2']);
+      assert.equal(typed.units, 2);
+    },
+  );
+});
+
 test('mixed profile: ui shares and coexisting patterns', () => {
   const p = scan('mixed');
   assert.deepEqual(
@@ -109,13 +164,20 @@ test('entries are sorted, shares sum to ~1, evidence capped and sorted', () => {
     const p = scan(n);
     for (const [dim, { entries }] of Object.entries(p.dimensions)) {
       if (entries.length === 0) continue;
-      const sum = entries.reduce((s, e) => s + e.share, 0);
-      assert.ok(Math.abs(sum - 1) < 0.05, `${n}/${dim} shares sum ${sum}`);
-      for (let i = 1; i < entries.length; i++) {
-        const a = entries[i - 1];
-        const b = entries[i];
+      const shared = entries.filter((e) => e.share !== null);
+      const flags = entries.filter((e) => e.share === null);
+      assert.deepEqual(entries, [...shared, ...flags], `${n}/${dim} share entries before presence entries`);
+      if (shared.length) {
+        const sum = shared.reduce((s, e) => s + e.share, 0);
+        assert.ok(Math.abs(sum - 1) < 0.05, `${n}/${dim} shares sum ${sum}`);
+      }
+      for (let i = 1; i < shared.length; i++) {
+        const a = shared[i - 1];
+        const b = shared[i];
         assert.ok(a.share > b.share || (a.share === b.share && a.id < b.id), `${n}/${dim} order`);
       }
+      for (let i = 1; i < flags.length; i++) assert.ok(flags[i - 1].id < flags[i].id, `${n}/${dim} flag order`);
+      for (const e of flags) assert.ok(catalog.entry(dim, e.id).detect.computed, `${n}/${dim}/${e.id} null share only for computed`);
       for (const e of entries) {
         assert.ok(e.units > 0);
         assert.ok(e.evidence.length <= 5);

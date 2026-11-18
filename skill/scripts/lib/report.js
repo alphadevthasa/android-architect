@@ -24,7 +24,7 @@ export function renderProfileMarkdown(profile, catalog = loadCatalog()) {
     }
     for (const e of entries) {
       const ev = e.evidence.length ? ` (evidence: ${e.evidence.map(where).join(', ')})` : '';
-      out.push(`- ${entryName(dimId, e.id)}: ${pct(e.share)}${ev}`);
+      out.push(`- ${entryName(dimId, e.id)}: ${e.share === null ? 'present' : pct(e.share)}${ev}`);
     }
   }
   if (profile.compliance.length) {
