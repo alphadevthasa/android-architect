@@ -1,4 +1,6 @@
 import fs from 'node:fs';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 export const SUPPORTED_SCHEMA_VERSION = 1;
 const STATUSES = ['current', 'legacy', 'deprecated'];
@@ -148,7 +150,7 @@ export function validateCatalog(raw) {
 }
 
 export function loadCatalog(dir = DEFAULT_DIR) {
-  const base = dir instanceof URL ? dir : new URL(`file://${String(dir).replace(/\/?$/, '/')}`);
+  const base = dir instanceof URL ? dir : pathToFileURL(path.resolve(String(dir)) + path.sep);
   const readJson = (rel) => {
     try {
       return JSON.parse(fs.readFileSync(new URL(rel, base), 'utf8'));

@@ -79,3 +79,22 @@ test('shipped successor and prerequisite rulings', () => {
   assert.deepEqual(c.entry('build', 'kapt').successors, ['ksp']);
   assert.deepEqual(c.entry('language', 'kotlin-k2').detect, { computed: true });
 });
+
+test('loads shipped catalog via relative string path', () => {
+  assert.equal(loadCatalog('skill/catalog').catalogVersion, '2026.11.0');
+});
+
+test('loads catalog from a dir whose name contains #', async () => {
+  const fs = await import('node:fs');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cat#?%-'));
+  fs.cpSync('skill/catalog', tmp, { recursive: true });
+  assert.equal(loadCatalog(tmp).catalogVersion, '2026.11.0');
+});
+
+test('databinding regex matches common forms', () => {
+  const re = new RegExp(loadCatalog().entry('ui', 'databinding').detect.content[0].regex);
+  for (const s of ['dataBinding true', 'dataBinding = true', 'dataBinding {', 'dataBinding=true']) assert.ok(re.test(s), s);
+  assert.ok(!re.test('dataBinding false'));
+});

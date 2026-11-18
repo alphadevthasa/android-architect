@@ -69,7 +69,7 @@
         "content": [
           {
             "glob": "**/build.gradle*",
-            "regex": "dataBinding\\s*(\\{|=)\\s*.*true|dataBinding\\s*\\{"
+            "regex": "dataBinding\\s*(=\\s*)?true|dataBinding\\s*\\{"
           }
         ]
       }
