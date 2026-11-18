@@ -4,8 +4,13 @@
 
 ## Tool
 
-- Initial package bootstrap.
+- `android-architect install|uninstall|doctor|version` CLI with `--claude`, `--codex`, `--home`, `--force` and `--json`. Installs from a staged copy and removes only directories it installed.
+- Offline, read-only scripts: `scan.js` (stack profile), `candidates.js` (catalog-legal targets), `recommend-check.js` (guardrail validation R1-R6).
+- Skill with `audit` and `recommend` commands, persona, method, rubrics and output templates.
+- Detection for Java/Kotlin, Groovy/KTS, version catalogs, multi-module, XML/Compose/mixed UI and KMP.
+- No dependencies, no install-time scripts, no network.
 
 ## Catalog
 
-- Initial catalog (pending).
+- Catalog 2026.11.0: 18 dimensions with entries, successor edges and prerequisites.
+- Recommendation schema documented in `skill/catalog/recommendations.schema.md`.
