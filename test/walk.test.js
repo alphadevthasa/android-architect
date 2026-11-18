@@ -61,6 +61,20 @@ test('lists file symlink inside root under link path, traverses dir symlink once
   assert.equal(out.filter((p) => p.endsWith('F.kt')).length, 1);
 });
 
+test('canonical path wins over a symlink that sorts first', () => {
+  const root = mkTree(['real/F.kt']);
+  fs.symlinkSync(path.join(root, 'real'), path.join(root, 'alink'));
+  const out = listFiles(root);
+  assert.ok(out.includes('real/F.kt'));
+  assert.ok(!out.includes('alink/F.kt'));
+});
+
+test('canonical deep path wins over a shallow symlink', () => {
+  const root = mkTree(['x/y/deep/F.kt']);
+  fs.symlinkSync(path.join(root, 'x/y/deep'), path.join(root, 'alink'));
+  assert.deepEqual(listFiles(root), ['x/y/deep/F.kt']);
+});
+
 test('survives symlink loop', () => {
   const root = mkTree(['a/F.kt']);
   fs.symlinkSync('..', path.join(root, 'a', 'loop'));

@@ -31,50 +31,61 @@ export function listFiles(root, opts = {}) {
   const realRoot = fs.realpathSync(root);
   const visited = new Set([realRoot]);
   const results = [];
-  const stack = [{ abs: root, rel: '' }];
+  const pendingLinks = [];
 
   const targetIgnored = (realTarget) =>
     path.relative(realRoot, realTarget).split(path.sep).some((seg) => ignored.has(seg));
 
-  while (stack.length > 0) {
-    const { abs, rel } = stack.pop();
-    let entries;
-    try {
-      entries = fs.readdirSync(abs, { withFileTypes: true });
-    } catch {
-      continue;
-    }
-    for (const entry of entries) {
-      const name = entry.name;
-      const entryAbs = path.join(abs, name);
-      const entryRel = rel ? `${rel}/${name}` : name;
-
-      let isDir = entry.isDirectory();
-      let isFile = entry.isFile();
-      let real = null;
-      if (entry.isSymbolicLink()) {
-        try {
-          real = fs.realpathSync(entryAbs);
-        } catch {
-          continue; // broken link
+  // Walk real (non-symlink) directories, claiming each real path. Symlinks are
+  // deferred so the canonical path of a directory always wins over a link path.
+  const walkReal = (startAbs, startRel) => {
+    const stack = [{ abs: startAbs, rel: startRel }];
+    while (stack.length > 0) {
+      const { abs, rel } = stack.pop();
+      let entries;
+      try {
+        entries = fs.readdirSync(abs, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+      for (const entry of entries) {
+        const name = entry.name;
+        const entryAbs = path.join(abs, name);
+        const entryRel = rel ? `${rel}/${name}` : name;
+        if (entry.isSymbolicLink()) {
+          pendingLinks.push({ abs: entryAbs, rel: entryRel, name });
+        } else if (entry.isDirectory()) {
+          if (ignored.has(name)) continue;
+          const real = fs.realpathSync(entryAbs);
+          if (visited.has(real)) continue;
+          visited.add(real);
+          stack.push({ abs: entryAbs, rel: entryRel });
+        } else if (entry.isFile() && !isSecret(name)) {
+          results.push(entryRel);
         }
-        if (!isInside(realRoot, real) || targetIgnored(real)) continue;
-        const st = fs.statSync(real);
-        isDir = st.isDirectory();
-        isFile = st.isFile();
-        if (isFile && isSecret(path.basename(real))) continue;
       }
+    }
+  };
 
-      if (isDir) {
-        if (ignored.has(name)) continue;
-        if (real === null) real = fs.realpathSync(entryAbs);
-        if (visited.has(real)) continue;
-        visited.add(real);
-        stack.push({ abs: entryAbs, rel: entryRel });
-      } else if (isFile) {
-        if (isSecret(name)) continue;
-        results.push(entryRel);
-      }
+  walkReal(root, '');
+  while (pendingLinks.length > 0) {
+    pendingLinks.sort((x, y) => (x.rel < y.rel ? 1 : x.rel > y.rel ? -1 : 0));
+    const link = pendingLinks.pop();
+    if (ignored.has(link.name)) continue;
+    let real;
+    let st;
+    try {
+      real = fs.realpathSync(link.abs);
+      st = fs.statSync(real);
+    } catch {
+      continue; // broken link
+    }
+    if (!isInside(realRoot, real) || targetIgnored(real)) continue;
+    if (st.isFile()) {
+      if (!isSecret(link.name) && !isSecret(path.basename(real))) results.push(link.rel);
+    } else if (st.isDirectory() && !visited.has(real)) {
+      visited.add(real);
+      walkReal(link.abs, link.rel);
     }
   }
   return results.sort();
