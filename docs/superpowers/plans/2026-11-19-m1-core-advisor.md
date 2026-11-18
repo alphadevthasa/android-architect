@@ -398,5 +398,5 @@ Required content (copy is the builder's, but these facts are fixed):
 - [ ] **Step 2: Run, confirm FAIL** (README headings).
 - [ ] **Step 3: Write README and CHANGELOG.**
 - [ ] **Step 4: Run full `npm test`.** Expected: all pass.
-- [ ] **Step 5: Manual smoke test** (read-only): `node skill/scripts/scan.js ~/AndroidStudioProjects/MtouTransferValas --format md`. Check that the profile looks plausible and record the observations in the commit body. Fix detection gaps as follow-up commits with a fixture test for each.
+- [ ] **Step 5: Manual smoke test** (read-only): `node skill/scripts/scan.js <a real local Android project> --format md`. Check that the profile looks plausible and record the observations in the (untracked) task report, never in tracked files. Triage detection gaps for follow-up.
 - [ ] **Step 6: Commit** `docs: add README and changelog for 0.1.0`
