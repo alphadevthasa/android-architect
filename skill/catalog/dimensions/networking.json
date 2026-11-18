@@ -1,0 +1,127 @@
+{
+  "id": "networking",
+  "name": "Networking",
+  "entries": [
+    {
+      "id": "httpurlconnection",
+      "name": "HttpURLConnection",
+      "era": 1,
+      "status": "legacy",
+      "since": "2008",
+      "successors": [
+        "volley",
+        "okhttp-retrofit"
+      ],
+      "detect": {
+        "imports": [
+          "java.net.HttpURLConnection"
+        ]
+      }
+    },
+    {
+      "id": "apache-httpclient",
+      "name": "Apache HttpClient",
+      "era": 1,
+      "status": "deprecated",
+      "since": "2008",
+      "deprecatedSince": "2015-09",
+      "successors": [
+        "okhttp-retrofit"
+      ],
+      "detect": {
+        "gradle": [
+          {
+            "coord": "org.apache.httpcomponents:httpclient"
+          }
+        ],
+        "imports": [
+          "org.apache.http.client"
+        ]
+      }
+    },
+    {
+      "id": "volley",
+      "name": "Volley",
+      "era": 2,
+      "status": "legacy",
+      "since": "2013-05",
+      "successors": [
+        "okhttp-retrofit"
+      ],
+      "detect": {
+        "gradle": [
+          {
+            "coord": "com.android.volley:volley"
+          }
+        ],
+        "imports": [
+          "com.android.volley"
+        ]
+      }
+    },
+    {
+      "id": "okhttp-retrofit",
+      "name": "OkHttp and Retrofit",
+      "era": 3,
+      "status": "current",
+      "since": "2013",
+      "successors": [
+        "ktor-client"
+      ],
+      "detect": {
+        "gradle": [
+          {
+            "coord": "com.squareup.retrofit2:retrofit"
+          },
+          {
+            "coord": "com.squareup.okhttp3:okhttp"
+          }
+        ],
+        "imports": [
+          "retrofit2",
+          "okhttp3"
+        ]
+      }
+    },
+    {
+      "id": "ktor-client",
+      "name": "Ktor client",
+      "era": 4,
+      "status": "current",
+      "since": "2019-01",
+      "successors": [],
+      "detect": {
+        "gradle": [
+          {
+            "coord": "io.ktor:ktor-client-core"
+          }
+        ],
+        "imports": [
+          "io.ktor.client"
+        ]
+      }
+    },
+    {
+      "id": "apollo",
+      "name": "Apollo GraphQL client",
+      "era": 4,
+      "status": "current",
+      "since": "2016",
+      "successors": [],
+      "detect": {
+        "gradle": [
+          {
+            "coord": "com.apollographql.apollo3:"
+          },
+          {
+            "coord": "com.apollographql.apollo:"
+          }
+        ],
+        "plugins": [
+          "com.apollographql.apollo3",
+          "com.apollographql.apollo"
+        ]
+      }
+    }
+  ]
+}

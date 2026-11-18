@@ -1,0 +1,95 @@
+{
+  "id": "keyvalue",
+  "name": "Key-value storage",
+  "entries": [
+    {
+      "id": "sharedpreferences",
+      "name": "SharedPreferences",
+      "era": 1,
+      "status": "legacy",
+      "since": "2008",
+      "successors": [
+        "encrypted-sharedpreferences",
+        "datastore",
+        "mmkv"
+      ],
+      "detect": {
+        "content": [
+          {
+            "glob": "**/*.{java,kt}",
+            "regex": "getSharedPreferences\\(|PreferenceManager\\.getDefaultSharedPreferences"
+          }
+        ]
+      }
+    },
+    {
+      "id": "encrypted-sharedpreferences",
+      "name": "EncryptedSharedPreferences",
+      "era": 3,
+      "status": "deprecated",
+      "since": "2018-12",
+      "deprecatedSince": "2025",
+      "successors": [
+        "datastore"
+      ],
+      "detect": {
+        "gradle": [
+          {
+            "coord": "androidx.security:security-crypto"
+          }
+        ],
+        "imports": [
+          "androidx.security.crypto"
+        ]
+      }
+    },
+    {
+      "id": "datastore",
+      "name": "Jetpack DataStore",
+      "era": 4,
+      "status": "current",
+      "since": "2020-09",
+      "successors": [],
+      "prerequisites": [
+        {
+          "dimension": "async",
+          "anyOf": [
+            "coroutines-livedata",
+            "coroutines-flow"
+          ]
+        }
+      ],
+      "detect": {
+        "gradle": [
+          {
+            "coord": "androidx.datastore:"
+          }
+        ],
+        "imports": [
+          "androidx.datastore"
+        ]
+      }
+    },
+    {
+      "id": "mmkv",
+      "name": "MMKV",
+      "era": 3,
+      "status": "current",
+      "since": "2018-09",
+      "successors": [],
+      "detect": {
+        "gradle": [
+          {
+            "coord": "com.tencent:mmkv"
+          },
+          {
+            "coord": "com.tencent:mmkv-static"
+          }
+        ],
+        "imports": [
+          "com.tencent.mmkv"
+        ]
+      }
+    }
+  ]
+}

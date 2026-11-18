@@ -1,0 +1,177 @@
+{
+  "id": "persistence",
+  "name": "Persistence",
+  "entries": [
+    {
+      "id": "sqliteopenhelper",
+      "name": "SQLiteOpenHelper",
+      "era": 1,
+      "status": "legacy",
+      "since": "2008",
+      "successors": [
+        "room"
+      ],
+      "detect": {
+        "imports": [
+          "android.database.sqlite.SQLiteOpenHelper"
+        ]
+      }
+    },
+    {
+      "id": "contentprovider",
+      "name": "ContentProvider-backed storage",
+      "era": 1,
+      "status": "legacy",
+      "since": "2008",
+      "successors": [
+        "room"
+      ],
+      "detect": {
+        "content": [
+          {
+            "glob": "**/*.{java,kt}",
+            "regex": "(extends|:)\\s*ContentProvider\\b"
+          }
+        ]
+      }
+    },
+    {
+      "id": "ormlite",
+      "name": "ORMLite",
+      "era": 2,
+      "status": "legacy",
+      "since": "2010",
+      "successors": [
+        "room"
+      ],
+      "detect": {
+        "gradle": [
+          {
+            "coord": "com.j256.ormlite:"
+          }
+        ],
+        "imports": [
+          "com.j256.ormlite"
+        ]
+      }
+    },
+    {
+      "id": "greendao",
+      "name": "greenDAO",
+      "era": 2,
+      "status": "deprecated",
+      "since": "2011",
+      "deprecatedSince": "2019",
+      "successors": [
+        "room"
+      ],
+      "detect": {
+        "gradle": [
+          {
+            "coord": "org.greenrobot:greendao"
+          }
+        ],
+        "plugins": [
+          "org.greenrobot.greendao"
+        ],
+        "imports": [
+          "org.greenrobot.greendao"
+        ]
+      }
+    },
+    {
+      "id": "realm",
+      "name": "Realm",
+      "era": 3,
+      "status": "deprecated",
+      "since": "2014",
+      "deprecatedSince": "2024-09",
+      "successors": [
+        "room",
+        "sqldelight"
+      ],
+      "detect": {
+        "gradle": [
+          {
+            "coord": "io.realm:"
+          },
+          {
+            "coord": "io.realm.kotlin:"
+          }
+        ],
+        "plugins": [
+          "realm-android",
+          "io.realm.kotlin"
+        ],
+        "imports": [
+          "io.realm"
+        ]
+      }
+    },
+    {
+      "id": "room",
+      "name": "Room",
+      "era": 3,
+      "status": "current",
+      "since": "2017-05",
+      "successors": [],
+      "detect": {
+        "gradle": [
+          {
+            "coord": "androidx.room:room-runtime"
+          }
+        ],
+        "plugins": [
+          "androidx.room"
+        ],
+        "imports": [
+          "androidx.room"
+        ]
+      }
+    },
+    {
+      "id": "sqldelight",
+      "name": "SQLDelight",
+      "era": 4,
+      "status": "current",
+      "since": "2017",
+      "successors": [],
+      "detect": {
+        "gradle": [
+          {
+            "coord": "app.cash.sqldelight:"
+          },
+          {
+            "coord": "com.squareup.sqldelight:"
+          }
+        ],
+        "plugins": [
+          "app.cash.sqldelight",
+          "com.squareup.sqldelight"
+        ]
+      }
+    },
+    {
+      "id": "sqlcipher",
+      "name": "SQLCipher",
+      "era": 3,
+      "status": "current",
+      "since": "2011",
+      "successors": [],
+      "detect": {
+        "gradle": [
+          {
+            "coord": "net.zetetic:android-database-sqlcipher"
+          },
+          {
+            "coord": "net.zetetic:sqlcipher-android"
+          }
+        ],
+        "imports": [
+          "net.sqlcipher",
+          "net.zetetic.database.sqlcipher"
+        ]
+      }
+    }
+  ]
+}

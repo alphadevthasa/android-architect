@@ -1,0 +1,209 @@
+{
+  "id": "di",
+  "name": "Dependency injection",
+  "entries": [
+    {
+      "id": "manual-servicelocator",
+      "name": "Manual wiring or service locator",
+      "era": 1,
+      "status": "legacy",
+      "since": "2008",
+      "successors": [
+        "dagger2",
+        "koin"
+      ],
+      "detect": {
+        "content": [
+          {
+            "glob": "**/*.{java,kt}",
+            "regex": "(object|class)\\s+\\w*ServiceLocator\\b|\\bServiceLocator\\."
+          }
+        ]
+      }
+    },
+    {
+      "id": "dagger1",
+      "name": "Dagger 1",
+      "era": 2,
+      "status": "deprecated",
+      "since": "2013",
+      "deprecatedSince": "2015",
+      "successors": [
+        "dagger2"
+      ],
+      "detect": {
+        "gradle": [
+          {
+            "coord": "com.squareup.dagger:"
+          }
+        ],
+        "imports": [
+          "dagger.ObjectGraph"
+        ]
+      }
+    },
+    {
+      "id": "dagger2",
+      "name": "Dagger 2",
+      "era": 3,
+      "status": "current",
+      "since": "2015",
+      "successors": [
+        "dagger-android",
+        "hilt"
+      ],
+      "detect": {
+        "gradle": [
+          {
+            "coord": "com.google.dagger:dagger"
+          },
+          {
+            "coord": "com.google.dagger:dagger-compiler"
+          }
+        ],
+        "imports": [
+          "dagger.Component",
+          "dagger.Subcomponent"
+        ]
+      }
+    },
+    {
+      "id": "dagger-android",
+      "name": "Dagger Android (AndroidInjector)",
+      "era": 3,
+      "status": "legacy",
+      "since": "2016",
+      "successors": [
+        "hilt"
+      ],
+      "detect": {
+        "gradle": [
+          {
+            "coord": "com.google.dagger:dagger-android"
+          },
+          {
+            "coord": "com.google.dagger:dagger-android-support"
+          }
+        ],
+        "imports": [
+          "dagger.android"
+        ]
+      }
+    },
+    {
+      "id": "koin",
+      "name": "Koin",
+      "era": 4,
+      "status": "current",
+      "since": "2017",
+      "successors": [],
+      "detect": {
+        "gradle": [
+          {
+            "coord": "io.insert-koin:"
+          },
+          {
+            "coord": "org.koin:"
+          }
+        ],
+        "imports": [
+          "org.koin"
+        ]
+      }
+    },
+    {
+      "id": "kodein",
+      "name": "Kodein",
+      "era": 4,
+      "status": "current",
+      "since": "2016",
+      "successors": [],
+      "detect": {
+        "gradle": [
+          {
+            "coord": "org.kodein.di:"
+          }
+        ],
+        "imports": [
+          "org.kodein.di"
+        ]
+      }
+    },
+    {
+      "id": "hilt",
+      "name": "Hilt",
+      "era": 4,
+      "status": "current",
+      "since": "2020-09",
+      "successors": [],
+      "detect": {
+        "plugins": [
+          "com.google.dagger.hilt.android"
+        ],
+        "gradle": [
+          {
+            "coord": "com.google.dagger:hilt-android"
+          }
+        ]
+      }
+    },
+    {
+      "id": "kotlin-inject",
+      "name": "kotlin-inject",
+      "era": 5,
+      "status": "current",
+      "since": "2020",
+      "successors": [
+        "metro"
+      ],
+      "detect": {
+        "gradle": [
+          {
+            "coord": "me.tatarka.inject:"
+          }
+        ],
+        "imports": [
+          "me.tatarka.inject"
+        ]
+      }
+    },
+    {
+      "id": "anvil",
+      "name": "Anvil",
+      "era": 5,
+      "status": "legacy",
+      "since": "2020",
+      "successors": [
+        "metro"
+      ],
+      "detect": {
+        "plugins": [
+          "com.squareup.anvil"
+        ],
+        "gradle": [
+          {
+            "coord": "com.squareup.anvil:"
+          }
+        ]
+      }
+    },
+    {
+      "id": "metro",
+      "name": "Metro",
+      "era": 6,
+      "status": "current",
+      "since": "2025-03",
+      "successors": [],
+      "detect": {
+        "plugins": [
+          "dev.zacsweers.metro"
+        ],
+        "gradle": [
+          {
+            "coord": "dev.zacsweers.metro:"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,81 @@
+{
+  "id": "build-performance",
+  "name": "Build performance",
+  "entries": [
+    {
+      "id": "config-cache",
+      "name": "Gradle configuration cache",
+      "era": 4,
+      "status": "current",
+      "since": "2021-11",
+      "successors": [],
+      "detect": {
+        "content": [
+          {
+            "glob": "**/gradle.properties",
+            "regex": "org\\.gradle\\.(unsafe\\.)?configuration-cache=true"
+          }
+        ]
+      }
+    },
+    {
+      "id": "build-cache",
+      "name": "Gradle build cache",
+      "era": 3,
+      "status": "current",
+      "since": "2017-04",
+      "successors": [],
+      "detect": {
+        "content": [
+          {
+            "glob": "**/gradle.properties",
+            "regex": "org\\.gradle\\.caching=true"
+          }
+        ]
+      }
+    },
+    {
+      "id": "non-transitive-r",
+      "name": "Non-transitive R classes",
+      "era": 4,
+      "status": "current",
+      "since": "2021-04",
+      "successors": [],
+      "detect": {
+        "content": [
+          {
+            "glob": "**/gradle.properties",
+            "regex": "android\\.nonTransitiveRClass=true"
+          }
+        ]
+      }
+    },
+    {
+      "id": "parallel",
+      "name": "Parallel project execution",
+      "era": 2,
+      "status": "current",
+      "since": "2013",
+      "successors": [],
+      "detect": {
+        "content": [
+          {
+            "glob": "**/gradle.properties",
+            "regex": "org\\.gradle\\.parallel=true"
+          }
+        ]
+      }
+    },
+    {
+      "id": "kapt-free",
+      "name": "No kapt annotation processing",
+      "era": 5,
+      "status": "current",
+      "since": "2021-09",
+      "successors": [],
+      "detect": {
+        "computed": true
+      }
+    }
+  ]
+}

@@ -57,8 +57,21 @@ test('rejects bad status', () => {
   assert.ok(errs.some((e) => e.includes('bad status "old"')));
 });
 
-test('accepts computed detect and policy', () => {
-  assert.deepEqual(validateCatalog(raw([entry('a', { detect: { computed: true }, policy: { x: 1 } })])), []);
+const rawDim = (dimId, entries) => ({ meta, dimensions: [{ id: dimId, name: dimId, entries }] });
+
+test('accepts computed detect and policy on an allowed dimension', () => {
+  assert.deepEqual(validateCatalog(rawDim('compliance', [entry('a', { detect: { computed: true }, policy: { x: 1 } })])), []);
+});
+
+test('rejects computed detect on a dimension outside the allowlist', () => {
+  const errs = validateCatalog(raw([entry('a', { detect: { computed: true } })]));
+  assert.ok(errs.some((e) => e.includes('d.a: detect.computed is not allowed')));
+});
+
+test('rejects malformed compliance policy', () => {
+  const bad = validateCatalog(rawDim('compliance', [entry('a', { detect: { computed: true }, policy: { kind: 'targetSdkMin', value: 'x', effective: 'soon' } })]));
+  assert.ok(bad.some((e) => e.includes('policy.value')));
+  assert.ok(bad.some((e) => e.includes('policy.effective')));
 });
 
 test('loadCatalog throws CatalogError listing errors', () => {
@@ -97,4 +110,85 @@ test('databinding regex matches common forms', () => {
   const re = new RegExp(loadCatalog().entry('ui', 'databinding').detect.content[0].regex);
   for (const s of ['dataBinding true', 'dataBinding = true', 'dataBinding {', 'dataBinding=true']) assert.ok(re.test(s), s);
   assert.ok(!re.test('dataBinding false'));
+});
+
+const EXPECTED_DIMENSIONS = ['language', 'build', 'ui', 'presentation', 'navigation', 'async', 'di', 'networking',
+  'serialization', 'persistence', 'keyvalue', 'image', 'background', 'modularization', 'testing', 'static-analysis',
+  'compliance', 'build-performance'];
+
+test('catalog has 18 dimensions in declared order', () => {
+  const c = loadCatalog();
+  assert.equal(c.dimensions.length, 18);
+  assert.deepEqual(c.dimensions.map((d) => d.id), EXPECTED_DIMENSIONS);
+});
+
+test('presentation successors form the documented chain', () => {
+  const c = loadCatalog();
+  const succ = (id) => c.entry('presentation', id).successors;
+  assert.deepEqual(succ('god-activity'), ['mvp']);
+  assert.deepEqual(succ('mvp'), ['mvvm-livedata']);
+  assert.deepEqual(succ('mvvm-livedata'), ['mvvm-clean', 'udf-stateflow']);
+  assert.deepEqual(succ('mvvm-clean'), ['udf-stateflow']);
+  assert.deepEqual(succ('mvi'), ['udf-stateflow']);
+  assert.deepEqual(succ('udf-stateflow'), ['circuit-decompose']);
+  assert.deepEqual(succ('circuit-decompose'), []);
+  for (const id of ['viper', 'ribs', 'square-workflow']) {
+    assert.equal(c.entry('presentation', id).status, 'legacy');
+    assert.deepEqual(succ(id), []);
+  }
+  assert.deepEqual([1, 2, 3, 4, 4, 5, 6], ['god-activity', 'mvp', 'mvvm-livedata', 'mvvm-clean', 'mvi', 'udf-stateflow', 'circuit-decompose'].map((id) => c.entry('presentation', id).era));
+});
+
+test('computed detect is accepted only on modularization, compliance, build-performance, language.kotlin-k2, presentation.god-activity', () => {
+  const c = loadCatalog();
+  const allowedDims = ['modularization', 'compliance', 'build-performance'];
+  const allowedEntries = ['language.kotlin-k2', 'presentation.god-activity'];
+  for (const d of c.dimensions) for (const e of d.entries) {
+    const key = `${d.id}.${e.id}`;
+    if (e.detect.computed) assert.ok(allowedDims.includes(d.id) || allowedEntries.includes(key), `${key} must not be computed`);
+  }
+  for (const id of allowedDims) assert.ok(c.dimensions.find((d) => d.id === id).entries.some((e) => e.detect.computed), id);
+  const errs = validateCatalog(rawDim('presentation', [entry('mvp', { detect: { computed: true } })]));
+  assert.ok(errs.some((e) => e.includes('detect.computed is not allowed')));
+  assert.deepEqual(validateCatalog(rawDim('presentation', [entry('god-activity', { detect: { computed: true } })])), []);
+  assert.deepEqual(validateCatalog(rawDim('language', [entry('kotlin-k2', { detect: { computed: true } })])), []);
+  assert.ok(validateCatalog(rawDim('language', [entry('kotlin', { detect: { computed: true } })])).length > 0);
+});
+
+test('required entry ids exist per dimension', () => {
+  const c = loadCatalog();
+  const want = {
+    navigation: 'multi-activity fragment-manual cicerone-conductor jetpack-nav-xml nav-compose-string nav-compose-typesafe navigation3 voyager decompose-nav',
+    async: 'asynctask-loader eventbus rxjava1 rxjava2 rxjava3 coroutines-livedata coroutines-flow',
+    di: 'manual-servicelocator dagger1 dagger2 dagger-android koin kodein hilt kotlin-inject anvil metro',
+    networking: 'httpurlconnection apache-httpclient volley okhttp-retrofit ktor-client apollo',
+    serialization: 'gson moshi kotlinx-serialization jackson',
+    persistence: 'sqliteopenhelper contentprovider ormlite greendao realm room sqldelight sqlcipher',
+    keyvalue: 'sharedpreferences encrypted-sharedpreferences datastore mmkv',
+    image: 'uil picasso glide fresco coil',
+    background: 'service-alarmmanager intentservice jobscheduler firebase-jobdispatcher workmanager',
+    modularization: 'single-module layer-modules feature-modules api-impl-modules dynamic-features polyrepo-aar monorepo-convention',
+    testing: 'instrumentation-robotium junit4 mockito espresso mockk turbine robolectric compose-ui-test paparazzi roborazzi junit5 kotest',
+    'static-analysis': 'android-lint checkstyle pmd findbugs-spotbugs ktlint detekt spotless',
+    compliance: 'target-sdk-35 page-size-16kb edge-to-edge predictive-back fgs-types',
+    'build-performance': 'config-cache build-cache non-transitive-r parallel kapt-free',
+  };
+  for (const [dim, ids] of Object.entries(want)) {
+    assert.deepEqual(c.dimensions.find((d) => d.id === dim).entries.map((e) => e.id).sort(), ids.split(' ').sort(), dim);
+  }
+  assert.deepEqual(c.entry('compliance', 'target-sdk-35').policy, { kind: 'targetSdkMin', value: 35, effective: '2025-08-31' });
+  assert.deepEqual(c.entry('navigation', 'nav-compose-typesafe').detect.gradle, [{ coord: 'androidx.navigation:navigation-compose', minVersion: '2.8' }]);
+  assert.deepEqual(c.entry('keyvalue', 'datastore').prerequisites, [{ dimension: 'async', anyOf: ['coroutines-livedata', 'coroutines-flow'] }]);
+  assert.deepEqual(c.entry('async', 'coroutines-flow').prerequisites, [{ dimension: 'language', anyOf: ['kotlin', 'kotlin-k2', 'kmp'] }]);
+});
+
+test('shipped regexes and globs are well formed', () => {
+  const c = loadCatalog();
+  for (const d of c.dimensions) for (const e of d.entries) for (const item of e.detect.content ?? []) {
+    assert.doesNotThrow(() => new RegExp(item.regex), `${d.id}.${e.id}`);
+  }
+  const re = new RegExp(c.entry('build-performance', 'config-cache').detect.content[0].regex);
+  assert.ok(re.test('org.gradle.configuration-cache=true'));
+  assert.ok(!re.test('org.gradle.configuration-cache=false'));
+  assert.ok(new RegExp(c.entry('presentation', 'udf-stateflow').detect.content[0].regex).test('MutableStateFlow<HomeUiState>(HomeUiState())'));
 });

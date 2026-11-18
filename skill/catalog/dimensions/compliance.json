@@ -1,0 +1,86 @@
+{
+  "id": "compliance",
+  "name": "Platform compliance",
+  "entries": [
+    {
+      "id": "target-sdk-35",
+      "name": "Target API level 35 (Google Play requirement)",
+      "era": 5,
+      "status": "current",
+      "since": "2025-08",
+      "policy": {
+        "kind": "targetSdkMin",
+        "value": 35,
+        "effective": "2025-08-31"
+      },
+      "successors": [],
+      "detect": {
+        "computed": true
+      }
+    },
+    {
+      "id": "page-size-16kb",
+      "name": "16 KB memory page size support",
+      "era": 5,
+      "status": "current",
+      "since": "2025-11",
+      "policy": {
+        "kind": "pageSizeBytes",
+        "value": 16384,
+        "effective": "2025-11-01"
+      },
+      "successors": [],
+      "detect": {
+        "computed": true
+      }
+    },
+    {
+      "id": "edge-to-edge",
+      "name": "Edge-to-edge enforcement (Android 15)",
+      "era": 5,
+      "status": "current",
+      "since": "2024-10",
+      "policy": {
+        "kind": "targetSdkEnforced",
+        "value": 35,
+        "effective": "2025-08-31"
+      },
+      "successors": [],
+      "detect": {
+        "computed": true
+      }
+    },
+    {
+      "id": "predictive-back",
+      "name": "Predictive back gesture (Android 16 default)",
+      "era": 5,
+      "status": "current",
+      "since": "2025-06",
+      "policy": {
+        "kind": "targetSdkEnforced",
+        "value": 36,
+        "effective": "2026-08-31"
+      },
+      "successors": [],
+      "detect": {
+        "computed": true
+      }
+    },
+    {
+      "id": "fgs-types",
+      "name": "Foreground service types (Android 14)",
+      "era": 4,
+      "status": "current",
+      "since": "2023-10",
+      "policy": {
+        "kind": "targetSdkEnforced",
+        "value": 34,
+        "effective": "2024-08-31"
+      },
+      "successors": [],
+      "detect": {
+        "computed": true
+      }
+    }
+  ]
+}

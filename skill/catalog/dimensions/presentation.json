@@ -1,0 +1,203 @@
+{
+  "id": "presentation",
+  "name": "Presentation pattern",
+  "entries": [
+    {
+      "id": "god-activity",
+      "name": "God Activity (UI and logic in one class)",
+      "era": 1,
+      "status": "legacy",
+      "since": "2008",
+      "successors": [
+        "mvp"
+      ],
+      "detect": {
+        "computed": true
+      }
+    },
+    {
+      "id": "mvp",
+      "name": "MVP (Model-View-Presenter)",
+      "era": 2,
+      "status": "legacy",
+      "since": "2011",
+      "successors": [
+        "mvvm-livedata"
+      ],
+      "detect": {
+        "files": [
+          "**/*Presenter.{java,kt}"
+        ],
+        "gradle": [
+          {
+            "coord": "com.hannesdorfmann.mosby3:"
+          },
+          {
+            "coord": "com.hannesdorfmann.mosby:"
+          },
+          {
+            "coord": "com.github.moxy-community:"
+          },
+          {
+            "coord": "com.arello-mobile:"
+          }
+        ]
+      }
+    },
+    {
+      "id": "mvvm-livedata",
+      "name": "MVVM with ViewModel and LiveData",
+      "era": 3,
+      "status": "legacy",
+      "since": "2017-05",
+      "successors": [
+        "mvvm-clean",
+        "udf-stateflow"
+      ],
+      "detect": {
+        "imports": [
+          "androidx.lifecycle.LiveData",
+          "androidx.lifecycle.MutableLiveData"
+        ]
+      }
+    },
+    {
+      "id": "mvvm-clean",
+      "name": "MVVM with Clean Architecture (use cases)",
+      "era": 4,
+      "status": "current",
+      "since": "2017",
+      "successors": [
+        "udf-stateflow"
+      ],
+      "detect": {
+        "files": [
+          "**/*UseCase.{kt,java}",
+          "**/*Interactor.{kt,java}"
+        ]
+      }
+    },
+    {
+      "id": "mvi",
+      "name": "MVI (Model-View-Intent)",
+      "era": 4,
+      "status": "current",
+      "since": "2017",
+      "successors": [
+        "udf-stateflow"
+      ],
+      "detect": {
+        "gradle": [
+          {
+            "coord": "org.orbit-mvi:"
+          },
+          {
+            "coord": "com.airbnb.android:mavericks"
+          },
+          {
+            "coord": "com.arkivanov.mvikotlin:"
+          }
+        ]
+      }
+    },
+    {
+      "id": "udf-stateflow",
+      "name": "Unidirectional data flow with StateFlow UI state",
+      "era": 5,
+      "status": "current",
+      "since": "2020-10",
+      "successors": [
+        "circuit-decompose"
+      ],
+      "prerequisites": [
+        {
+          "dimension": "async",
+          "anyOf": [
+            "coroutines-flow"
+          ]
+        }
+      ],
+      "detect": {
+        "content": [
+          {
+            "glob": "**/*.kt",
+            "regex": "MutableStateFlow<\\w*UiState>"
+          }
+        ]
+      }
+    },
+    {
+      "id": "circuit-decompose",
+      "name": "Circuit / Decompose / Molecule presenters",
+      "era": 6,
+      "status": "current",
+      "since": "2022",
+      "successors": [],
+      "detect": {
+        "gradle": [
+          {
+            "coord": "com.slack.circuit:"
+          },
+          {
+            "coord": "com.arkivanov.decompose:"
+          },
+          {
+            "coord": "app.cash.molecule:"
+          }
+        ]
+      }
+    },
+    {
+      "id": "viper",
+      "name": "VIPER",
+      "era": 2,
+      "status": "legacy",
+      "since": "2014",
+      "successors": [],
+      "detect": {
+        "files": [
+          "**/*Wireframe.{java,kt}"
+        ]
+      }
+    },
+    {
+      "id": "ribs",
+      "name": "RIBs (Uber)",
+      "era": 3,
+      "status": "legacy",
+      "since": "2017",
+      "successors": [],
+      "detect": {
+        "gradle": [
+          {
+            "coord": "com.uber.rib:"
+          }
+        ],
+        "imports": [
+          "com.uber.rib.core"
+        ]
+      }
+    },
+    {
+      "id": "square-workflow",
+      "name": "Square Workflow",
+      "era": 4,
+      "status": "legacy",
+      "since": "2019",
+      "successors": [],
+      "detect": {
+        "gradle": [
+          {
+            "coord": "com.squareup.workflow:"
+          },
+          {
+            "coord": "com.squareup.workflow1:"
+          }
+        ],
+        "imports": [
+          "com.squareup.workflow1"
+        ]
+      }
+    }
+  ]
+}

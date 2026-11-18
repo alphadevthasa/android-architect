@@ -1,0 +1,169 @@
+{
+  "id": "async",
+  "name": "Async and reactivity",
+  "entries": [
+    {
+      "id": "asynctask-loader",
+      "name": "AsyncTask and Loaders",
+      "era": 1,
+      "status": "deprecated",
+      "since": "2008",
+      "deprecatedSince": "2020-09",
+      "successors": [
+        "rxjava2",
+        "coroutines-flow"
+      ],
+      "detect": {
+        "imports": [
+          "android.os.AsyncTask",
+          "android.content.AsyncTaskLoader",
+          "androidx.loader.content.AsyncTaskLoader"
+        ]
+      }
+    },
+    {
+      "id": "eventbus",
+      "name": "EventBus (greenrobot)",
+      "era": 2,
+      "status": "legacy",
+      "since": "2012",
+      "successors": [
+        "rxjava2",
+        "coroutines-flow"
+      ],
+      "detect": {
+        "gradle": [
+          {
+            "coord": "org.greenrobot:eventbus"
+          }
+        ],
+        "imports": [
+          "org.greenrobot.eventbus"
+        ]
+      }
+    },
+    {
+      "id": "rxjava1",
+      "name": "RxJava 1",
+      "era": 2,
+      "status": "deprecated",
+      "since": "2014",
+      "deprecatedSince": "2018-03",
+      "successors": [
+        "rxjava2"
+      ],
+      "detect": {
+        "gradle": [
+          {
+            "coord": "io.reactivex:rxjava"
+          },
+          {
+            "coord": "io.reactivex:rxandroid"
+          }
+        ],
+        "imports": [
+          "rx.Observable",
+          "rx.schedulers"
+        ]
+      }
+    },
+    {
+      "id": "rxjava2",
+      "name": "RxJava 2",
+      "era": 3,
+      "status": "legacy",
+      "since": "2016-10",
+      "deprecatedSince": "2021-02",
+      "successors": [
+        "rxjava3",
+        "coroutines-flow"
+      ],
+      "detect": {
+        "gradle": [
+          {
+            "coord": "io.reactivex.rxjava2:"
+          }
+        ],
+        "imports": [
+          "io.reactivex.Observable",
+          "io.reactivex.Single",
+          "io.reactivex.schedulers"
+        ]
+      }
+    },
+    {
+      "id": "rxjava3",
+      "name": "RxJava 3",
+      "era": 4,
+      "status": "legacy",
+      "since": "2020-02",
+      "successors": [
+        "coroutines-flow"
+      ],
+      "detect": {
+        "gradle": [
+          {
+            "coord": "io.reactivex.rxjava3:"
+          }
+        ],
+        "imports": [
+          "io.reactivex.rxjava3"
+        ]
+      }
+    },
+    {
+      "id": "coroutines-livedata",
+      "name": "Coroutines with LiveData",
+      "era": 4,
+      "status": "current",
+      "since": "2018-09",
+      "successors": [
+        "coroutines-flow"
+      ],
+      "detect": {
+        "gradle": [
+          {
+            "coord": "androidx.lifecycle:lifecycle-livedata-ktx"
+          }
+        ],
+        "content": [
+          {
+            "glob": "**/*.kt",
+            "regex": "liveData\\s*\\{|\\.asLiveData\\("
+          }
+        ]
+      }
+    },
+    {
+      "id": "coroutines-flow",
+      "name": "Coroutines with Flow",
+      "era": 5,
+      "status": "current",
+      "since": "2019-09",
+      "successors": [],
+      "prerequisites": [
+        {
+          "dimension": "language",
+          "anyOf": [
+            "kotlin",
+            "kotlin-k2",
+            "kmp"
+          ]
+        }
+      ],
+      "detect": {
+        "gradle": [
+          {
+            "coord": "org.jetbrains.kotlinx:kotlinx-coroutines-core"
+          },
+          {
+            "coord": "org.jetbrains.kotlinx:kotlinx-coroutines-android"
+          }
+        ],
+        "imports": [
+          "kotlinx.coroutines.flow"
+        ]
+      }
+    }
+  ]
+}

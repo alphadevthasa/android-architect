@@ -1,0 +1,111 @@
+{
+  "id": "image",
+  "name": "Image loading",
+  "entries": [
+    {
+      "id": "uil",
+      "name": "Universal Image Loader",
+      "era": 1,
+      "status": "deprecated",
+      "since": "2011",
+      "deprecatedSince": "2017",
+      "successors": [
+        "picasso",
+        "glide",
+        "coil"
+      ],
+      "detect": {
+        "gradle": [
+          {
+            "coord": "com.nostra13.universalimageloader:"
+          }
+        ],
+        "imports": [
+          "com.nostra13.universalimageloader"
+        ]
+      }
+    },
+    {
+      "id": "picasso",
+      "name": "Picasso",
+      "era": 2,
+      "status": "legacy",
+      "since": "2013-05",
+      "successors": [
+        "glide",
+        "coil"
+      ],
+      "detect": {
+        "gradle": [
+          {
+            "coord": "com.squareup.picasso:"
+          }
+        ],
+        "imports": [
+          "com.squareup.picasso"
+        ]
+      }
+    },
+    {
+      "id": "glide",
+      "name": "Glide",
+      "era": 3,
+      "status": "current",
+      "since": "2013",
+      "successors": [
+        "coil"
+      ],
+      "detect": {
+        "gradle": [
+          {
+            "coord": "com.github.bumptech.glide:"
+          }
+        ],
+        "imports": [
+          "com.bumptech.glide"
+        ]
+      }
+    },
+    {
+      "id": "fresco",
+      "name": "Fresco",
+      "era": 3,
+      "status": "current",
+      "since": "2015-03",
+      "successors": [],
+      "detect": {
+        "gradle": [
+          {
+            "coord": "com.facebook.fresco:"
+          }
+        ],
+        "imports": [
+          "com.facebook.drawee",
+          "com.facebook.fresco"
+        ]
+      }
+    },
+    {
+      "id": "coil",
+      "name": "Coil",
+      "era": 4,
+      "status": "current",
+      "since": "2019-10",
+      "successors": [],
+      "detect": {
+        "gradle": [
+          {
+            "coord": "io.coil-kt:"
+          },
+          {
+            "coord": "io.coil-kt.coil3:"
+          }
+        ],
+        "imports": [
+          "coil",
+          "coil3"
+        ]
+      }
+    }
+  ]
+}

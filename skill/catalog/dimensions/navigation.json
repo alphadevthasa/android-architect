@@ -1,0 +1,182 @@
+{
+  "id": "navigation",
+  "name": "Navigation",
+  "entries": [
+    {
+      "id": "multi-activity",
+      "name": "Multiple activities with Intents",
+      "era": 1,
+      "status": "legacy",
+      "since": "2008",
+      "successors": [
+        "fragment-manual",
+        "jetpack-nav-xml"
+      ],
+      "detect": {
+        "content": [
+          {
+            "glob": "**/*.{java,kt}",
+            "regex": "startActivity(ForResult)?\\("
+          }
+        ]
+      }
+    },
+    {
+      "id": "fragment-manual",
+      "name": "Manual FragmentManager transactions",
+      "era": 2,
+      "status": "legacy",
+      "since": "2011",
+      "successors": [
+        "jetpack-nav-xml",
+        "nav-compose-string"
+      ],
+      "detect": {
+        "content": [
+          {
+            "glob": "**/*.{java,kt}",
+            "regex": "(supportFragmentManager|fragmentManager|getSupportFragmentManager\\(\\)|getFragmentManager\\(\\))\\s*\\.\\s*beginTransaction"
+          }
+        ]
+      }
+    },
+    {
+      "id": "cicerone-conductor",
+      "name": "Cicerone / Conductor routers",
+      "era": 3,
+      "status": "legacy",
+      "since": "2016",
+      "successors": [
+        "jetpack-nav-xml",
+        "nav-compose-string"
+      ],
+      "detect": {
+        "gradle": [
+          {
+            "coord": "com.github.terrakok:cicerone"
+          },
+          {
+            "coord": "ru.terrakok.cicerone:"
+          },
+          {
+            "coord": "com.bluelinelabs:conductor"
+          }
+        ]
+      }
+    },
+    {
+      "id": "jetpack-nav-xml",
+      "name": "Jetpack Navigation with XML graphs",
+      "era": 3,
+      "status": "current",
+      "since": "2018-05",
+      "successors": [
+        "nav-compose-string",
+        "nav-compose-typesafe"
+      ],
+      "detect": {
+        "gradle": [
+          {
+            "coord": "androidx.navigation:navigation-fragment"
+          },
+          {
+            "coord": "androidx.navigation:navigation-fragment-ktx"
+          },
+          {
+            "coord": "androidx.navigation:navigation-ui"
+          }
+        ],
+        "files": [
+          "**/res/navigation/*.xml"
+        ]
+      }
+    },
+    {
+      "id": "nav-compose-string",
+      "name": "Navigation Compose with string routes",
+      "era": 4,
+      "status": "legacy",
+      "since": "2020-07",
+      "successors": [
+        "nav-compose-typesafe",
+        "navigation3"
+      ],
+      "detect": {
+        "gradle": [
+          {
+            "coord": "androidx.navigation:navigation-compose"
+          }
+        ],
+        "content": [
+          {
+            "glob": "**/*.kt",
+            "regex": "composable\\(\\s*(route\\s*=\\s*)?\""
+          }
+        ]
+      }
+    },
+    {
+      "id": "nav-compose-typesafe",
+      "name": "Navigation Compose with type-safe routes",
+      "era": 5,
+      "status": "current",
+      "since": "2024-09",
+      "successors": [
+        "navigation3"
+      ],
+      "detect": {
+        "gradle": [
+          {
+            "coord": "androidx.navigation:navigation-compose",
+            "minVersion": "2.8"
+          }
+        ]
+      }
+    },
+    {
+      "id": "navigation3",
+      "name": "Navigation 3",
+      "era": 6,
+      "status": "current",
+      "since": "2025-05",
+      "successors": [],
+      "detect": {
+        "gradle": [
+          {
+            "coord": "androidx.navigation3:"
+          }
+        ]
+      }
+    },
+    {
+      "id": "voyager",
+      "name": "Voyager",
+      "era": 5,
+      "status": "current",
+      "since": "2022",
+      "successors": [],
+      "detect": {
+        "gradle": [
+          {
+            "coord": "cafe.adriel.voyager:"
+          }
+        ]
+      }
+    },
+    {
+      "id": "decompose-nav",
+      "name": "Decompose navigation",
+      "era": 5,
+      "status": "current",
+      "since": "2021",
+      "successors": [],
+      "detect": {
+        "gradle": [
+          {
+            "coord": "com.arkivanov.decompose:"
+          }
+        ]
+      }
+    }
+  ]
+}

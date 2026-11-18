@@ -1,0 +1,249 @@
+{
+  "id": "testing",
+  "name": "Testing",
+  "entries": [
+    {
+      "id": "instrumentation-robotium",
+      "name": "Robotium and raw instrumentation",
+      "era": 1,
+      "status": "deprecated",
+      "since": "2010",
+      "deprecatedSince": "2016",
+      "successors": [
+        "espresso"
+      ],
+      "detect": {
+        "gradle": [
+          {
+            "coord": "com.jayway.android.robotium:robotium-solo"
+          },
+          {
+            "coord": "com.robotium:robotium-solo"
+          }
+        ],
+        "imports": [
+          "com.robotium.solo"
+        ]
+      }
+    },
+    {
+      "id": "junit4",
+      "name": "JUnit 4",
+      "era": 2,
+      "status": "current",
+      "since": "2006",
+      "successors": [
+        "junit5"
+      ],
+      "detect": {
+        "gradle": [
+          {
+            "coord": "junit:junit"
+          }
+        ],
+        "imports": [
+          "org.junit.Test"
+        ]
+      }
+    },
+    {
+      "id": "mockito",
+      "name": "Mockito",
+      "era": 2,
+      "status": "current",
+      "since": "2008",
+      "successors": [
+        "mockk"
+      ],
+      "detect": {
+        "gradle": [
+          {
+            "coord": "org.mockito:"
+          },
+          {
+            "coord": "org.mockito.kotlin:"
+          }
+        ],
+        "imports": [
+          "org.mockito"
+        ]
+      }
+    },
+    {
+      "id": "espresso",
+      "name": "Espresso",
+      "era": 3,
+      "status": "current",
+      "since": "2013-10",
+      "successors": [
+        "compose-ui-test"
+      ],
+      "detect": {
+        "gradle": [
+          {
+            "coord": "androidx.test.espresso:"
+          }
+        ],
+        "imports": [
+          "androidx.test.espresso"
+        ]
+      }
+    },
+    {
+      "id": "mockk",
+      "name": "MockK",
+      "era": 4,
+      "status": "current",
+      "since": "2017",
+      "successors": [],
+      "detect": {
+        "gradle": [
+          {
+            "coord": "io.mockk:"
+          }
+        ],
+        "imports": [
+          "io.mockk"
+        ]
+      }
+    },
+    {
+      "id": "turbine",
+      "name": "Turbine",
+      "era": 4,
+      "status": "current",
+      "since": "2019",
+      "successors": [],
+      "detect": {
+        "gradle": [
+          {
+            "coord": "app.cash.turbine:"
+          }
+        ],
+        "imports": [
+          "app.cash.turbine"
+        ]
+      }
+    },
+    {
+      "id": "robolectric",
+      "name": "Robolectric",
+      "era": 3,
+      "status": "current",
+      "since": "2010",
+      "successors": [],
+      "detect": {
+        "gradle": [
+          {
+            "coord": "org.robolectric:"
+          }
+        ],
+        "imports": [
+          "org.robolectric"
+        ]
+      }
+    },
+    {
+      "id": "compose-ui-test",
+      "name": "Compose UI testing",
+      "era": 4,
+      "status": "current",
+      "since": "2021-07",
+      "successors": [],
+      "detect": {
+        "gradle": [
+          {
+            "coord": "androidx.compose.ui:ui-test-junit4"
+          },
+          {
+            "coord": "androidx.compose.ui:ui-test"
+          }
+        ],
+        "imports": [
+          "androidx.compose.ui.test"
+        ]
+      }
+    },
+    {
+      "id": "paparazzi",
+      "name": "Paparazzi screenshot tests",
+      "era": 5,
+      "status": "current",
+      "since": "2020",
+      "successors": [],
+      "detect": {
+        "gradle": [
+          {
+            "coord": "app.cash.paparazzi:"
+          }
+        ],
+        "plugins": [
+          "app.cash.paparazzi"
+        ],
+        "imports": [
+          "app.cash.paparazzi"
+        ]
+      }
+    },
+    {
+      "id": "roborazzi",
+      "name": "Roborazzi screenshot tests",
+      "era": 5,
+      "status": "current",
+      "since": "2022",
+      "successors": [],
+      "detect": {
+        "gradle": [
+          {
+            "coord": "io.github.takahirom.roborazzi:"
+          }
+        ],
+        "plugins": [
+          "io.github.takahirom.roborazzi"
+        ],
+        "imports": [
+          "com.github.takahirom.roborazzi"
+        ]
+      }
+    },
+    {
+      "id": "junit5",
+      "name": "JUnit 5",
+      "era": 4,
+      "status": "current",
+      "since": "2017-09",
+      "successors": [],
+      "detect": {
+        "gradle": [
+          {
+            "coord": "org.junit.jupiter:"
+          }
+        ],
+        "plugins": [
+          "de.mannodermaus.android-junit5"
+        ],
+        "imports": [
+          "org.junit.jupiter"
+        ]
+      }
+    },
+    {
+      "id": "kotest",
+      "name": "Kotest",
+      "era": 4,
+      "status": "current",
+      "since": "2018",
+      "successors": [],
+      "detect": {
+        "gradle": [
+          {
+            "coord": "io.kotest:"
+          }
+        ],
+        "imports": [
+          "io.kotest"
+        ]
+      }
+    }
+  ]
+}

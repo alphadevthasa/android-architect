@@ -6,6 +6,11 @@ export const SUPPORTED_SCHEMA_VERSION = 1;
 const STATUSES = ['current', 'legacy', 'deprecated'];
 const DATE_RE = /^\d{4}(-(0[1-9]|1[0-2]))?$/;
 const DETECT_LISTS = ['gradle', 'plugins', 'imports', 'files', 'content', 'manifest'];
+// `detect.computed` marks signals derived by the scanner (module graph, policy
+// evaluation), not by file/gradle matching. Accepted only where listed here.
+const COMPUTED_DIMENSIONS = ['modularization', 'compliance', 'build-performance'];
+const COMPUTED_ENTRIES = ['language.kotlin-k2', 'presentation.god-activity'];
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const DEFAULT_DIR = new URL('../../catalog/', import.meta.url);
 
 export class CatalogError extends Error {
@@ -19,7 +24,7 @@ export class CatalogError extends Error {
 const isStr = (v) => typeof v === 'string' && v.length > 0;
 const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 
-function validateDetect(where, detect, errs) {
+function validateDetect(where, detect, errs, computedAllowed) {
   if (!isObj(detect)) {
     errs.push(`${where}: detect must be an object`);
     return;
@@ -52,6 +57,7 @@ function validateDetect(where, detect, errs) {
   if (detect.computed !== undefined && typeof detect.computed !== 'boolean') {
     errs.push(`${where}: detect.computed must be boolean`);
   } else if (detect.computed === true) {
+    if (!computedAllowed) errs.push(`${where}: detect.computed is not allowed here`);
     signals += 1;
   }
   if (signals === 0) errs.push(`${where}: no detect signals`);
@@ -103,7 +109,18 @@ export function validateCatalog(raw) {
           errs.push(`${where}: ${k} must be YYYY or YYYY-MM`);
         }
       }
-      if (e.policy !== undefined && !isObj(e.policy)) errs.push(`${where}: policy must be an object`);
+      if (e.policy !== undefined) {
+        if (!isObj(e.policy)) errs.push(`${where}: policy must be an object`);
+        else {
+          if (e.policy.kind !== undefined && !isStr(e.policy.kind)) errs.push(`${where}: policy.kind must be a non-empty string`);
+          if (e.policy.kind === 'targetSdkMin' && !Number.isInteger(e.policy.value)) {
+            errs.push(`${where}: policy.value must be an integer for targetSdkMin`);
+          }
+          if (e.policy.effective !== undefined && !(typeof e.policy.effective === 'string' && ISO_DATE_RE.test(e.policy.effective))) {
+            errs.push(`${where}: policy.effective must be YYYY-MM-DD`);
+          }
+        }
+      }
       if (!Array.isArray(e.successors)) {
         errs.push(`${where}: successors must be an array`);
       } else {
@@ -130,7 +147,8 @@ export function validateCatalog(raw) {
           }
         }
       }
-      validateDetect(where, e.detect, errs);
+      validateDetect(where, e.detect, errs,
+        COMPUTED_DIMENSIONS.includes(d.id) || COMPUTED_ENTRIES.includes(where));
     }
     // Cycle detection by DFS over successors.
     const state = new Map();

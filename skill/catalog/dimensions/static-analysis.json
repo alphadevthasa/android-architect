@@ -1,0 +1,145 @@
+{
+  "id": "static-analysis",
+  "name": "Static analysis and formatting",
+  "entries": [
+    {
+      "id": "android-lint",
+      "name": "Android Lint",
+      "era": 1,
+      "status": "current",
+      "since": "2008",
+      "successors": [],
+      "detect": {
+        "files": [
+          "**/lint.xml"
+        ],
+        "content": [
+          {
+            "glob": "**/build.gradle*",
+            "regex": "lint(Options)?\\s*\\{"
+          }
+        ]
+      }
+    },
+    {
+      "id": "checkstyle",
+      "name": "Checkstyle",
+      "era": 1,
+      "status": "legacy",
+      "since": "2008",
+      "successors": [
+        "detekt"
+      ],
+      "detect": {
+        "plugins": [
+          "checkstyle"
+        ],
+        "files": [
+          "**/checkstyle*.xml"
+        ]
+      }
+    },
+    {
+      "id": "pmd",
+      "name": "PMD",
+      "era": 1,
+      "status": "legacy",
+      "since": "2008",
+      "successors": [
+        "detekt"
+      ],
+      "detect": {
+        "plugins": [
+          "pmd"
+        ],
+        "files": [
+          "**/pmd*.xml"
+        ]
+      }
+    },
+    {
+      "id": "findbugs-spotbugs",
+      "name": "FindBugs / SpotBugs",
+      "era": 1,
+      "status": "legacy",
+      "since": "2008",
+      "successors": [
+        "detekt"
+      ],
+      "detect": {
+        "plugins": [
+          "findbugs",
+          "com.github.spotbugs"
+        ],
+        "gradle": [
+          {
+            "coord": "com.github.spotbugs:"
+          }
+        ]
+      }
+    },
+    {
+      "id": "ktlint",
+      "name": "ktlint",
+      "era": 3,
+      "status": "current",
+      "since": "2016",
+      "successors": [],
+      "detect": {
+        "plugins": [
+          "org.jlleitschuh.gradle.ktlint"
+        ],
+        "gradle": [
+          {
+            "coord": "com.pinterest:ktlint"
+          },
+          {
+            "coord": "com.pinterest.ktlint:"
+          }
+        ],
+        "files": [
+          "**/.editorconfig"
+        ]
+      }
+    },
+    {
+      "id": "detekt",
+      "name": "detekt",
+      "era": 3,
+      "status": "current",
+      "since": "2017",
+      "successors": [],
+      "detect": {
+        "plugins": [
+          "io.gitlab.arturbosch.detekt"
+        ],
+        "gradle": [
+          {
+            "coord": "io.gitlab.arturbosch.detekt:"
+          }
+        ],
+        "files": [
+          "**/detekt*.yml"
+        ]
+      }
+    },
+    {
+      "id": "spotless",
+      "name": "Spotless",
+      "era": 3,
+      "status": "current",
+      "since": "2015",
+      "successors": [],
+      "detect": {
+        "plugins": [
+          "com.diffplug.spotless"
+        ],
+        "gradle": [
+          {
+            "coord": "com.diffplug.spotless:"
+          }
+        ]
+      }
+    }
+  ]
+}

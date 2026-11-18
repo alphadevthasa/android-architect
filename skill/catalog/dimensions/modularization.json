@@ -1,0 +1,94 @@
+{
+  "id": "modularization",
+  "name": "Modularization",
+  "entries": [
+    {
+      "id": "single-module",
+      "name": "Single module",
+      "era": 1,
+      "status": "current",
+      "since": "2008",
+      "successors": [
+        "layer-modules",
+        "feature-modules"
+      ],
+      "detect": {
+        "computed": true
+      }
+    },
+    {
+      "id": "layer-modules",
+      "name": "Layer modules (data/domain/ui)",
+      "era": 2,
+      "status": "legacy",
+      "since": "2015",
+      "successors": [
+        "feature-modules"
+      ],
+      "detect": {
+        "computed": true
+      }
+    },
+    {
+      "id": "feature-modules",
+      "name": "Feature modules",
+      "era": 3,
+      "status": "current",
+      "since": "2017",
+      "successors": [
+        "api-impl-modules"
+      ],
+      "detect": {
+        "computed": true
+      }
+    },
+    {
+      "id": "api-impl-modules",
+      "name": "API / implementation module split",
+      "era": 4,
+      "status": "current",
+      "since": "2019",
+      "successors": [
+        "monorepo-convention"
+      ],
+      "detect": {
+        "computed": true
+      }
+    },
+    {
+      "id": "dynamic-features",
+      "name": "Play Feature Delivery dynamic features",
+      "era": 3,
+      "status": "current",
+      "since": "2018-05",
+      "successors": [],
+      "detect": {
+        "computed": true
+      }
+    },
+    {
+      "id": "polyrepo-aar",
+      "name": "Polyrepo with published AARs",
+      "era": 2,
+      "status": "legacy",
+      "since": "2012",
+      "successors": [
+        "monorepo-convention"
+      ],
+      "detect": {
+        "computed": true
+      }
+    },
+    {
+      "id": "monorepo-convention",
+      "name": "Monorepo with convention plugins",
+      "era": 5,
+      "status": "current",
+      "since": "2021",
+      "successors": [],
+      "detect": {
+        "computed": true
+      }
+    }
+  ]
+}

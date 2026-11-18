@@ -5,6 +5,21 @@
   "dimensions": [
     "language",
     "build",
-    "ui"
+    "ui",
+    "presentation",
+    "navigation",
+    "async",
+    "di",
+    "networking",
+    "serialization",
+    "persistence",
+    "keyvalue",
+    "image",
+    "background",
+    "modularization",
+    "testing",
+    "static-analysis",
+    "compliance",
+    "build-performance"
   ]
 }

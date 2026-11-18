@@ -1,0 +1,102 @@
+{
+  "id": "background",
+  "name": "Background work",
+  "entries": [
+    {
+      "id": "service-alarmmanager",
+      "name": "Services and AlarmManager",
+      "era": 1,
+      "status": "legacy",
+      "since": "2008",
+      "successors": [
+        "jobscheduler",
+        "workmanager"
+      ],
+      "detect": {
+        "imports": [
+          "android.app.AlarmManager"
+        ]
+      }
+    },
+    {
+      "id": "intentservice",
+      "name": "IntentService",
+      "era": 1,
+      "status": "deprecated",
+      "since": "2008",
+      "deprecatedSince": "2020-09",
+      "successors": [
+        "workmanager"
+      ],
+      "detect": {
+        "imports": [
+          "android.app.IntentService"
+        ],
+        "content": [
+          {
+            "glob": "**/*.{java,kt}",
+            "regex": "(extends|:)\\s*IntentService\\b"
+          }
+        ]
+      }
+    },
+    {
+      "id": "jobscheduler",
+      "name": "JobScheduler",
+      "era": 2,
+      "status": "legacy",
+      "since": "2014-10",
+      "successors": [
+        "workmanager"
+      ],
+      "detect": {
+        "imports": [
+          "android.app.job.JobScheduler",
+          "android.app.job.JobService"
+        ]
+      }
+    },
+    {
+      "id": "firebase-jobdispatcher",
+      "name": "Firebase JobDispatcher",
+      "era": 2,
+      "status": "deprecated",
+      "since": "2016",
+      "deprecatedSince": "2018",
+      "successors": [
+        "workmanager"
+      ],
+      "detect": {
+        "gradle": [
+          {
+            "coord": "com.firebase:firebase-jobdispatcher"
+          }
+        ],
+        "imports": [
+          "com.firebase.jobdispatcher"
+        ]
+      }
+    },
+    {
+      "id": "workmanager",
+      "name": "WorkManager",
+      "era": 3,
+      "status": "current",
+      "since": "2018-10",
+      "successors": [],
+      "detect": {
+        "gradle": [
+          {
+            "coord": "androidx.work:work-runtime"
+          },
+          {
+            "coord": "androidx.work:work-runtime-ktx"
+          }
+        ],
+        "imports": [
+          "androidx.work"
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,96 @@
+{
+  "id": "serialization",
+  "name": "Serialization",
+  "entries": [
+    {
+      "id": "gson",
+      "name": "Gson",
+      "era": 2,
+      "status": "legacy",
+      "since": "2008",
+      "successors": [
+        "moshi",
+        "kotlinx-serialization"
+      ],
+      "detect": {
+        "gradle": [
+          {
+            "coord": "com.google.code.gson:gson"
+          }
+        ],
+        "imports": [
+          "com.google.gson"
+        ]
+      }
+    },
+    {
+      "id": "jackson",
+      "name": "Jackson",
+      "era": 2,
+      "status": "legacy",
+      "since": "2009",
+      "successors": [
+        "moshi",
+        "kotlinx-serialization"
+      ],
+      "detect": {
+        "gradle": [
+          {
+            "coord": "com.fasterxml.jackson.core:"
+          },
+          {
+            "coord": "com.fasterxml.jackson.module:"
+          }
+        ],
+        "imports": [
+          "com.fasterxml.jackson"
+        ]
+      }
+    },
+    {
+      "id": "moshi",
+      "name": "Moshi",
+      "era": 3,
+      "status": "current",
+      "since": "2015",
+      "successors": [
+        "kotlinx-serialization"
+      ],
+      "detect": {
+        "gradle": [
+          {
+            "coord": "com.squareup.moshi:"
+          }
+        ],
+        "imports": [
+          "com.squareup.moshi"
+        ]
+      }
+    },
+    {
+      "id": "kotlinx-serialization",
+      "name": "kotlinx.serialization",
+      "era": 4,
+      "status": "current",
+      "since": "2020-10",
+      "successors": [],
+      "detect": {
+        "gradle": [
+          {
+            "coord": "org.jetbrains.kotlinx:kotlinx-serialization-json"
+          },
+          {
+            "coord": "org.jetbrains.kotlinx:kotlinx-serialization-core"
+          }
+        ],
+        "plugins": [
+          "org.jetbrains.kotlin.plugin.serialization",
+          "kotlinx-serialization"
+        ],
+        "imports": [
+          "kotlinx.serialization"
+        ]
+      }
+    }
+  ]
+}
