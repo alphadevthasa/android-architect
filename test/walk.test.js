@@ -87,3 +87,22 @@ test('readLines handles CRLF and BOM', () => {
   fs.writeFileSync(f, '﻿one\r\ntwo\nthree');
   assert.deepEqual(readLines(f), ['one', 'two', 'three']);
 });
+
+test('M1: secret file patterns are case-insensitive', () => {
+  const root = mkTree(['app/Release.JKS', '.ENV', 'Local.properties', 'KEYSTORE.Properties', 'a/Google-Services.JSON', 'b.P12', 'Main.kt']);
+  assert.deepEqual(listFiles(root), ['Main.kt']);
+});
+
+test('M1: a symlink to a secret file is excluded', () => {
+  const root = mkTree(['keys/release.jks', 'Main.kt']);
+  fs.symlinkSync(path.join(root, 'keys/release.jks'), path.join(root, 'innocent.txt'));
+  fs.symlinkSync(path.join(root, 'keys/release.jks'), path.join(root, 'Upper.JKS'));
+  assert.deepEqual(listFiles(root), ['Main.kt']);
+});
+
+test('M1: a symlink into an ignored dir is excluded', () => {
+  const root = mkTree(['build/gen/G.kt', 'Main.kt']);
+  fs.symlinkSync(path.join(root, 'build/gen'), path.join(root, 'gen-link'));
+  fs.symlinkSync(path.join(root, 'build/gen/G.kt'), path.join(root, 'G-link.kt'));
+  assert.deepEqual(listFiles(root), ['Main.kt']);
+});

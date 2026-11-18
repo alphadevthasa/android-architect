@@ -13,7 +13,13 @@ const args = process.argv.slice(2);
 const cmd = args[0];
 const flag = (n) => args.includes(`--${n}`);
 const hi = args.indexOf('--home');
-const home = hi >= 0 && args[hi + 1] ? args[hi + 1] : os.homedir();
+const homeArg = hi >= 0 ? args[hi + 1] : undefined;
+const badHome = hi >= 0 && (!homeArg || homeArg.startsWith('--'));
+if (badHome) {
+  console.error(`--home needs a directory value\n${USAGE}`);
+  process.exit(1);
+}
+const home = hi >= 0 ? homeArg : os.homedir();
 
 try {
   switch (cmd) {

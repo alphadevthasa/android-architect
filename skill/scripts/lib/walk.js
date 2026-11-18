@@ -3,15 +3,16 @@ import path from 'node:path';
 
 export const IGNORED_DIRS = ['build', '.gradle', '.git', '.idea', 'node_modules', '.ai', 'graphify-out'];
 
-// Matched against file basenames. These files are never listed or read.
+// Matched case-insensitively against file basenames (link and target). These
+// files are never listed or read.
 export const SECRET_FILE_PATTERNS = [
-  /^local\.properties$/,
-  /^keystore\.properties$/,
-  /\.jks$/,
-  /\.keystore$/,
-  /\.p12$/,
-  /^google-services\.json$/,
-  /^\.env(\..*)?$/,
+  /^local\.properties$/i,
+  /^keystore\.properties$/i,
+  /\.jks$/i,
+  /\.keystore$/i,
+  /\.p12$/i,
+  /^google-services\.json$/i,
+  /^\.env(\..*)?$/i,
 ];
 
 function isSecret(name) {

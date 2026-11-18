@@ -187,3 +187,11 @@ test('foreign directory is refused without --force, allowed with it; doctor repo
   assert.ok(!fs.existsSync(path.join(t, 'mine.txt')));
   assert.ok(fs.existsSync(path.join(t, '.installed.json')));
 });
+
+test('M5: --home without a value, or followed by another flag, is a usage error', () => {
+  for (const args of [['doctor', '--home'], ['install', '--claude', '--home', '--force'], ['doctor', '--home', '--json']]) {
+    const r = run(args);
+    assert.equal(r.status, 1, args.join(' '));
+    assert.match(r.stderr, /--home/, args.join(' '));
+  }
+});
