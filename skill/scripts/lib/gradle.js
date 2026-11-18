@@ -5,6 +5,8 @@
 import { resolveAlias } from './version-catalog.js';
 
 const KEYWORDS = new Set(['val', 'var', 'def', 'if', 'else', 'for', 'while', 'return', 'exclude', 'because', 'println', 'import', 'package']);
+// A bare reference such as deps.retrofit or rootProject.ext.deps.retrofit.
+const IDENT_REF = /^[A-Za-z_][\w.]*(?:\[[^\]]*\])?\s*\)?\s*$/;
 const NOTATION_START = /^(?:["']|libs\b|projects\b|platform\b|enforcedPlatform\b|testFixtures\b|project\b|kotlin\s*\(|group\b|name\b)/;
 
 // For each char of s, true when it is inside (or delimits) a single-line string.
@@ -171,11 +173,25 @@ const STR = String.raw`(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)')`;
 
 function parseDependency(stmt, vc, lookup, line) {
   const m = /^([A-Za-z_]\w*)\s*(?:\(\s*|\s+)(.+)$/.exec(stmt);
-  if (!m || KEYWORDS.has(m[1])) return null;
+  if (!m || KEYWORDS.has(m[1])) return [];
   const configuration = m[1];
   let rest = m[2].trim();
-  if (!NOTATION_START.test(rest)) return null;
-  return parseNotation(rest, configuration, vc, lookup, line);
+  if (!NOTATION_START.test(rest) && !IDENT_REF.test(rest)) return [];
+  if (/^["']/.test(rest)) {
+    // One statement may carry several coordinates: implementation 'a:b:1', 'c:d:2'
+    const rows = [];
+    const lit = new RegExp(`^${STR}\\s*,?\\s*`);
+    let pos = rest;
+    let mm;
+    while ((mm = lit.exec(pos))) {
+      const row = parseCoordinate(mm[1] ?? mm[2], configuration, line, lookup);
+      if (row) rows.push(row);
+      pos = pos.slice(mm[0].length);
+    }
+    return rows;
+  }
+  const row = parseNotation(rest, configuration, vc, lookup, line);
+  return row ? [row] : [];
 }
 
 function parseNotation(rest, configuration, vc, lookup, line) {
@@ -193,6 +209,12 @@ function parseNotation(rest, configuration, vc, lookup, line) {
 
   const lit = new RegExp(`^${STR}`).exec(rest);
   if (lit) return parseCoordinate(lit[1] ?? lit[2], configuration, line, lookup);
+
+  const pa = /^projects((?:\.[A-Za-z_]\w*)+)/.exec(rest);
+  if (pa) {
+    const segs = pa[1].slice(1).split('.').map((x) => x.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase());
+    return { configuration, group: null, name: null, version: null, unresolved: false, project: ':' + segs.join(':'), line };
+  }
 
   const lib = /^((?:libs|projects)(?:\.[A-Za-z_][\w-]*)+)/.exec(rest);
   if (lib) {
@@ -219,6 +241,12 @@ function parseNotation(rest, configuration, vc, lookup, line) {
     }
     const { version, unresolved } = finishVersion(raw, lookup);
     return { configuration, group: g.v, name: n.v, version, unresolved, line };
+  }
+
+  if (IDENT_REF.test(rest)) {
+    const v = lookupVar(lookup, rest.replace(/\s*\)\s*$/, ''));
+    const row = typeof v === 'string' ? parseCoordinate(v, configuration, line, lookup) : null;
+    return row ?? { configuration, group: null, name: null, version: null, unresolved: true, line };
   }
   return null;
 }
@@ -276,6 +304,19 @@ function parseAndroidStmt(stmt, top, android, lookup) {
   }
 }
 
+const MAX_JOIN = 20;
+
+function parenDepth(text) {
+  const mask = stringMask(text);
+  let d = 0;
+  for (let i = 0; i < text.length; i++) {
+    if (mask[i]) continue;
+    if (text[i] === '(') d++;
+    else if (text[i] === ')') d--;
+  }
+  return d;
+}
+
 function blockName(header) {
   const m = /([A-Za-z_][\w.]*)\s*(?:\(.*\))?\s*$/.exec(header.trim());
   if (!m) return '';
@@ -294,8 +335,20 @@ export function parseBuildFile(text, kind, ctx = {}) {
     const android = result.android;
     const stack = [];
 
-    stripped.split('\n').forEach((lineText, idx) => {
+    const rawLines = stripped.split('\n');
+    for (let idx = 0; idx < rawLines.length; idx++) {
       const line = idx + 1;
+      let lineText = rawLines[idx];
+      // Join continuation lines while parentheses are unbalanced (capped, so
+      // garbage cannot swallow the file); the statement keeps its first line.
+      if (parenDepth(lineText) > 0) {
+        let joined = lineText;
+        let end = idx;
+        while (end + 1 < rawLines.length && end - idx < MAX_JOIN && parenDepth(joined) > 0) {
+          joined += ' ' + rawLines[++end].trim();
+        }
+        if (parenDepth(joined) <= 0) { lineText = joined; idx = end; }
+      }
       const mask = stringMask(lineText);
       let segStart = 0;
       const handle = (seg) => {
@@ -318,8 +371,7 @@ export function parseBuildFile(text, kind, ctx = {}) {
             const p = parsePluginStmt(stmt, vc, line);
             if (p) result.plugins.push(p);
           } else if (top === 'dependencies') {
-            const d = parseDependency(stmt, vc, lookup, line);
-            if (d) result.dependencies.push(d);
+            result.dependencies.push(...parseDependency(stmt, vc, lookup, line));
           } else if (inAndroid) {
             parseAndroidStmt(stmt, top, android, lookup);
           }
@@ -335,7 +387,7 @@ export function parseBuildFile(text, kind, ctx = {}) {
           segStart = i + 1;
         }
       }
-    });
+    }
   } catch {
     // best effort: return whatever was collected
   }

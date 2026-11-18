@@ -185,3 +185,42 @@ test('never throws on garbage', () => {
     assert.ok(parseBuildFile(s, 'groovy').plugins);
   }
 });
+
+test('typesafe project accessors', () => {
+  const d = dep('  implementation(projects.core.data)\n  implementation(projects.featureHome)', 'kts');
+  assert.equal(d[0].project, ':core:data');
+  assert.equal(d[1].project, ':feature-home');
+  assert.equal(d[0].unresolved, false);
+});
+
+test('legacy ext map refs', () => {
+  const text = `ext.deps = [retrofit: 'com.squareup.retrofit2:retrofit:2.9.0']
+dependencies {
+  implementation deps.retrofit
+  implementation rootProject.ext.deps.retrofit
+  implementation deps.missing
+}`;
+  const d = parseBuildFile(text, 'groovy').dependencies;
+  assert.equal(d.length, 3);
+  assert.equal(d[0].name, 'retrofit'); assert.equal(d[0].version, '2.9.0');
+  assert.equal(d[1].name, 'retrofit');
+  assert.equal(d[2].unresolved, true); assert.equal(d[2].group, null); assert.equal(d[2].name, null);
+});
+
+test('multiple coordinates in one statement', () => {
+  const g = dep("  implementation 'a:b:1', 'c:d:2'");
+  assert.deepEqual(g.map((x) => [x.name, x.version, x.line]), [['b', '1', 2], ['d', '2', 2]]);
+  const k = dep('  implementation("a:b:1", "c:d:2")', 'kts');
+  assert.deepEqual(k.map((x) => [x.name, x.version, x.line]), [['b', '1', 2], ['d', '2', 2]]);
+});
+
+test('multi-line call form keeps line numbers', () => {
+  const d = dep('  implementation(\n    "m:n:1"\n  )\n  implementation("p:q:2")', 'kts');
+  assert.deepEqual(d.map((x) => [x.name, x.line]), [['n', 2], ['q', 5]]);
+});
+
+test('bundles stay a visible unresolved row', () => {
+  const d = dep('  implementation(libs.bundles.net)', 'kts', { versionCatalog: parseVersionCatalog(TOML) });
+  assert.equal(d[0].unresolved, true);
+  assert.equal(d[0].alias, 'bundles.net');
+});
