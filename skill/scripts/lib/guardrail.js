@@ -144,8 +144,17 @@ export function checkRecommendations(recs, catalog, profile) {
       }
     }
 
-    // R2: prerequisites.
     const deps = ancestors(s);
+    // R6: from must be present in the profile or produced by an ancestor step.
+    if (s.from !== null) {
+      const anchored = presentIds(profile, s.dimension).has(s.from)
+        || deps.some((d) => d.dimension === s.dimension && d.to === s.from);
+      if (!anchored) {
+        add('R6-anchor', `${label}: "${s.from}" in "${s.dimension}" is not present in the profile and is not produced by any step in dependsOn`, { ...ref, dimension: s.dimension });
+      }
+    }
+
+    // R2: prerequisites.
     for (const p of catalog.entry(s.dimension, s.to).prerequisites ?? []) {
       const present = presentIds(profile, p.dimension);
       const met = p.anyOf.some((id) => present.has(id))
@@ -155,6 +164,24 @@ export function checkRecommendations(recs, catalog, profile) {
       }
     }
   });
+
+  // R6 (dimensions): current must be real, target must be present or produced by a step.
+  for (const [i, d] of (Array.isArray(recs.dimensions) ? recs.dimensions : []).entries()) {
+    if (d === null || typeof d !== 'object' || !dimIds.has(d.dimension)) continue;
+    const present = presentIds(profile, d.dimension);
+    const where = `dimensions[${i}] "${d.dimension}"`;
+    for (const id of Array.isArray(d.current) ? d.current : []) {
+      if (isStr(id) && hasEntry(d.dimension, id) && !present.has(id)) {
+        add('R6-anchor', `${where}: current entry "${id}" is not present in the profile`, { dimension: d.dimension });
+      }
+    }
+    if (isStr(d.target) && hasEntry(d.dimension, d.target) && d.label !== 'later' && d.label !== 'dont') {
+      const produced = steps.some((s) => s && s.dimension === d.dimension && s.to === d.target);
+      if (!present.has(d.target) && !produced) {
+        add('R6-anchor', `${where}: target "${d.target}" is neither present in the profile nor the target of any step`, { dimension: d.dimension });
+      }
+    }
+  }
 
   return { ok: violations.length === 0, violations };
 }

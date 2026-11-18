@@ -20,7 +20,11 @@ export function candidatePaths(profile, catalog) {
   for (const dim of catalog.dimensions) {
     const present = presentEntries(profile, dim.id);
     const current = [...present]
-      .sort((a, b) => (b.share ?? Infinity) - (a.share ?? Infinity))
+      .sort((a, b) => {
+        if ((a.share === null) !== (b.share === null)) return a.share === null ? 1 : -1;
+        if (a.share !== null && a.share !== b.share) return b.share - a.share;
+        return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+      })
       .map((e) => e.id);
     const currentSet = new Set(current);
     const next = new Set();

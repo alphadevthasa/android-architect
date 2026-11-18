@@ -35,3 +35,10 @@ test('share null counts as present', () => {
   assert.ok(!c.language.next.includes('kotlin'));
   assert.ok(!('compose' in c.ui.blockedBy));
 });
+
+test('current ordering: numbers desc, nulls after, ties by id', () => {
+  const profile = { dimensions: { language: { entries: [
+    { id: 'kmp', share: null }, { id: 'kotlin', share: null }, { id: 'java', share: 0.3 }, { id: 'java8-desugar', share: 0.7 },
+  ] } } };
+  assert.deepEqual(candidatePaths(profile, catalog).language.current, ['java8-desugar', 'java', 'kmp', 'kotlin']);
+});
