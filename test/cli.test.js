@@ -111,3 +111,79 @@ test('doctor detects graphify', () => {
 test('version prints package and catalog version', () => {
   assert.match(ok(['version']).trim(), new RegExp(`^android-architect ${pkg.version.replace(/\./g, '\\.')} \\(catalog .+\\)$`));
 });
+
+test('skills dir symlink: install lands in real dir, nothing else touched', () => {
+  const home = tmp();
+  const real = tmp();
+  fs.writeFileSync(path.join(real, 'other.txt'), 'o');
+  fs.mkdirSync(path.join(home, '.claude'));
+  fs.symlinkSync(real, path.join(home, '.claude/skills'));
+  ok(['install', '--claude', '--home', home]);
+  assert.ok(fs.existsSync(path.join(real, 'android-architect/.installed.json')));
+  assert.equal(fs.readFileSync(path.join(real, 'other.txt'), 'utf8'), 'o');
+  assert.deepEqual(fs.readdirSync(real).sort(), ['android-architect', 'other.txt']);
+});
+
+test('source overlapping target is refused and nothing is touched', async () => {
+  const { install } = await import('../skill/scripts/lib/install.js');
+  const home = tmp();
+  const target = path.join(home, '.claude/skills/android-architect');
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.cpSync(path.join(root, 'skill'), target, { recursive: true });
+  fs.writeFileSync(path.join(target, '.installed.json'), '{}');
+  assert.throws(() => install({ home, claude: true, sourceDir: target }), /overlap/);
+  assert.ok(fs.existsSync(path.join(target, 'scripts/scan.js')));
+  // source containing the target
+  assert.throws(() => install({ home, claude: true, sourceDir: path.join(home, '.claude') }), /overlap|catalog/);
+  assert.ok(fs.existsSync(path.join(target, 'scripts/scan.js')));
+});
+
+test('failed copy leaves old install intact and no staging dir', async () => {
+  const { install } = await import('../skill/scripts/lib/install.js');
+  const home = tmp();
+  ok(['install', '--claude', '--home', home]);
+  const skills = path.join(home, '.claude/skills');
+  const before = fs.readFileSync(path.join(skills, 'android-architect/.installed.json'), 'utf8');
+  const boom = (from, to) => {
+    fs.mkdirSync(to);
+    fs.writeFileSync(path.join(to, 'partial'), 'x');
+    throw new Error('disk full');
+  };
+  assert.throws(() => install({ home, claude: true, sourceDir: path.join(root, 'skill'), _copy: boom }), /disk full/);
+  assert.equal(fs.readFileSync(path.join(skills, 'android-architect/.installed.json'), 'utf8'), before);
+  assert.ok(fs.existsSync(path.join(skills, 'android-architect/scripts/scan.js')));
+  assert.deepEqual(fs.readdirSync(skills), ['android-architect']);
+});
+
+test('second harness failure names the already installed one', async () => {
+  const { install } = await import('../skill/scripts/lib/install.js');
+  const home = tmp();
+  let n = 0;
+  const flaky = (from, to) => {
+    if (++n === 2) throw new Error('boom');
+    fs.cpSync(from, to, { recursive: true });
+  };
+  assert.throws(
+    () => install({ home, claude: true, codex: true, sourceDir: path.join(root, 'skill'), _copy: flaky }),
+    (e) => /boom/.test(e.message) && e.message.includes(path.join(fs.realpathSync(home), '.claude/skills/android-architect')),
+  );
+});
+
+test('foreign directory is refused without --force, allowed with it; doctor reports partial', () => {
+  const home = tmp();
+  const t = path.join(home, '.claude/skills/android-architect');
+  fs.mkdirSync(t, { recursive: true });
+  fs.writeFileSync(path.join(t, 'mine.txt'), 'm');
+  const d = JSON.parse(ok(['doctor', '--json', '--home', home]));
+  assert.equal(d.harnesses[0].installed, false);
+  assert.equal(d.harnesses[0].partial, true);
+  let r = run(['install', '--claude', '--home', home]);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /--force/);
+  r = run(['uninstall', '--home', home]);
+  assert.equal(r.status, 1);
+  assert.ok(fs.existsSync(path.join(t, 'mine.txt')));
+  ok(['install', '--claude', '--force', '--home', home]);
+  assert.ok(!fs.existsSync(path.join(t, 'mine.txt')));
+  assert.ok(fs.existsSync(path.join(t, '.installed.json')));
+});
