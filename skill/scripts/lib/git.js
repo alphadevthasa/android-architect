@@ -71,9 +71,20 @@ export function addToExclude(root, patterns) {
   return { added };
 }
 
+function insideGitTree(root) {
+  let dir = path.resolve(root);
+  for (;;) {
+    if (fs.existsSync(path.join(dir, '.git'))) return true;
+    const up = path.dirname(dir);
+    if (up === dir) return false;
+    dir = up;
+  }
+}
+
 /**
  * Subset of relPaths (relative to root, POSIX) that git ignores, via one `git check-ignore --stdin` process.
- * Tracked files are not reported as ignored. Not a repo, git missing, or none ignored gives an empty set.
+ * Tracked files are not reported as ignored. Fails closed: inside a git repo any git error other than
+ * "none ignored" (exit 1) throws. Only a missing git or a directory outside any repo gives an empty set.
  */
 export function ignoredPaths(root, relPaths) {
   if (relPaths.length === 0) return new Set();
@@ -83,11 +94,15 @@ export function ignoredPaths(root, relPaths) {
       cwd: root,
       input: relPaths.join('\0'),
       encoding: 'utf8',
-      stdio: ['pipe', 'pipe', 'ignore'],
+      stdio: ['pipe', 'pipe', 'pipe'],
       maxBuffer: 64 * 1024 * 1024,
     });
-  } catch {
-    return new Set(); // exit 1 = none ignored; other failures = no usable git
+  } catch (err) {
+    if (err.code === 'ENOENT' || err.status === 1) return new Set();
+    const stderr = String(err.stderr ?? '');
+    if (/not a git repository/i.test(stderr) && !insideGitTree(root)) return new Set();
+    const first = stderr.split(/\r?\n/).find((l) => l.trim() !== '') ?? err.message.split('\n')[0];
+    throw new Error('could not determine git-ignored files: ' + first);
   }
   return new Set(out.split('\0').filter(Boolean));
 }

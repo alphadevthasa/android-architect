@@ -28,7 +28,12 @@ export function main(argv) {
     fail(2, `not an Android/Gradle project: ${argv[0]}`);
   }
   const catalog = loadCatalog();
-  const profile = detectStack(root, catalog);
+  let profile;
+  try {
+    profile = detectStack(root, catalog);
+  } catch (e) {
+    fail(1, e.message);
+  }
   process.stdout.write(JSON.stringify(candidatePaths(profile, catalog), null, 2) + '\n');
 }
 

@@ -41,13 +41,16 @@ export function listFiles(root, opts = {}) {
   const visited = new Set([realRoot]);
   const results = [];
   const pendingLinks = [];
+  const checkAs = new Map(); // listed path reached through a symlink -> real in-root path git can check
 
   const targetIgnored = (realTarget) =>
     path.relative(realRoot, realTarget).split(path.sep).some((seg) => ignored.has(seg));
 
+  const realRel = (abs) => path.relative(realRoot, fs.realpathSync(abs)).split(path.sep).join('/');
+
   // Walk real (non-symlink) directories, claiming each real path. Symlinks are
   // deferred so the canonical path of a directory always wins over a link path.
-  const walkReal = (startAbs, startRel) => {
+  const walkReal = (startAbs, startRel, viaLink = false) => {
     const stack = [{ abs: startAbs, rel: startRel }];
     while (stack.length > 0) {
       const { abs, rel } = stack.pop();
@@ -71,6 +74,7 @@ export function listFiles(root, opts = {}) {
           stack.push({ abs: entryAbs, rel: entryRel });
         } else if (entry.isFile() && !isSecret(name)) {
           results.push(entryRel);
+          if (viaLink) checkAs.set(entryRel, realRel(entryAbs));
         }
       }
     }
@@ -91,16 +95,19 @@ export function listFiles(root, opts = {}) {
     }
     if (!isInside(realRoot, real) || targetIgnored(real)) continue;
     if (st.isFile()) {
-      if (!isSecret(link.name) && !isSecret(path.basename(real))) results.push(link.rel);
+      if (!isSecret(link.name) && !isSecret(path.basename(real))) {
+        results.push(link.rel);
+        checkAs.set(link.rel, realRel(link.abs));
+      }
     } else if (st.isDirectory() && !visited.has(real)) {
       visited.add(real);
-      walkReal(link.abs, link.rel);
+      walkReal(link.abs, link.rel, true);
     }
   }
   results.sort();
   if (!opts.gitignore) return results;
-  const hidden = ignoredPaths(root, results);
-  return hidden.size === 0 ? results : results.filter((f) => !hidden.has(f));
+  const hidden = ignoredPaths(root, [...new Set(results.map((f) => checkAs.get(f) ?? f))]);
+  return hidden.size === 0 ? results : results.filter((f) => !hidden.has(checkAs.get(f) ?? f));
 }
 
 /** Read a UTF-8 file as lines; index i is line i + 1. Strips a leading BOM. */

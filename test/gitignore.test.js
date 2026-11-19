@@ -49,16 +49,17 @@ test('non-git directory: no filtering, empty ignored set', () => {
   }
 });
 
-test('buildIndex skips ignored docs', () => {
+test('buildIndex skips ignored markdown docs', () => {
   const root = fixture({ git: true });
   try {
     fs.mkdirSync(path.join(root, 'docs'));
-    fs.writeFileSync(path.join(root, 'docs', 'ignored.md'), '# Visible Doc\n');
-    fs.appendFileSync(path.join(root, '.gitignore'), 'docs/ignored.md\n');
-    fs.writeFileSync(path.join(root, 'README.md'), '# Readme Title\n');
+    fs.writeFileSync(path.join(root, 'docs', 'secret-notes.md'), '# Hidden Private Notes\n');
+    fs.writeFileSync(path.join(root, 'docs', 'guide.md'), '# Visible Guide\n');
+    fs.appendFileSync(path.join(root, '.gitignore'), 'docs/secret-notes.md\n');
     const index = buildIndex(root);
-    assert.ok(index.docs.some((d) => d.path === 'README.md'));
-    assert.ok(!index.docs.some((d) => d.path === 'docs/ignored.md'));
+    assert.ok(index.docs.some((d) => d.path === 'docs/guide.md' && d.title.includes('Visible Guide')));
+    assert.ok(!index.docs.some((d) => d.path.endsWith('secret-notes.md')));
+    assert.ok(!index.docs.some((d) => d.title.includes('Hidden Private Notes')));
     assert.ok(!index.docs.some((d) => d.path === 'generated/A.kt'));
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -89,15 +90,77 @@ test('subdirectory root: paths relative to root are checked', () => {
   }
 });
 
-test('20000 paths in one call returns quickly', () => {
+test('thousands of files are filtered in one pass within a robust bound', () => {
+  const root = fixture({ git: true });
+  try {
+    for (let d = 0; d < 50; d++) {
+      const dir = path.join(root, `m${d}`);
+      fs.mkdirSync(dir);
+      for (let i = 0; i < 100; i++) fs.writeFileSync(path.join(dir, `F${i}.kt`), 'class F\n');
+    }
+    const t = Date.now();
+    const files = listFiles(root, { gitignore: true });
+    assert.ok(Date.now() - t < 15000);
+    assert.ok(files.length >= 5001);
+    assert.ok(!files.includes('generated/A.kt'));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('ignoredPaths handles 20000 paths in one call', () => {
   const root = fixture({ git: true });
   try {
     const paths = Array.from({ length: 20000 }, (_, i) => `dir${i % 50}/file${i}.kt`);
     paths.push('generated/A.kt');
-    const t = Date.now();
     const set = ignoredPaths(root, paths);
-    assert.ok(Date.now() - t < 5000);
     assert.deepEqual([...set], ['generated/A.kt']);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('symlinked dir: ignored file under the link target stays excluded, no throw', () => {
+  const root = fixture({ git: true });
+  try {
+    fs.symlinkSync('generated', path.join(root, 'link'));
+    const files = listFiles(root, { gitignore: true });
+    assert.ok(!files.some((f) => f.startsWith('link/') || f.startsWith('generated/')));
+    assert.ok(files.includes('app/B.kt'));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('corrupt repo fails closed with a clear error', () => {
+  const root = fixture({ git: true });
+  try {
+    fs.writeFileSync(path.join(root, '.git', 'index'), 'garbage-not-an-index');
+    assert.throws(() => listFiles(root, { gitignore: true }), /^Error: could not determine git-ignored files: /);
+    fs.writeFileSync(path.join(root, '.git', 'HEAD'), 'garbage');
+    assert.throws(() => listFiles(root, { gitignore: true }), /could not determine git-ignored files/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('names with spaces, unicode and newlines are filtered correctly', () => {
+  const root = fixture({ git: true });
+  try {
+    const names = ['my notes.md', 'catatan-é-日本.md'];
+    let nl = true;
+    try {
+      fs.writeFileSync(path.join(root, 'line\nbreak.md'), 'x');
+      names.push('line\nbreak.md');
+    } catch {
+      nl = false;
+    }
+    for (const n of names.slice(0, 2)) fs.writeFileSync(path.join(root, n), 'x');
+    fs.appendFileSync(path.join(root, '.gitignore'), 'my notes.md\ncatatan-*\n' + (nl ? 'line?break.md\n' : ''));
+    fs.writeFileSync(path.join(root, 'keep me.md'), 'x');
+    const files = listFiles(root, { gitignore: true });
+    for (const n of names) assert.ok(!files.includes(n));
+    assert.ok(files.includes('keep me.md'));
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

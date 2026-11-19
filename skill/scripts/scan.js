@@ -50,7 +50,12 @@ export function main(argv) {
     fail(2, `not an Android/Gradle project: ${opts.root}`);
   }
   const catalog = loadCatalog();
-  const profile = detectStack(root, catalog);
+  let profile;
+  try {
+    profile = detectStack(root, catalog);
+  } catch (e) {
+    fail(1, e.message);
+  }
   const text = opts.format === 'md' ? renderProfileMarkdown(profile, catalog) : JSON.stringify(profile, null, 2) + '\n';
   if (opts.out) fs.writeFileSync(path.resolve(opts.out), text);
   else process.stdout.write(text);

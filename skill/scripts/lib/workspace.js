@@ -42,7 +42,7 @@ function appliesPublish(module, text) {
 }
 
 function moduleRows(root) {
-  const modules = discoverModules(root, listFiles(root));
+  const modules = discoverModules(root, listFiles(root, { gitignore: true }));
   const rootBuild = ['build.gradle.kts', 'build.gradle'].find((f) => fs.existsSync(path.join(root, f)));
   const rootText = rootBuild ? readStripped(root, rootBuild) : '';
   return { modules, rootText };

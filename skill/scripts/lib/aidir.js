@@ -199,7 +199,7 @@ export function writeAiDir(
     block: isMember ? hubWorkflows(readTemplate('pointer.md', templatesDir), workspace.hub) : readTemplate('pointer.md', templatesDir),
     write: (rel, content) => put(rel, content),
   });
-  const files = listFiles(root);
+  const files = listFiles(root, { gitignore: true });
   const profile = detectStack(root, catalog);
   const modules = discoverModules(root, files);
   const date = now.toISOString().slice(0, 10);

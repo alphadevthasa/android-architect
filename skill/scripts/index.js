@@ -59,11 +59,16 @@ function build(opts) {
     fail(2, `not an Android/Gradle project: ${opts.positional}`);
   }
   const commit = headCommit(root);
-  const index = buildIndex(root, {
-    now: new Date(),
-    commit,
-    catalogVersion: loadCatalog().catalogVersion,
-  });
+  let index;
+  try {
+    index = buildIndex(root, {
+      now: new Date(),
+      commit,
+      catalogVersion: loadCatalog().catalogVersion,
+    });
+  } catch (e) {
+    fail(1, e.message);
+  }
   const out = path.resolve(opts.out ?? path.join(root, '.ai', 'index', 'index.json'));
   fs.mkdirSync(path.dirname(out), { recursive: true });
   fs.writeFileSync(out, JSON.stringify(index) + '\n');
