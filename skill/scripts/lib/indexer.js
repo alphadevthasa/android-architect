@@ -3,6 +3,7 @@ import path from 'node:path';
 import { listFiles, readLines } from './walk.js';
 import { discoverModules } from './modules.js';
 import { tokenize } from './tokenize.js';
+import { redact } from './redact.js';
 import { buildBm25, scoreBm25 } from './bm25.js';
 
 const K1 = 1.2;
@@ -21,7 +22,12 @@ function smallEnough(abs) {
   }
 }
 
+/** Lines of a text with secrets replaced by placeholders (line numbers are preserved). */
+const redactLines = (lines) => redact(lines.join('\n')).text.split('\n');
+const tokenizeSafe = (text) => tokenize(redact(text).text);
+
 function sourceUnits(rel, lines) {
+  lines = redactLines(lines);
   const fileTokens = [...tokenize(path.posix.basename(rel))];
   const decls = [];
   lines.forEach((text, i) => {
@@ -37,6 +43,7 @@ function sourceUnits(rel, lines) {
 }
 
 function markdownUnits(rel, lines) {
+  lines = redactLines(lines);
   const units = [];
   let cur = null;
   let fence = false;
@@ -55,9 +62,9 @@ function markdownUnits(rel, lines) {
 
 function gradleUnit(m) {
   const tokens = [];
-  for (const p of m.build.plugins) tokens.push(...tokenize(p.id));
+  for (const p of m.build.plugins) tokens.push(...tokenizeSafe(p.id));
   for (const d of m.build.dependencies) {
-    for (const part of [d.group, d.name, d.alias]) if (part) tokens.push(...tokenize(part));
+    for (const part of [d.group, d.name, d.alias]) if (part) tokens.push(...tokenizeSafe(part));
   }
   return { title: m.path, line: 1, tokens };
 }

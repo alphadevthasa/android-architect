@@ -13,6 +13,12 @@ export const SECRET_FILE_PATTERNS = [
   /\.p12$/i,
   /^google-services\.json$/i,
   /^\.env(\..*)?$/i,
+  /^signing\.properties$/i,
+  /^secrets\.properties$/i,
+  /\.pem$/i,
+  /\.key$/i,
+  /^credentials\.json$/i,
+  /^service-account.*\.json$/i,
 ];
 
 function isSecret(name) {

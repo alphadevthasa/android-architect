@@ -13,6 +13,7 @@ import { sha256File, hashTree } from './hash.js';
 import { MANIFEST_SCHEMA_VERSION, readManifest, writeManifest } from './manifest.js';
 import { readTemplate, renderReadme, renderKnowledge } from './knowledge.js';
 import { applyPointers } from './pointers.js';
+import { redact } from './redact.js';
 
 const DEFAULT_SKILL_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const WORKFLOWS = ['01-read-context.md', '02-plan.md', '03-implement.md', '04-review.md'];
@@ -162,6 +163,10 @@ export function writeAiDir(
     written.add(`.ai/${rel}`);
   };
 
+  // Generated texts (knowledge, README, candidates, refresh report) go through redact(); vendored tool sources and the
+  // manifest (hashes) are written as they are.
+  const putRedacted = (rel, text) => putAi(rel, redact(text).text);
+
   preflight(root, { local });
 
   // Vendor sources are read into memory before the first write, and must not live inside .ai.
@@ -206,9 +211,9 @@ export function writeAiDir(
     { toolVersion, catalogVersion: catalog.catalogVersion, date, commit, mode, workspace: workspaceLabel(workspace, repos) },
     templatesDir,
   );
-  putAi('README.md', isMember ? hubWorkflows(readme, workspace.hub) + memberNote(workspace.hub) : readme);
-  for (const [rel, text] of Object.entries(renderKnowledge(profile, modules, catalog, meta))) putAi(rel, text);
-  putAi(
+  putRedacted('README.md', isMember ? hubWorkflows(readme, workspace.hub) + memberNote(workspace.hub) : readme);
+  for (const [rel, text] of Object.entries(renderKnowledge(profile, modules, catalog, meta))) putRedacted(rel, text);
+  putRedacted(
     'candidates.json',
     JSON.stringify(
       { catalogVersion: catalog.catalogVersion, generatedAt: now.toISOString(), candidates: candidatePaths(profile, catalog) },
@@ -283,7 +288,7 @@ export function writeAiDir(
   const extra = typeof extraGenerated === 'function'
     ? extraGenerated({ written: [...written].sort(byText), kept: [...kept].sort(byText), conflicts: [...conflicts].sort(byText), commit })
     : extraGenerated ?? {};
-  for (const [rel, text] of Object.entries(extra)) putAi(rel, text);
+  for (const [rel, text] of Object.entries(extra)) putRedacted(rel, text);
 
   writeManifest(aiDir, {
     schemaVersion: MANIFEST_SCHEMA_VERSION,
