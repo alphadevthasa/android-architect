@@ -67,7 +67,7 @@ export function parseAdr(text, file) {
   if (!STATUSES.includes(out.status)) {
     throw new Error(`${file}: status must be one of ${STATUSES.join(', ')}, got "${out.status}"`);
   }
-  if (out.status === 'rejected' && (out.dimension === '' || out.target === '')) {
+  if (out.status === 'rejected' && (out.dimension.trim() === '' || out.target.trim() === '')) {
     throw new Error(`${file}: rejected ADR needs dimension and target`);
   }
   return { ...out, file };

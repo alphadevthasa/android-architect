@@ -57,6 +57,8 @@ test('parseAdr rejects unsafe or invalid front matter, prefixed with the file na
     ['unknown key', fm('id: "1"\ntitle: x\nstatus: proposed\nowner: me')],
     ['bad status', fm('id: "1"\ntitle: x\nstatus: maybe')],
     ['multi-line value', fm('id: "1"\ntitle: x\n  continued\nstatus: proposed')],
+    ['single quotes', fm("id: \"1\"\ntitle: 'x'\nstatus: proposed")],
+    ['blank dimension', fm('id: "1"\ntitle: x\nstatus: rejected\ndimension: "  "\ntarget: ktor-client')],
     ['rejected without target', fm('id: "1"\ntitle: x\nstatus: rejected\ndimension: networking')],
   ];
   for (const [name, text] of cases) {
@@ -131,4 +133,13 @@ test('loadAdrs skips the template, sorts by name, and recommend-check honours --
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('the ADR example in recommendations.schema.md parses', () => {
+  const doc = fs.readFileSync(new URL('../skill/catalog/recommendations.schema.md', import.meta.url), 'utf8');
+  const block = /## ADR front matter[\s\S]*?```\n(---\n[\s\S]*?\n---)\n```/.exec(doc);
+  assert.ok(block, 'example block found');
+  const a = parseAdr(block[1], 'schema-example.md');
+  assert.equal(a.status, 'rejected');
+  assert.deepEqual(a.reopenIf, ['present:kmp']);
 });

@@ -43,14 +43,18 @@ ADR files (`.ai/knowledge/adr/*.md`) start with a front matter block between two
 ---
 id: "0001"
 title: Keep OkHttp and Retrofit
-status: rejected        # proposed | accepted | superseded | rejected
+status: rejected
 date: 2026-11-19
-dimension: networking   # required when status is rejected
-target: ktor-client     # required when status is rejected
+dimension: networking
+target: ktor-client
 reopenIf:
   - present:kmp
 reason: "Why it was rejected."
 ---
 ```
+
+- `status` is one of `proposed`, `accepted`, `superseded`, `rejected`.
+- `dimension` and `target` are required (non-blank) when `status` is `rejected`.
+- No inline comments; values are bare or double-quoted; single quotes are rejected.
 
 `reopenIf` conditions use `present:<entryId>` or `absent:<entryId>`, checked across all profile dimensions (an entry is present when `units > 0`, `share > 0`, or `share` is null). Any other text is a human note and never reopens the ADR.
