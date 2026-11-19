@@ -24,7 +24,9 @@ remove catalog entries and cannot add dimensions. The base catalog vendored into
 ```
 
 An entry has `id`, `name`, `era` (integer >= 1), `status`, `successors` (ids, may be empty) and `detect` with at least one
-of `gradle` (`{ "coord": "group:artifact" }`), `plugins`, `imports`, `files`, `content` (`{ "glob", "regex" }`) or `manifest`.
+of `gradle` (`{ "coord": "group:artifact" }`), `plugins`, `imports`, `files` (path globs, see below), `content` or `manifest`.
+A `content` signal is `{ "contains": "<literal text>" }` (a case-sensitive substring, 1 to 200 characters, matched per
+line in `.kt` and `.java` files); add `"glob"` (same grammar as `files`) to look in other files.
 
 ## Safety rules
 
@@ -34,12 +36,15 @@ Override files are untrusted text, so they are checked before anything is read o
 - Strict JSON, `schemaVersion` 1. Strings are at most 500 characters.
 - An entry id must not already exist in its dimension (status pins are the way to change an existing entry).
 - `detect.computed` is not allowed.
-- Every `detect.content[].regex` is at most 200 characters, compiles without flags and has no nested quantifier such as
-  `(a+)+`. Globs in `detect.files` and `detect.content[].glob` are at most 200 characters.
+- Regular expressions are not allowed: a `regex` key in an override entry is rejected. Use `contains` for text.
+- Globs (`detect.files`, `detect.content[].glob`) use a small grammar: literal path segments, an optional single leading
+  `**/`, at most one `*` per segment, at most 2 `*` in total (a `**` counts as one), no `?`, braces or classes, at most 200
+  characters. `**/Network*.kt` and `app/src/main/AndroidManifest.xml` are fine; `*a*a*b` and `**/*Net*.kt` are not.
 - `successors` and `prerequisites` may reference base or override entries only; successors must not form a cycle.
 
-A status pin shows up as a status change in the refresh report the first time it is applied, because the previous
-catalog (the vendored base) did not have it. Pass `--no-overrides` to `scan.js` or `candidates.js` to ignore this folder.
+Active pins (with their reasons) and added entries are listed in `knowledge/architecture-current.md` and in the refresh
+report, which also reports pins and entries added, removed or changed since the previous run (`overrides` in the JSON
+report). They do not appear under the catalog status changes. Pass `--no-overrides` to `scan.js` or `candidates.js` to ignore this folder.
 
 ## Example
 

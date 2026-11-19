@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadCatalog } from './catalog.js';
-import { loadCatalogWithOverrides, baseVersion } from './overrides.js';
+import { baseVersion } from './overrides.js';
 import { detectStack } from './detect.js';
 import { candidatePaths } from './candidates.js';
 import { checkRecommendations } from './guardrail.js';
@@ -64,7 +64,7 @@ function tryLoadCatalog(dir) {
   }
 }
 
-function diffRecommendations(recs, oldCatalog, newCatalog, profile, adrs, notes) {
+function diffRecommendations(recs, oldCatalog, newCatalog, newBase, profile, adrs, notes) {
   const checked = recs !== null && typeof recs === 'object' && !Array.isArray(recs);
   if (checked && recs.catalogVersion !== baseVersion(newCatalog) && recs.catalogVersion !== newCatalog.catalogVersion) {
     notes.push(`recommendations.json was written for catalog ${recs.catalogVersion}; checked against ${baseVersion(newCatalog)}`);
@@ -86,7 +86,7 @@ function diffRecommendations(recs, oldCatalog, newCatalog, profile, adrs, notes)
     for (const s of Array.isArray(recs.steps) ? recs.steps : []) add(s?.dimension, s?.to);
     for (const { dimension, id } of [...refs.values()].sort((a, b) => byText(`${a.dimension}/${a.id}`, `${b.dimension}/${b.id}`))) {
       const before = oldCatalog.entry(dimension, id);
-      const after = newCatalog.entry(dimension, id);
+      const after = newBase.entry(dimension, id);
       if (!before) continue;
       const to = after ? after.status : 'removed';
       if (before.status !== to) statusChanges.push({ dimension, id, from: before.status, to });
@@ -97,11 +97,31 @@ function diffRecommendations(recs, oldCatalog, newCatalog, profile, adrs, notes)
     }
     for (const d of [...targets.values()].sort((a, b) => byText(`${a.dimension}/${a.target}`, `${b.dimension}/${b.target}`))) {
       const before = new Set(oldCatalog.entry(d.dimension, d.target)?.successors ?? []);
-      const successors = (newCatalog.entry(d.dimension, d.target)?.successors ?? []).filter((s) => !before.has(s));
+      const successors = (newBase.entry(d.dimension, d.target)?.successors ?? []).filter((s) => !before.has(s));
       if (successors.length && oldCatalog.entry(d.dimension, d.target)) newOptions.push({ dimension: d.dimension, target: d.target, successors });
     }
   }
   return { violations, statusChanges, newOptions };
+}
+
+/** Pins and added entries compared with the previous manifest (absent fields count as none). */
+function diffOverrides(manifest, catalog) {
+  const prevPins = manifest.overridePins ?? {};
+  const prevAdded = new Set(manifest.overrideAdded ?? []);
+  const o = catalog.overridden ?? { added: [], pins: {} };
+  const pins = Object.fromEntries(Object.entries(o.pins ?? {}).map(([k, v]) => [k, v.status]));
+  const keys = (obj) => Object.keys(obj).sort(byText);
+  return {
+    pinsAdded: keys(pins).filter((k) => !(k in prevPins)).map((k) => ({ entry: k, status: pins[k] })),
+    pinsRemoved: keys(prevPins).filter((k) => !(k in pins)).map((k) => ({ entry: k, status: prevPins[k] })),
+    pinsChanged: keys(pins).filter((k) => k in prevPins && prevPins[k] !== pins[k]).map((k) => ({ entry: k, from: prevPins[k], to: pins[k] })),
+    entriesAdded: o.added.filter((id) => !prevAdded.has(id)).sort(byText),
+    entriesRemoved: [...prevAdded].filter((id) => !o.added.includes(id)).sort(byText),
+    active: {
+      pins: keys(pins).map((k) => ({ entry: k, status: pins[k], reason: o.pins[k].reason })),
+      entries: [...o.added].sort(byText),
+    },
+  };
 }
 
 function renderReport(report, meta) {
@@ -123,6 +143,20 @@ function renderReport(report, meta) {
     lines.push(`- Status changes: ${r.statusChanges.length}`, ...r.statusChanges.map((c) => `  - ${c.dimension}.${c.id}: ${c.from} -> ${c.to}`));
     lines.push(`- New options: ${r.newOptions.length}`, ...r.newOptions.map((o) => `  - ${o.dimension}.${o.target}: new successors [${o.successors.join(', ')}]`));
   }
+  const ov = report.overrides;
+  lines.push('', '## Catalog overrides', '');
+  lines.push(`- Files: ${report.overrideFiles.length ? report.overrideFiles.join(', ') : 'none'}`);
+  lines.push(`- Active pins: ${ov.active.pins.length}`, ...ov.active.pins.map((p) => `  - ${p.entry}: ${p.status} (reason: ${p.reason})`));
+  lines.push(`- Added entries: ${ov.active.entries.length}`, ...ov.active.entries.map((e) => `  - ${e}`));
+  lines.push('- Changes since the last run:');
+  const changes = [
+    ...ov.pinsAdded.map((p) => `pin added: ${p.entry} -> ${p.status}`),
+    ...ov.pinsRemoved.map((p) => `pin removed: ${p.entry} (was ${p.status})`),
+    ...ov.pinsChanged.map((p) => `pin changed: ${p.entry} ${p.from} -> ${p.to}`),
+    ...ov.entriesAdded.map((e) => `entry added: ${e}`),
+    ...ov.entriesRemoved.map((e) => `entry removed: ${e}`),
+  ];
+  lines.push(...(changes.length ? changes.map((c) => `  - ${c}`) : ['  - none']));
   lines.push('', '## Rejections', '');
   lines.push(...list(report.rejections.reopened.map((r) => `${r.dimension}.${r.target} can be reopened (${r.condition}), see ${r.adr.file}`), '- no reopened rejections'));
   lines.push('', '## Files', '');
@@ -163,7 +197,7 @@ export function refreshAiDir(root, { now = new Date(), catalogDir, skillDir = DE
   const local = manifest.mode === 'local';
   const workspace = manifest.workspace ?? null;
   const isMember = workspace?.role === 'member';
-  preflight(root, { local, catalogDir });
+  const loaded = preflight(root, { local, catalogDir });
   migrateLayout(aiDir, manifest.schemaVersion, now);
 
   const notes = [];
@@ -173,9 +207,11 @@ export function refreshAiDir(root, { now = new Date(), catalogDir, skillDir = DE
   if (!oldCatalog) notes.push('the previous catalog could not be read from .ai/tools/catalog; status and new-option diffs are empty');
   if (!oldSnapshot?.candidates) notes.push('the previous .ai/candidates.json could not be read; candidate diff is empty');
 
-  // New side = base + project overrides. The old side stays the previously vendored base catalog, so a status pin shows
-  // up as a status change the first time it is applied.
-  const newCatalog = loadCatalogWithOverrides(catalogDir, root).catalog;
+  // New side = base + project overrides for detection and the guardrail. Status changes and new options compare the old
+  // vendored base with the new BASE, so pins never appear there; they are reported under `overrides`, diffed against the
+  // previous manifest.
+  const newCatalog = loaded.catalog;
+  const newBase = loaded.base;
   if (manifest.catalogVersion !== baseVersion(newCatalog)) {
     notes.push(`catalog moved from ${manifest.catalogVersion} to ${baseVersion(newCatalog)}; re-check recommendations.json and architecture-target.md`);
   }
@@ -194,7 +230,7 @@ export function refreshAiDir(root, { now = new Date(), catalogDir, skillDir = DE
     if (fs.existsSync(recFile)) {
       const recs = readJson(recFile);
       if (recs === null) notes.push('.ai/recommendations.json is not valid JSON');
-      recommendations = diffRecommendations(recs, oldCatalog, newCatalog, profile, adrs, notes);
+      recommendations = diffRecommendations(recs, oldCatalog, newCatalog, newBase, profile, adrs, notes);
     }
   }
 
@@ -204,6 +240,8 @@ export function refreshAiDir(root, { now = new Date(), catalogDir, skillDir = DE
     tool: { from: manifest.toolVersion ?? null, to: toolTo },
     catalog: { from: manifest.catalogVersion ?? null, to: baseVersion(newCatalog) },
     candidates,
+    overrideFiles: loaded.files,
+    overrides: diffOverrides(manifest, newCatalog),
     recommendations,
     rejections,
     files: { written: [], kept: [], conflicts: [] },

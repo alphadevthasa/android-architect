@@ -1,6 +1,6 @@
 // Project catalog overrides: <root>/.ai/catalog-overrides/*.json add entries to existing dimensions and pin statuses.
 // Override files live in the repo, so they are untrusted input: everything is validated before use, regexes and globs
-// are bounded, and nothing is evaluated.
+// carry no regexes (literal `contains` only) and globs use a tiny grammar, and nothing is evaluated.
 import fs from 'node:fs';
 import path from 'node:path';
 import { CatalogError, loadCatalog, validateEntry, SUPPORTED_SCHEMA_VERSION } from './catalog.js';
@@ -12,49 +12,31 @@ export const MAX_ENTRIES_PER_FILE = 50;
 const MAX_PATTERN = 200;
 const MAX_STRING = 500;
 const MAX_FILE_BYTES = 256 * 1024;
-const MAX_DOUBLE_STAR = 5;
 const STATUSES = ['current', 'legacy', 'deprecated'];
 
 const isStr = (v) => typeof v === 'string' && v.length > 0;
 const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 
 /**
- * True when `src` is an acceptable detection regex: at most 200 characters, compiles without flags, and has no nested
- * quantifier (a group that itself contains + * or {n,m} and is followed by + * or {), the classic catastrophic shape.
+ * Override globs are deliberately tiny, because a glob becomes a RegExp run over every project path: literal segments,
+ * an optional single leading "**\/", at most one "*" per segment, at most 2 "*" in all (a "**" counts as one), no "?",
+ * no braces or classes, at most 200 characters.
  */
-export function safeRegex(src) {
-  if (typeof src !== 'string' || src.length === 0 || src.length > MAX_PATTERN) return false;
-  try {
-    new RegExp(src);
-  } catch {
-    return false;
-  }
-  const stack = [];
-  const mark = () => {
-    if (stack.length) stack[stack.length - 1] = true;
-  };
-  for (let i = 0; i < src.length; i++) {
-    const c = src[i];
-    if (c === '\\') i++;
-    else if (c === '[') {
-      for (i++; i < src.length && src[i] !== ']'; i++) if (src[i] === '\\') i++;
-    } else if (c === '(') stack.push(false);
-    else if (c === ')') {
-      const inner = stack.pop();
-      const after = src[i + 1];
-      const quantified = after === '+' || after === '*' || after === '{';
-      if (inner && quantified) return false;
-      if (inner || quantified) mark();
-    } else if (c === '+' || c === '*') mark();
-    else if (c === '{' && /^\{\d+(,\d*)?\}/.test(src.slice(i))) mark();
-  }
-  return true;
-}
-
 function globProblem(glob) {
   if (typeof glob !== 'string' || glob.length === 0) return 'must be a non-empty string';
   if (glob.length > MAX_PATTERN) return `is longer than ${MAX_PATTERN} characters`;
-  if (glob.split('**').length - 1 > MAX_DOUBLE_STAR) return `has more than ${MAX_DOUBLE_STAR} "**"`;
+  const rest = glob.startsWith('**/') ? glob.slice(3) : glob;
+  let stars = rest === glob ? 0 : 1;
+  if (rest.length === 0) return 'needs a file or directory name after "**/"';
+  for (const seg of rest.split('/')) {
+    if (seg.length === 0) return 'has an empty path segment';
+    if (/[?{}[\]]/.test(seg)) return 'may not use ?, braces or classes';
+    if (seg.includes('**')) return 'may use "**" only as a single leading "**/"';
+    const n = seg.split('*').length - 1;
+    if (n > 1) return 'may use at most one "*" per path segment';
+    stars += n;
+  }
+  if (stars > 2) return 'may use at most 2 "*" in total';
   try {
     globToRegExp(glob);
   } catch {
@@ -87,12 +69,18 @@ function safetyErrors(dimId, e) {
   }
   for (const c of Array.isArray(detect.content) ? detect.content : []) {
     if (!isObj(c)) continue;
-    if (isStr(c.glob)) {
+    if (c.regex !== undefined) errs.push(`${where}: detect.content regex is not allowed in overrides; use { "contains": "<literal>" }`);
+    for (const k of Object.keys(c)) {
+      if (k !== 'regex' && k !== 'glob' && k !== 'contains') errs.push(`${where}: detect.content has unknown key "${k}"`);
+    }
+    if (c.contains === undefined) {
+      if (c.regex === undefined) errs.push(`${where}: detect.content item needs contains`);
+    } else if (typeof c.contains !== 'string' || c.contains.length < 1 || c.contains.length > MAX_PATTERN) {
+      errs.push(`${where}: detect.content contains must be 1..${MAX_PATTERN} characters`);
+    }
+    if (c.glob !== undefined) {
       const p = globProblem(c.glob);
       if (p) errs.push(`${where}: detect.content glob ${p}`);
-    }
-    if (isStr(c.regex) && !safeRegex(c.regex)) {
-      errs.push(`${where}: detect.content regex is rejected (at most ${MAX_PATTERN} characters, no nested quantifiers)`);
     }
   }
   return errs;
@@ -119,8 +107,9 @@ export function loadOverrides(dir, base = loadCatalog()) {
   let names;
   try {
     names = fs.readdirSync(dir).filter((n) => n.endsWith('.json')).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
-  } catch {
-    return empty;
+  } catch (err) {
+    if (err.code === 'ENOENT') return empty;
+    throw new CatalogError([`${OVERRIDES_DIR}: cannot read the folder (${err.code ?? err.message}); it must be a directory`]);
   }
   if (names.length > MAX_FILES) throw new CatalogError([`${OVERRIDES_DIR}: too many override files (${names.length}, at most ${MAX_FILES})`]);
   const errs = [];
@@ -225,12 +214,14 @@ export function applyOverrides(catalog, overrides) {
     addedList.push(`${dimension}.${entry.id}`);
   }
   const pinned = [];
+  const pins = {};
   for (const p of overrides.status) {
     const e = find(p.dimension)?.entries.find((x) => x.id === p.id);
     if (!e) throw new CatalogError([`${p.dimension}.${p.id}: cannot pin status of an unknown entry`]);
     e.status = p.status;
     e.statusPin = { reason: p.reason };
     pinned.push(`${p.dimension}.${p.id}`);
+    pins[`${p.dimension}.${p.id}`] = { status: p.status, reason: p.reason };
   }
   return {
     ...catalog,
@@ -238,7 +229,7 @@ export function applyOverrides(catalog, overrides) {
     baseCatalogVersion: catalog.catalogVersion,
     dimensions,
     entry: (dimId, entryId) => dimensions.find((d) => d.id === dimId)?.entries.find((e) => e.id === entryId),
-    overridden: { added: addedList, statusPinned: [...new Set(pinned)] },
+    overridden: { added: addedList, statusPinned: [...new Set(pinned)], pins },
   };
 }
 

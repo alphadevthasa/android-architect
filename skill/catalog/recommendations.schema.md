@@ -5,7 +5,7 @@ The advisor writes a JSON file that `skill/scripts/recommend-check.js` validates
 ```json
 {
   "schemaVersion": 1,
-  "catalogVersion": "<must equal meta.catalogVersion of the loaded catalog>",
+  "catalogVersion": "<meta.catalogVersion of the catalog, or <meta.catalogVersion>+overrides when the project has catalog overrides>",
   "generatedAt": "2026-11-19",
   "dimensions": [
     { "dimension": "presentation", "current": ["mvp"], "target": "mvvm-livedata",

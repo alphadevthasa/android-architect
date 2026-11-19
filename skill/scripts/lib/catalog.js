@@ -13,6 +13,7 @@ const COMPUTED_DIMENSIONS = ['modularization', 'compliance', 'build-performance'
 const COMPUTED_ENTRIES = ['language.kotlin-k2', 'presentation.god-activity', 'navigation.multi-activity'];
 const SEVERITIES = ['critical', 'high', 'medium', 'low'];
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+export const DEFAULT_CONTENT_GLOB = '**/*.{kt,java}';
 const DEFAULT_DIR = new URL('../../catalog/', import.meta.url);
 
 export class CatalogError extends Error {
@@ -46,9 +47,12 @@ function validateDetect(where, detect, errs, computedAllowed) {
           errs.push(`${where}: detect.gradle bad minVersion "${item.minVersion}"`);
         }
       } else if (key === 'content') {
-        if (!isObj(item) || !isStr(item.glob) || !isStr(item.regex)) {
-          errs.push(`${where}: detect.content item needs glob and regex`);
-        } else {
+        // A content signal is { glob, regex } or { glob?, contains } (literal substring; glob defaults to Kotlin/Java sources).
+        const lit = isObj(item) && item.contains !== undefined;
+        if (!isObj(item) || (lit ? !isStr(item.contains) || item.regex !== undefined : !isStr(item.glob) || !isStr(item.regex))
+          || (item.glob !== undefined && !isStr(item.glob))) {
+          errs.push(`${where}: detect.content item needs glob and regex, or contains`);
+        } else if (!lit) {
           try { new RegExp(item.regex); } catch { errs.push(`${where}: detect.content invalid regex "${item.regex}"`); }
         }
       } else if (!isStr(item)) {

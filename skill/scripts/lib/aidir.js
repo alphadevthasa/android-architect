@@ -114,6 +114,7 @@ function makeGuard(root, realRoot) {
  * Checks run before any write: --local needs a repo; .ai (and anything in it) and the pointer files must not be symlinks;
  * .ai/catalog-overrides (when present) must be valid against the catalog in `catalogDir` (default: this skill's).
  * writeAiDir runs this itself; workspace mode runs it for every repo first.
+ * Returns { catalog, base, files }: the merged catalog (base + overrides), the base catalog and the override file names.
  */
 export function preflight(root, { local = false, catalogDir = path.join(DEFAULT_SKILL_DIR, 'catalog') } = {}) {
   const realRoot = fs.realpathSync(root);
@@ -123,7 +124,7 @@ export function preflight(root, { local = false, catalogDir = path.join(DEFAULT_
   guard('.ai');
   if (fs.existsSync(aiDir)) regularFiles(aiDir);
   for (const f of ['AGENTS.md', 'CLAUDE.md', 'CLAUDE.local.md']) guard(f);
-  loadCatalogWithOverrides(catalogDir, root);
+  return loadCatalogWithOverrides(catalogDir, root);
 }
 
 /**
@@ -165,14 +166,15 @@ export function writeAiDir(
   // manifest (hashes) are written as they are.
   const putRedacted = (rel, text) => putAi(rel, redact(text).text);
 
-  preflight(root, { local, catalogDir });
+  // Overrides are validated here, before the first write; the result is reused for detection below.
+  const loaded = preflight(root, { local, catalogDir });
 
   // Vendor sources are read into memory before the first write, and must not live inside .ai.
   const vendorSources = collectVendorSources(skillDir, catalogDir, { aiDir });
   toolVersion = toolVersion ?? resolveToolVersion(skillDir, aiDir);
 
   // Detection and candidates use base + project overrides; vendoring (above) copies the base catalog only.
-  const { catalog, base, files: overrideFiles } = loadCatalogWithOverrides(catalogDir, root);
+  const { catalog, base, files: overrideFiles } = loaded;
   const previous = readManifest(aiDir);
   const head = headCommit(root);
   // Keep the recorded commit when only .ai or pointer files changed since, so committing .ai does not churn headers.
@@ -282,6 +284,9 @@ export function writeAiDir(
     // The base version, so ai-status compares like with like; the merged one ("+overrides") only labels generated files.
     catalogVersion: base.catalogVersion,
     overrides: overrideFiles,
+    // Active pins and added entries, so refresh can report what changed between runs.
+    overridePins: Object.fromEntries(Object.entries(catalog.overridden?.pins ?? {}).map(([k, v]) => [k, v.status])),
+    overrideAdded: catalog.overridden?.added ?? [],
     generatedAt: now.toISOString(),
     commit,
     mode,

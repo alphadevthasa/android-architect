@@ -46,6 +46,13 @@ function renderArchitecture(profile, catalog) {
     }
     out.push('');
   }
+  const ov = catalog.overridden;
+  if (ov && (ov.added.length || ov.statusPinned.length)) {
+    out.push('## Catalog overrides', '', 'Project-specific catalog changes from `.ai/catalog-overrides/` (not part of the shared catalog).', '');
+    for (const id of ov.added) out.push(`- Added entry: ${id} (${catalog.entry(id.slice(0, id.indexOf('.')), id.slice(id.indexOf('.') + 1))?.name ?? id})`);
+    for (const [id, p] of Object.entries(ov.pins)) out.push(`- Status pin: ${id} is ${p.status} (reason: ${p.reason})`);
+    out.push('');
+  }
   const { sdk } = profile;
   out.push('## Overview', '');
   out.push(`- Modules: ${profile.modules.length}`);

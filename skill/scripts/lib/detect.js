@@ -3,6 +3,7 @@ import path from 'node:path';
 import { listFiles, readLines } from './walk.js';
 import { discoverModules } from './modules.js';
 import { globToRegExp } from './glob.js';
+import { DEFAULT_CONTENT_GLOB } from './catalog.js';
 import { securityFindings } from './security.js';
 import { compareVersions } from './version.js';
 import { vulnerableDependencies } from './vuln.js';
@@ -152,15 +153,17 @@ function evaluateEntry(entry, ctx) {
     }
   }
   for (const c of d.content ?? []) {
-    const re = ctx.glob(c.glob);
-    // Tested per line, no flags: ^/$ anchor to the line.
-    const rx = new RegExp(c.regex);
+    const re = ctx.glob(c.glob ?? DEFAULT_CONTENT_GLOB);
+    // Regex: tested per line, no flags (^/$ anchor to the line). contains: literal, case-sensitive substring (linear).
+    const rx = c.contains === undefined ? new RegExp(c.regex) : null;
     for (const f of ctx.files) {
       if (!re.test(f)) continue;
       const lines = ctx.read(f);
       if (!lines) continue;
       lines.forEach((text, i) => {
-        if (rx.test(text)) addEvidence(acc, f, 'file', { file: f, line: i + 1, signal: `content ${c.regex}` });
+        if (rx ? rx.test(text) : text.includes(c.contains)) {
+          addEvidence(acc, f, 'file', { file: f, line: i + 1, signal: rx ? `content ${c.regex}` : `content contains ${c.contains}` });
+        }
       });
     }
   }
