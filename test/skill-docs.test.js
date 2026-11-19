@@ -104,6 +104,8 @@ test('SKILL.md links all core references', () => {
 
 test('no file under skill/ contains TODO or TBD', () => {
   for (const file of walkFiles(skillDir)) {
+    // .ai templates intentionally ship `TODO: run "setup"` placeholders for user-owned files.
+    if (path.relative(skillDir, file).startsWith(path.join('templates', 'ai') + path.sep)) continue;
     const text = fs.readFileSync(file, 'utf8');
     assert.doesNotMatch(text, /\bTODO\b|\bTBD\b/, `${path.relative(skillDir, file)} contains TODO or TBD`);
   }
