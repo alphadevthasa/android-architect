@@ -115,11 +115,13 @@ export function preflight(root, { local = false } = {}) {
  * Write the .ai folder. See task 4 for the ownership table.
  * `workspace` is null, { role: 'hub', hub: '.' } (with `repos`, the repos.json content, written only when missing)
  * or { role: 'member', hub: <relative path> } (thin .ai: no workflows, no user-owned files).
+ * `extraGenerated` is { name: text } or a function of { written, kept, conflicts } returning that: extra generated
+ * files written at the top of .ai (always rewritten, through the same guarded writer).
  * Returns { written, kept, conflicts, pointers, excluded } with paths relative to root, sorted.
  */
 export function writeAiDir(
   root,
-  { now, local = false, appendPointers = false, workspace = null, repos = null, toolVersion, skillDir = DEFAULT_SKILL_DIR, catalogDir } = {},
+  { now, local = false, appendPointers = false, workspace = null, repos = null, toolVersion, skillDir = DEFAULT_SKILL_DIR, catalogDir, extraGenerated = null } = {},
 ) {
   const realRoot = fs.realpathSync(root);
   const aiDir = path.join(root, '.ai');
@@ -228,6 +230,11 @@ export function writeAiDir(
   }
   const adrDir = path.join(aiDir, 'knowledge', 'adr');
   if (!isMember && fs.existsSync(adrDir)) for (const f of regularFiles(adrDir)) kept.add(`.ai/knowledge/adr/${f}`);
+
+  const extra = typeof extraGenerated === 'function'
+    ? extraGenerated({ written: [...written].sort(byText), kept: [...kept].sort(byText), conflicts: [...conflicts].sort(byText) })
+    : extraGenerated ?? {};
+  for (const [rel, text] of Object.entries(extra)) putAi(rel, text);
 
   writeManifest(aiDir, {
     schemaVersion: MANIFEST_SCHEMA_VERSION,
