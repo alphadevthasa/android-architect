@@ -6,7 +6,7 @@ import { loadCatalog } from './catalog.js';
 import { detectStack } from './detect.js';
 import { candidatePaths } from './candidates.js';
 import { checkRecommendations } from './guardrail.js';
-import { loadAdrs, activeRejections } from './adr.js';
+import { loadAdrs, activeRejections, adrWarnings } from './adr.js';
 import { MANIFEST_SCHEMA_VERSION, readManifest } from './manifest.js';
 import { writeAiDir, preflight, resolveToolVersion } from './aidir.js';
 import { generatedHeader } from './knowledge.js';
@@ -167,6 +167,7 @@ export function refreshAiDir(root, { now = new Date(), catalogDir, skillDir = DE
     const adrDir = path.join(aiDir, 'knowledge', 'adr');
     const adrs = fs.existsSync(adrDir) ? loadAdrs(adrDir) : [];
     rejections = { reopened: activeRejections(adrs, profile).reopened };
+    notes.push(...adrWarnings(adrs, newCatalog));
     const recFile = path.join(aiDir, 'recommendations.json');
     if (fs.existsSync(recFile)) {
       const recs = readJson(recFile);

@@ -76,7 +76,7 @@ test('M7: installed copy runs scan --out, candidates and recommend-check end to 
     fs.writeFileSync(recPath, JSON.stringify(recs));
     const r = spawnSync(process.execPath, ['--import', helper, path.join(scripts, 'recommend-check.js'), recPath, '--profile', profilePath], { encoding: 'utf8' });
     assert.equal(r.status, 0, r.stdout + r.stderr);
-    assert.deepEqual(JSON.parse(r.stdout), { ok: true, violations: [] });
+    assert.deepEqual(JSON.parse(r.stdout), { ok: true, violations: [], warnings: [] });
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
     fs.rmSync(work, { recursive: true, force: true });

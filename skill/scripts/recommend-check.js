@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 // Usage: node skill/scripts/recommend-check.js <recommendations.json> --profile <profile.json> [--adr-dir <dir>]
-// Prints { ok, violations } as JSON. Exit 1 when not ok, 0 when ok, 2 on unreadable input.
+// Prints { ok, violations, warnings } as JSON (warnings: rejected ADRs with unknown catalog ids). Exit 1 when not ok, 0 when ok, 2 on unreadable input.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadCatalog } from './lib/catalog.js';
 import { checkRecommendations } from './lib/guardrail.js';
-import { loadAdrs } from './lib/adr.js';
+import { loadAdrs, adrWarnings } from './lib/adr.js';
 
 const USAGE = 'usage: node recommend-check.js <recommendations.json> --profile <profile.json> [--adr-dir <dir>]';
 
@@ -50,7 +50,8 @@ export function main(argv) {
       fail(2, `cannot read ADRs ${adrDir}: ${err.message}`);
     }
   }
-  const result = checkRecommendations(recs, loadCatalog(), profile, { adrs });
+  const catalog = loadCatalog();
+  const result = { ...checkRecommendations(recs, catalog, profile, { adrs }), warnings: adrWarnings(adrs, catalog) };
   process.stdout.write(JSON.stringify(result, null, 2) + '\n');
   if (!result.ok) process.exit(1);
 }

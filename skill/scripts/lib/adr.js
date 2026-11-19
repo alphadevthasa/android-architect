@@ -13,13 +13,14 @@ function scalar(raw, file, lineNo) {
   if (v === '') return '';
   if (v[0] === '"') {
     if (v.length < 2 || v[v.length - 1] !== '"') throw new Error(`${file}: line ${lineNo}: unterminated quoted value`);
-    return v.slice(1, -1);
+    return v.slice(1, -1).trim();
   }
   if (v[0] === '&' || v[0] === '*') throw bad('YAML anchor or alias');
   if (v[0] === '!') throw bad('YAML tag');
   if (v[0] === '|' || v[0] === '>') throw bad('block scalar');
   if (v[0] === '[' || v[0] === '{') throw bad('flow collection');
   if (v[0] === "'") throw bad('single-quoted value');
+  if (/\s#/.test(v)) throw new Error(`${file}: line ${lineNo}: inline comments are not supported (quote the value if it contains " #")`);
   return v;
 }
 
@@ -73,11 +74,29 @@ export function parseAdr(text, file) {
   return { ...out, file };
 }
 
+const ADR_FILE = /^\d{4}-.*\.md$/;
+
+/** Parse the ADR files in dir (NNNN-*.md, except the template); other files such as a README are ignored. */
 export function loadAdrs(dir) {
   const names = fs.readdirSync(dir)
-    .filter((n) => n.endsWith('.md') && n !== '0000-template.md')
+    .filter((n) => ADR_FILE.test(n) && n !== '0000-template.md')
     .sort();
   return names.map((n) => parseAdr(fs.readFileSync(path.join(dir, n), 'utf8'), n));
+}
+
+/** Warnings (not failures) for rejected ADRs whose dimension or target is not a catalog id: they block nothing. */
+export function adrWarnings(adrs, catalog) {
+  const dims = new Set(catalog.dimensions.map((d) => d.id));
+  const out = [];
+  for (const adr of adrs) {
+    if (adr.status !== 'rejected') continue;
+    if (!dims.has(adr.dimension)) {
+      out.push(`${adr.file}: dimension "${adr.dimension}" is not a catalog dimension id; this rejection blocks nothing`);
+    } else if (catalog.entry(adr.dimension, adr.target) === undefined) {
+      out.push(`${adr.file}: target "${adr.target}" is not an entry of "${adr.dimension}" in the catalog; this rejection blocks nothing`);
+    }
+  }
+  return out;
 }
 
 export function reopenHolds(cond, profile) {

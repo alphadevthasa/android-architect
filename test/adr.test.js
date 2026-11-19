@@ -7,7 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { loadCatalog } from '../skill/scripts/lib/catalog.js';
 import { detectStack } from '../skill/scripts/lib/detect.js';
-import { parseAdr, loadAdrs, reopenHolds, activeRejections } from '../skill/scripts/lib/adr.js';
+import { parseAdr, loadAdrs, reopenHolds, activeRejections, adrWarnings } from '../skill/scripts/lib/adr.js';
 import { checkRecommendations } from '../skill/scripts/lib/guardrail.js';
 
 const catalog = loadCatalog();
@@ -142,4 +142,82 @@ test('the ADR example in recommendations.schema.md parses', () => {
   const a = parseAdr(block[1], 'schema-example.md');
   assert.equal(a.status, 'rejected');
   assert.deepEqual(a.reopenIf, ['present:kmp']);
+});
+
+test('parseAdr trims quoted and bare values', () => {
+  const a = parseAdr(fm('id: "  0001 "\ntitle:   No Ktor   \nstatus: rejected\ndimension: " networking "\ntarget: ktor-client  \nreopenIf:\n  - "  present:kmp  "\nreason: "  why  "'), 'a.md');
+  assert.equal(a.id, '0001');
+  assert.equal(a.title, 'No Ktor');
+  assert.equal(a.dimension, 'networking');
+  assert.equal(a.target, 'ktor-client');
+  assert.deepEqual(a.reopenIf, ['present:kmp']);
+  assert.equal(a.reason, 'why');
+});
+
+test('parseAdr rejects an inline comment in a bare value with the line number', () => {
+  assert.throws(
+    () => parseAdr(fm('id: "1"\ntitle: x\nstatus: rejected\ndimension: networking\ntarget: ktor-client # no'), 'a.md'),
+    /^Error: a\.md: line 6: inline comments are not supported/,
+  );
+  assert.throws(() => parseAdr(fm('id: "1"\ntitle: x\nstatus: proposed\nreopenIf:\n  - present:kmp # x'), 'a.md'), /line 6: inline comments/);
+  // A quoted value may contain " #", and "#" without a space before it is plain text.
+  assert.equal(parseAdr(fm('id: "1"\ntitle: "a # b"\nstatus: proposed'), 'a.md').title, 'a # b');
+  assert.equal(parseAdr(fm('id: "1"\ntitle: C# interop\nstatus: proposed'), 'a.md').title, 'C# interop');
+});
+
+test('a rejected ADR with a blank target is refused', () => {
+  for (const target of ['target: ""', 'target: "   "', 'target:']) {
+    assert.throws(
+      () => parseAdr(fm(`id: "1"\ntitle: x\nstatus: rejected\ndimension: networking\n${target}`), 'a.md'),
+      /a\.md: rejected ADR needs dimension and target/,
+      target,
+    );
+  }
+});
+
+test('loadAdrs ignores markdown that is not an NNNN- ADR file', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'adr-'));
+  try {
+    fs.writeFileSync(path.join(dir, 'README.md'), '# How we write ADRs\n');
+    fs.writeFileSync(path.join(dir, 'notes.md'), 'scratch');
+    fs.writeFileSync(path.join(dir, '12-short.md'), 'not an adr name');
+    fs.writeFileSync(path.join(dir, '0001-a.md'), rejected());
+    assert.deepEqual(loadAdrs(dir).map((a) => a.file), ['0001-a.md']);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('adrWarnings flags rejected ADRs whose dimension or target is not a catalog id', () => {
+  const bad = (dimension, target) => parseAdr(fm(`id: "9"\ntitle: x\nstatus: rejected\ndimension: ${dimension}\ntarget: ${target}`), `0009-${dimension}.md`);
+  assert.deepEqual(adrWarnings([adr()], catalog), []);
+  const w = adrWarnings([bad('netwrking', 'ktor-client'), bad('networking', 'ktorr'), parseAdr(fm('id: "2"\ntitle: x\nstatus: accepted\ndimension: zz\ntarget: zz'), '0002.md')], catalog);
+  assert.equal(w.length, 2);
+  assert.match(w[0], /0009-netwrking\.md: dimension "netwrking" is not a catalog dimension id/);
+  assert.match(w[1], /0009-networking\.md: target "ktorr" is not an entry of "networking"/);
+});
+
+test('recommend-check prints ADR warnings without changing the exit code', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'adr-'));
+  try {
+    const adrDir = path.join(dir, 'adr');
+    fs.mkdirSync(adrDir);
+    fs.writeFileSync(path.join(adrDir, '0001-typo.md'), fm('id: "1"\ntitle: x\nstatus: rejected\ndimension: networking\ntarget: ktorr'));
+    fs.writeFileSync(path.join(adrDir, 'README.md'), '# not an ADR\n');
+    const cli = fileURLToPath(new URL('../skill/scripts/recommend-check.js', import.meta.url));
+    const profFile = path.join(dir, 'profile.json');
+    const recFile = path.join(dir, 'recs.json');
+    fs.writeFileSync(profFile, JSON.stringify(profile));
+    fs.writeFileSync(recFile, JSON.stringify(recs('must')));
+    const plain = spawnSync(process.execPath, [cli, recFile, '--profile', profFile], { encoding: 'utf8' });
+    const r = spawnSync(process.execPath, [cli, recFile, '--profile', profFile, '--adr-dir', adrDir], { encoding: 'utf8' });
+    assert.equal(r.status, plain.status);
+    const out = JSON.parse(r.stdout);
+    assert.deepEqual(Object.keys(out), ['ok', 'violations', 'warnings']);
+    assert.equal(out.warnings.length, 1);
+    assert.match(out.warnings[0], /0001-typo\.md: target "ktorr"/);
+    assert.deepEqual(JSON.parse(plain.stdout).warnings, []);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

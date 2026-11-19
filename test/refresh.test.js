@@ -121,6 +121,18 @@ test('a rejected ADR whose reopenIf holds appears in rejections.reopened', () =>
   assert.equal(report.rejections.reopened[0].condition, 'present:mvp');
 });
 
+test('refresh ignores a README in adr/ and notes rejected ADRs with unknown catalog ids', () => {
+  init();
+  fs.writeFileSync(path.join(root, '.ai/knowledge/adr/README.md'), '# How we write ADRs\n');
+  fs.writeFileSync(
+    path.join(root, '.ai/knowledge/adr/0001-typo.md'),
+    '---\nid: "0001"\ntitle: Typo\nstatus: rejected\ndimension: ui\ntarget: viewbindng\n---\n\n# x\n',
+  );
+  const report = refresh();
+  assert.ok(report.notes.some((n) => /0001-typo\.md: target "viewbindng" is not an entry of "ui"/.test(n)), report.notes.join('\n'));
+  assert.ok(report.files.kept.includes('.ai/knowledge/adr/README.md'));
+});
+
 test('an invalid ADR aborts refresh before anything is written', () => {
   init();
   fs.writeFileSync(path.join(root, '.ai/knowledge/adr/0002-bad.md'), 'no front matter');
