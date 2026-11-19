@@ -19,8 +19,21 @@ function readStripped(root, rel) {
 
 /** First quoted literal assigned to `key` (`key = "x"` or `key 'x'`); values with `$` interpolation are unresolvable. */
 function literals(text, key) {
-  const re = new RegExp(`(?:^|[\\s;{(])${key}\\s*(?:=\\s*|\\s+)(["'])([^"'\\n]*)\\1`, 'g');
-  return [...text.matchAll(re)].map((m) => m[2]).filter((v) => v && !v.includes('$'));
+  const re = new RegExp(`(?:^|[\\s;{])${key}\\s*(?:=\\s*|\\s+)(["'])([^"'\\n]*)\\1`, 'g');
+  return [...text.matchAll(re)]
+    .filter((m) => parenDepth(text, m.index) === 0)
+    .map((m) => m[2])
+    .filter((v) => v && !v.includes('$'));
+}
+
+/** Open parentheses before index: a `group = "x"` inside `exclude(...)` is not the module's group. */
+function parenDepth(text, index) {
+  let d = 0;
+  for (let i = 0; i < index; i++) {
+    if (text[i] === '(') d++;
+    else if (text[i] === ')' && d > 0) d--;
+  }
+  return d;
 }
 
 function appliesPublish(module, text) {
@@ -37,7 +50,10 @@ function moduleRows(root) {
 
 /** Published coordinates (`group:name`) of a repo, sorted. */
 export function publishedArtifacts(root) {
-  const { modules, rootText } = moduleRows(root);
+  return artifactsOf(root, moduleRows(root));
+}
+
+function artifactsOf(root, { modules, rootText }) {
   const out = new Set();
   for (const m of modules) {
     if (!m.buildFile) continue;
@@ -76,16 +92,19 @@ export function siblingRepos(hubRoot) {
 export function linkWorkspace(hubRoot, repoPaths, { confirmed }) {
   const hub = fs.realpathSync(hubRoot);
   const all = [hub, ...repoPaths.map((p) => fs.realpathSync(p))];
-  const infos = all.map((abs, i) => ({
-    abs,
-    name: path.basename(abs),
-    path: i === 0 ? '.' : posix(path.relative(hub, abs)),
-    artifacts: publishedArtifacts(abs),
-  }));
+  const infos = all.map((abs, i) => {
+    const rows = moduleRows(abs);
+    return {
+      abs,
+      name: path.basename(abs),
+      path: i === 0 ? '.' : posix(path.relative(hub, abs)),
+      rows,
+      artifacts: artifactsOf(abs, rows),
+    };
+  });
   const links = [];
   for (const consumer of infos) {
-    const { modules } = moduleRows(consumer.abs);
-    for (const m of modules) {
+    for (const m of consumer.rows.modules) {
       if (!m.buildFile) continue;
       for (const d of m.build.dependencies) {
         if (!d.group || !d.name) continue;

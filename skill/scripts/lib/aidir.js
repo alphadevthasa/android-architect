@@ -49,7 +49,8 @@ export function resolveToolVersion(skillDir = DEFAULT_SKILL_DIR, aiDir = null) {
 function workspaceLabel(workspace, repos) {
   if (!workspace) return 'none';
   if (workspace.role === 'member') return `member of ${workspace.hub}`;
-  return `hub (${(repos?.repos ?? []).filter((r) => r.path !== '.').length} repos)`;
+  const n = (repos?.repos ?? []).filter((r) => r.path !== '.').length;
+  return `hub (${n} ${n === 1 ? 'repo' : 'repos'})`;
 }
 
 function memberNote(hub) {
@@ -71,30 +72,12 @@ function regularFiles(dir) {
   return out.sort(byText);
 }
 
-/**
- * Write the .ai folder. See task 4 for the ownership table.
- * `workspace` is null, { role: 'hub', hub: '.' } (with `repos`, the repos.json content, written only when missing)
- * or { role: 'member', hub: <relative path> } (thin .ai: no workflows, no user-owned files).
- * Returns { written, kept, conflicts, pointers, excluded } with paths relative to root, sorted.
- */
-export function writeAiDir(
-  root,
-  { now, local = false, appendPointers = false, workspace = null, repos = null, toolVersion, skillDir = DEFAULT_SKILL_DIR, catalogDir } = {},
-) {
-  const realRoot = fs.realpathSync(root);
-  const aiDir = path.join(root, '.ai');
-  const templatesDir = path.join(skillDir, 'templates', 'ai');
-  catalogDir = catalogDir ?? path.join(skillDir, 'catalog');
-  if (local && !gitDir(root)) throw new Error('--local needs a git repository');
+const refuse = (rel) => new Error(`refusing to write through a symlink: ${rel}`);
 
-  const isMember = workspace?.role === 'member';
-  const written = new Set();
-  const kept = new Set();
-  const conflicts = [];
-  const refuse = (rel) => new Error(`refusing to write through a symlink: ${rel}`);
-
+/** Returns guard(rel): throws when rel escapes root or passes through a symlink; else the absolute path. */
+function makeGuard(root, realRoot) {
   // Every component from root down to rel must not be a symlink, and the target must stay in root.
-  const guard = (rel) => {
+  return (rel) => {
     const abs = path.resolve(root, rel);
     if (!path.resolve(realRoot, rel).startsWith(realRoot + path.sep)) {
       throw new Error(`refusing to write outside the project: ${rel}`);
@@ -112,6 +95,43 @@ export function writeAiDir(
     }
     return abs;
   };
+}
+
+/**
+ * Checks run before any write: --local needs a repo; .ai (and anything in it) and the pointer files must not be symlinks.
+ * writeAiDir runs this itself; workspace mode runs it for every repo first.
+ */
+export function preflight(root, { local = false } = {}) {
+  const realRoot = fs.realpathSync(root);
+  const aiDir = path.join(root, '.ai');
+  if (local && !gitDir(root)) throw new Error('--local needs a git repository');
+  const guard = makeGuard(root, realRoot);
+  guard('.ai');
+  if (fs.existsSync(aiDir)) regularFiles(aiDir);
+  for (const f of ['AGENTS.md', 'CLAUDE.md', 'CLAUDE.local.md']) guard(f);
+}
+
+/**
+ * Write the .ai folder. See task 4 for the ownership table.
+ * `workspace` is null, { role: 'hub', hub: '.' } (with `repos`, the repos.json content, written only when missing)
+ * or { role: 'member', hub: <relative path> } (thin .ai: no workflows, no user-owned files).
+ * Returns { written, kept, conflicts, pointers, excluded } with paths relative to root, sorted.
+ */
+export function writeAiDir(
+  root,
+  { now, local = false, appendPointers = false, workspace = null, repos = null, toolVersion, skillDir = DEFAULT_SKILL_DIR, catalogDir } = {},
+) {
+  const realRoot = fs.realpathSync(root);
+  const aiDir = path.join(root, '.ai');
+  const templatesDir = path.join(skillDir, 'templates', 'ai');
+  catalogDir = catalogDir ?? path.join(skillDir, 'catalog');
+
+  const isMember = workspace?.role === 'member';
+  const written = new Set();
+  const kept = new Set();
+  const conflicts = [];
+
+  const guard = makeGuard(root, realRoot);
   const put = (rel, content) => {
     const abs = guard(rel);
     fs.mkdirSync(path.dirname(abs), { recursive: true });
@@ -123,10 +143,7 @@ export function writeAiDir(
     written.add(`.ai/${rel}`);
   };
 
-  // Preflight: nothing is written when .ai (or anything in it) or a pointer file is a symlink.
-  guard('.ai');
-  if (fs.existsSync(aiDir)) regularFiles(aiDir);
-  for (const f of ['AGENTS.md', 'CLAUDE.md', 'CLAUDE.local.md']) guard(f);
+  preflight(root, { local });
 
   // Vendor sources are read into memory before the first write, and must not live inside .ai.
   const realAi = fs.existsSync(aiDir) ? fs.realpathSync(aiDir) : path.join(realRoot, '.ai');

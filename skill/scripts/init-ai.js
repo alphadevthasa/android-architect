@@ -3,11 +3,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { writeAiDir } from './lib/aidir.js';
-import { gitDir } from './lib/git.js';
+import { writeAiDir, preflight } from './lib/aidir.js';
 import { siblingRepos, linkWorkspace } from './lib/workspace.js';
 
-const USAGE = 'usage: node init-ai.js <root> [--local] [--append-pointers] [--workspace [path ...]]';
+const USAGE = 'usage: node init-ai.js <root> [--local] [--append-pointers] [--workspace [path ...]]\n(relative --workspace paths resolve against <root>)';
 const BUILD_FILES = ['build.gradle', 'build.gradle.kts', 'settings.gradle', 'settings.gradle.kts'];
 
 function fail(code, message) {
@@ -37,7 +36,7 @@ const inside = (parent, p) => p === parent || p.startsWith(parent + path.sep);
 /** Validate every workspace repo before anything is written. Relative paths resolve against the hub. */
 function planWorkspace(root, opts) {
   const hub = fs.realpathSync(root);
-  if (opts.local && !gitDir(root)) throw new Error('--local needs a git repository');
+  preflight(root, { local: opts.local });
   const confirmed = opts.workspace.length > 0;
   const given = confirmed ? opts.workspace : siblingRepos(hub);
   if (!given.length) throw new Error('no sibling Gradle repos found; pass repo paths to --workspace');
@@ -54,7 +53,7 @@ function planWorkspace(root, opts) {
     if (inside(hub, abs) || inside(abs, hub)) throw new Error(`workspace path must be outside the hub and must not contain it: ${p}`);
     if (members.some((m) => m.abs === abs)) throw new Error(`workspace path listed twice: ${p}`);
     if (path.basename(abs) === path.basename(hub) || members.some((m) => m.name === path.basename(abs))) throw new Error(`workspace repos need distinct names: ${path.basename(abs)}`);
-    if (opts.local && !gitDir(abs)) throw new Error(`--local needs a git repository: ${p}`);
+    preflight(abs, { local: opts.local });
     members.push({
       abs,
       name: path.basename(abs),

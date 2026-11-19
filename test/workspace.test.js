@@ -36,6 +36,14 @@ test('publishedArtifacts honours artifactId, groupId and skips unresolved values
   assert.deepEqual(publishedArtifacts(lib), []);
 });
 
+test('publishedArtifacts ignores group literals inside parentheses', () => {
+  fs.writeFileSync(
+    path.join(lib, 'core-net/build.gradle.kts'),
+    `plugins { id("maven-publish") }\ndependencies { implementation("a:b:1") { exclude(group = "wrong") } }\ngroup = "com.example.core"\n`,
+  );
+  assert.deepEqual(publishedArtifacts(lib), ['com.example.core:core-net']);
+});
+
 test('linkWorkspace links the hub dependency to the producing repo', () => {
   const repos = linkWorkspace(hub, [lib], { confirmed: true });
   assert.equal(repos.schemaVersion, 1);
@@ -63,7 +71,7 @@ test('init-ai --workspace writes hub repos.json and a thin member', () => {
   assert.deepEqual(Object.keys(out), ['hub', 'members', 'repos']);
   assert.ok(out.hub.written.includes('.ai/repos.json'));
   assert.deepEqual(json(path.join(hub, '.ai/manifest.json')).workspace, { role: 'hub', hub: '.' });
-  assert.match(fs.readFileSync(path.join(hub, '.ai/README.md'), 'utf8'), /Workspace: hub \(1 repos\)/);
+  assert.match(fs.readFileSync(path.join(hub, '.ai/README.md'), 'utf8'), /Workspace: hub \(1 repo\)/);
   assert.equal(json(path.join(hub, '.ai/repos.json')).links.length, 1);
 
   const m = path.join(lib, '.ai');
@@ -127,6 +135,7 @@ test('a symlinked member .ai is refused', () => {
     const r = init(['.', '--workspace', '../lib-core']);
     assert.equal(r.status, 1);
     assert.deepEqual(fs.readdirSync(outside), []);
+    assert.equal(fs.existsSync(path.join(hub, '.ai')), false);
   } finally {
     fs.rmSync(outside, { recursive: true, force: true });
   }
