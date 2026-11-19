@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadCatalog } from './catalog.js';
-import { baseVersion } from './overrides.js';
+import { baseVersion, oneLine } from './overrides.js';
 import { detectStack } from './detect.js';
 import { candidatePaths } from './candidates.js';
 import { checkRecommendations } from './guardrail.js';
@@ -146,7 +146,7 @@ function renderReport(report, meta) {
   const ov = report.overrides;
   lines.push('', '## Catalog overrides', '');
   lines.push(`- Files: ${report.overrideFiles.length ? report.overrideFiles.join(', ') : 'none'}`);
-  lines.push(`- Active pins: ${ov.active.pins.length}`, ...ov.active.pins.map((p) => `  - ${p.entry}: ${p.status} (reason: ${p.reason})`));
+  lines.push(`- Active pins: ${ov.active.pins.length}`, ...ov.active.pins.map((p) => `  - ${p.entry}: ${p.status} (reason: ${oneLine(p.reason)})`));
   lines.push(`- Added entries: ${ov.active.entries.length}`, ...ov.active.entries.map((e) => `  - ${e}`));
   lines.push('- Changes since the last run:');
   const changes = [

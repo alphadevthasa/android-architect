@@ -221,3 +221,13 @@ test('recommend-check prints ADR warnings without changing the exit code', () =>
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('parseAdr rejects a bare value starting with "#" with the line number', () => {
+  assert.throws(
+    () => parseAdr(fm('id: "1"\ntitle: x\nstatus: rejected\ndimension: networking\ntarget: #foo'), 'a.md'),
+    /^Error: a\.md: line 6: a value starting with "#"/,
+  );
+  assert.throws(() => parseAdr(fm('id: "1"\ntitle: x\nstatus: proposed\nreopenIf:\n  - #x'), 'a.md'), /line 6: a value starting with "#"/);
+  // Quoted, it is plain text.
+  assert.equal(parseAdr(fm('id: "1"\ntitle: "#foo"\nstatus: proposed'), 'a.md').title, '#foo');
+});

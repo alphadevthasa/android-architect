@@ -18,4 +18,3 @@ Deferred minor findings from the M2 per-task reviews, the final review and its f
 - Task 9: minor (deferred): substring-only doc tests, duplicate script-path test
 - Task 9: minor (deferred): SKILL.md recommend step 7 / setup step 3 / Rejections hardcode <root>/.ai/knowledge/adr without "(member: see Workspaces)" pointer
 - Task 10: minor (deferred): app + :data/:domain reports both layer-modules and app-plus-libraries (unpinned); M5 lacks shared/root plugin and .kts plugin-form tests; rubric-code-quality Rx bullet sits in swallowed-exceptions section; README:73 example shows 2026.11.0; catalog.test.js import order
-- Final: minor (deferred): member silently re-pointed to a different hub (old hub repos.json stale); bare --workspace on confirmed hub writes noisy repos.json.new; member README CODEOWNERS line still mentions .ai/workflows; bare `target: #foo` stored literally; generatedAt churn in manifest/candidates/index

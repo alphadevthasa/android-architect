@@ -310,3 +310,28 @@ test('recommend-check --root applies status pins (a deprecated-pinned fresh targ
   assert.equal(pinned.status, 1);
   assert.ok(pinned.out.violations.some((v) => v.rule === 'R1-hop'));
 });
+
+rejects('a pin reason with a newline', file([], [{ dimension: 'networking', id: 'okhttp-retrofit', status: 'legacy', reason: 'x\n## Compliance gaps' }]), 'control characters');
+rejects('an entry name with a carriage return', file([entry('x', { name: 'a\rb' })]), 'control characters');
+rejects('a note with a tab', file([entry('x', { notes: 'a\tb' })]), 'control characters');
+rejects('a control character in a nested string', file([entry('x', { detect: { content: [{ contains: 'a\u0007b' }] } })]), 'control characters');
+rejects('a control character in an id', file([entry('x\ny')]), 'control characters');
+for (const key of ['gradle', 'plugins', 'imports', 'files', 'content', 'manifest']) {
+  const mk21 = () => Array.from({ length: 21 }, (_, i) => (key === 'gradle' ? { coord: `g:a${i}` } : key === 'content' ? { contains: `c${i}` } : key === 'files' ? `f${i}.kt` : `v${i}`));
+  rejects(`more than 20 detect.${key} items`, file([entry('x', { detect: { [key]: mk21() } })]), `detect.${key} has more than 20 items`);
+}
+test('20 detect items per list are accepted', () => {
+  const root = mk();
+  const dir = writeOverride(root, 'ok.json', file([entry('x', { detect: { gradle: Array.from({ length: 20 }, (_, i) => ({ coord: `g:a${i}` })) } })]));
+  assert.equal(loadOverrides(dir, loadCatalog()).entries.length, 1);
+});
+
+test('override text printed in knowledge and the refresh report is collapsed to one line', () => {
+  const root = project();
+  writeOverride(root, 'pin.json', {
+    schemaVersion: 1,
+    status: [{ dimension: 'networking', id: 'okhttp-retrofit', status: 'legacy', reason: 'a   b  c' }],
+  });
+  initProject(root, { now: NOW });
+  assert.match(fs.readFileSync(path.join(root, '.ai/knowledge/architecture-current.md'), 'utf8'), /\(reason: a b c\)/);
+});

@@ -45,6 +45,14 @@ function globProblem(glob) {
   return null;
 }
 
+// Override text is printed into generated Markdown, so control characters (line breaks above all) are refused.
+const CONTROL = /[\u0000-\u001f\u007f]/;
+const MAX_DETECT_ITEMS = 20;
+const DETECT_LISTS = ['gradle', 'plugins', 'imports', 'files', 'content', 'manifest'];
+
+/** Collapses every whitespace run to one space, for override text printed into a Markdown line. */
+export const oneLine = (s) => String(s).replace(/\s+/g, ' ').trim();
+
 /** Walks string leaves of a JSON value; calls fn(string). */
 function eachString(v, fn) {
   if (typeof v === 'string') fn(v);
@@ -61,7 +69,17 @@ function safetyErrors(dimId, e) {
     if (s.length > MAX_STRING) tooLong = true;
   });
   if (tooLong) errs.push(`${where}: strings must be at most ${MAX_STRING} characters`);
+  let control = false;
+  eachString(e, (s) => {
+    if (CONTROL.test(s)) control = true;
+  });
+  if (control) errs.push(`${where}: strings may not contain control characters (such as line breaks)`);
   const detect = isObj(e.detect) ? e.detect : {};
+  for (const key of DETECT_LISTS) {
+    if (Array.isArray(detect[key]) && detect[key].length > MAX_DETECT_ITEMS) {
+      errs.push(`${where}: detect.${key} has more than ${MAX_DETECT_ITEMS} items`);
+    }
+  }
   if (detect.computed !== undefined) errs.push(`${where}: detect.computed is not allowed in overrides`);
   for (const g of Array.isArray(detect.files) ? detect.files : []) {
     const p = globProblem(g);
@@ -192,6 +210,8 @@ export function loadOverrides(dir, base = loadCatalog()) {
         errs.push(`${name}: status[${i}] needs dimension, id, status (${STATUSES.join('|')}) and reason`);
       } else if (p.reason.length > MAX_STRING) {
         errs.push(`${name}: status[${i}] reason must be at most ${MAX_STRING} characters`);
+      } else if ([p.dimension, p.id, p.reason].some((s) => CONTROL.test(s))) {
+        errs.push(`${name}: status[${i}] strings may not contain control characters (such as line breaks)`);
       } else if (!ctx.hasEntry(p.dimension, p.id)) {
         errs.push(`${name}: status[${i}] unknown entry ${p.dimension}.${p.id}`);
       } else status.push({ file: name, dimension: p.dimension, id: p.id, status: p.status, reason: p.reason });

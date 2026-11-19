@@ -213,3 +213,58 @@ test('a symlinked member .ai is refused', () => {
     fs.rmSync(outside, { recursive: true, force: true });
   }
 });
+
+test('item 1: a second init after committing .ai leaves git status clean', () => {
+  const git = (...a) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'commit.gpgsign=false', ...a], { cwd: lib, encoding: 'utf8' });
+  git('init', '-q');
+  git('add', '-A');
+  git('commit', '-q', '-m', 'base');
+  assert.equal(init(['.'], lib).status, 0);
+  git('add', '-A');
+  git('commit', '-q', '-m', 'ai');
+  const before = json(path.join(lib, '.ai/manifest.json')).generatedAt;
+  const wait = Date.now() + 15;
+  while (Date.now() < wait);
+  assert.equal(init(['.'], lib).status, 0);
+  assert.equal(git('status', '--porcelain'), '');
+  assert.equal(json(path.join(lib, '.ai/manifest.json')).generatedAt, before);
+});
+
+test('item 2: a member cannot be silently re-pointed to another hub', () => {
+  assert.equal(init(['.', '--workspace', '../lib-core']).status, 0);
+  const hub2 = path.join(tmp, 'hub-two');
+  fs.cpSync(path.join(FX, 'hub-app'), hub2, { recursive: true });
+  const r = init(['.', '--workspace', '../lib-core'], hub2);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /lib-core/);
+  assert.match(r.stderr, /hub-app/);
+  assert.match(r.stderr, /remove its \.ai\/ and run init again from the new hub/);
+  assert.equal(fs.existsSync(path.join(hub2, '.ai')), false);
+  assert.deepEqual(json(path.join(lib, '.ai/manifest.json')).workspace, { role: 'member', hub: '../hub-app' });
+  // The same hub again is fine.
+  assert.equal(init(['.', '--workspace', '../lib-core']).status, 0);
+});
+
+test('item 3: the member README points the CODEOWNERS line at the hub workflows', () => {
+  assert.equal(init(['.', '--workspace', '../lib-core']).status, 0);
+  const member = fs.readFileSync(path.join(lib, '.ai/README.md'), 'utf8');
+  const line = member.split('\n').find((l) => l.includes('CODEOWNERS'));
+  assert.match(line, /`\.\.\/hub-app\/\.ai\/workflows\/`/);
+  assert.doesNotMatch(line, / `\.ai\/workflows\//);
+  assert.match(line, /`\.ai\/tools\/`/);
+  assert.match(fs.readFileSync(path.join(hub, '.ai/README.md'), 'utf8').split('\n').find((l) => l.includes('CODEOWNERS')), /for `\.ai\/workflows\/` and/);
+});
+
+test('item 5: bare --workspace on a confirmed hub with every sibling listed writes nothing', () => {
+  assert.equal(init(['.', '--workspace', '../lib-core']).status, 0);
+  const out = JSON.parse(init(['.', '--workspace']).stdout);
+  assert.deepEqual(out.proposed, []);
+  assert.deepEqual(out.hub.conflicts, []);
+  assert.equal(fs.existsSync(path.join(hub, '.ai/repos.json.new')), false);
+  // A new sibling is still proposed (the list is every sibling, as before).
+  const extra = path.join(tmp, 'lib-extra');
+  fs.cpSync(lib, extra, { recursive: true });
+  fs.rmSync(path.join(extra, '.ai'), { recursive: true, force: true });
+  const more = JSON.parse(init(['.', '--workspace']).stdout);
+  assert.deepEqual(more.proposed, ['../lib-core', '../lib-extra']);
+});

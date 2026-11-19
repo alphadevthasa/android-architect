@@ -64,6 +64,18 @@ function planWorkspace(root, { local, workspace, catalogDir }) {
       if (setup && (setup.role !== 'member' || setup.mode !== (local ? 'local' : 'committed'))) {
         throw refuseSwitch(p, setup, `making it a ${local ? 'local' : 'committed'} workspace member`);
       }
+      if (setup) {
+        const oldHub = path.resolve(abs, setup.workspace.hub);
+        let oldReal = oldHub;
+        try {
+          oldReal = fs.realpathSync(oldHub);
+        } catch {
+          // The old hub is gone: it still differs from this one.
+        }
+        if (oldReal !== hub) {
+          throw new Error(`${p} is already a member of the workspace hub at ${setup.workspace.hub}; to move it, remove its .ai/ and run init again from the new hub`);
+        }
+      }
     }
     members.push({
       abs,
@@ -97,14 +109,26 @@ export function initProject(root, { now = new Date(), local = false, appendPoint
   }
   if (workspace === null) return writeAiDir(root, base);
   const plan = planWorkspace(root, { local, workspace, catalogDir });
-  const hub = writeAiDir(root, { ...base, workspace: { role: 'hub', hub: '.' }, repos: plan.repos });
   const members = {};
   if (workspace.length === 0) {
     // Detected siblings are only proposed: write the hub, leave the siblings untouched until the user confirms paths.
     const hubReal = fs.realpathSync(root);
-    const proposed = plan.members.map((m) => path.relative(hubReal, m.abs).split(path.sep).join('/'));
-    return { hub, members, repos: plan.repos, proposed };
+    let proposed = plan.members.map((m) => path.relative(hubReal, m.abs).split(path.sep).join('/'));
+    let repos = plan.repos;
+    // A confirmed repos.json that already lists every sibling has nothing left to propose: keep it as it is.
+    const existing = readJson(path.join(root, '.ai', 'repos.json'));
+    if (
+      Array.isArray(existing?.repos) &&
+      !existing.repos.every((r) => r?.confirmed === false) &&
+      proposed.every((p) => existing.repos.some((r) => r?.path === p))
+    ) {
+      repos = existing;
+      proposed = [];
+    }
+    const hub = writeAiDir(root, { ...base, workspace: { role: 'hub', hub: '.' }, repos });
+    return { hub, members, repos, proposed };
   }
+  const hub = writeAiDir(root, { ...base, workspace: { role: 'hub', hub: '.' }, repos: plan.repos });
   for (const m of plan.members) {
     members[m.name] = writeAiDir(m.abs, { ...base, workspace: { role: 'member', hub: m.hubRel } });
   }

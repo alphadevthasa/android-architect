@@ -71,11 +71,27 @@ function workspaceLabel(workspace, repos) {
 function hubWorkflows(text, hub) {
   return text
     .replace('Follow `.ai/workflows/`', `Follow the hub's workflows in \`${hub}/.ai/workflows/\``)
-    .replace('Workflows live in `.ai/workflows/`', `Workflows live in the hub: \`${hub}/.ai/workflows/\``);
+    .replace('Workflows live in `.ai/workflows/`', `Workflows live in the hub: \`${hub}/.ai/workflows/\``)
+    .replace('CODEOWNERS entry for `.ai/workflows/` and', `CODEOWNERS entry for \`${hub}/.ai/workflows/\` (in the hub repo) and`);
 }
 
 function memberNote(hub) {
   return `\n## Workspace member\n\nThis repo is a member of a workspace. The target architecture, ADRs, conventions and roadmap live in the hub repo at \`${hub}\` (see \`${hub}/.ai/README.md\`). This folder holds only generated knowledge for this repo.\n`;
+}
+
+/**
+ * The generatedAt to write: the previous one when rendering with it reproduces the existing file byte for byte (so a
+ * re-run that changes nothing else leaves the file, and git, alone), else `nowIso`. render(generatedAt) returns the text.
+ */
+function stableStamp(file, nowIso, render) {
+  try {
+    const old = fs.readFileSync(file, 'utf8');
+    const prev = JSON.parse(old)?.generatedAt;
+    if (typeof prev === 'string' && render(prev) === old) return prev;
+  } catch {
+    // No readable previous file: use the new stamp.
+  }
+  return nowIso;
 }
 
 const refuse = (rel) => new Error(`refusing to write through a symlink: ${rel}`);
@@ -202,14 +218,10 @@ export function writeAiDir(
   );
   putRedacted('README.md', isMember ? hubWorkflows(readme, workspace.hub) + memberNote(workspace.hub) : readme);
   for (const [rel, text] of Object.entries(renderKnowledge(profile, modules, catalog, meta))) putRedacted(rel, text);
-  putAi(
-    'candidates.json',
-    JSON.stringify(
-      redactJson({ catalogVersion: catalog.catalogVersion, generatedAt: now.toISOString(), candidates: candidatePaths(profile, catalog) }),
-      null,
-      2,
-    ) + '\n',
-  );
+  const candidates = candidatePaths(profile, catalog);
+  const renderCandidates = (generatedAt) =>
+    JSON.stringify(redactJson({ catalogVersion: catalog.catalogVersion, generatedAt, candidates }), null, 2) + '\n';
+  putAi('candidates.json', renderCandidates(stableStamp(path.join(aiDir, 'candidates.json'), now.toISOString(), renderCandidates)));
 
   // tools: tool-owned, wiped and rewritten from the running skill
   const toolsAbs = guard('.ai/tools');
@@ -271,14 +283,16 @@ export function writeAiDir(
   }
 
   // The index covers .ai/knowledge, so it is built once the knowledge files above exist.
-  putAi('index/index.json', JSON.stringify(buildIndex(root, { now, commit, catalogVersion: catalog.catalogVersion })) + '\n');
+  const index = buildIndex(root, { now, commit, catalogVersion: catalog.catalogVersion });
+  const renderIndex = (generatedAt) => JSON.stringify({ ...index, generatedAt }) + '\n';
+  putAi('index/index.json', renderIndex(stableStamp(path.join(aiDir, 'index', 'index.json'), index.generatedAt, renderIndex)));
 
   const extra = typeof extraGenerated === 'function'
     ? extraGenerated({ written: [...written].sort(byText), kept: [...kept].sort(byText), conflicts: [...conflicts].sort(byText), commit })
     : extraGenerated ?? {};
   for (const [rel, text] of Object.entries(extra)) putRedacted(rel, text);
 
-  writeManifest(aiDir, {
+  const manifestFor = (generatedAt) => ({
     schemaVersion: MANIFEST_SCHEMA_VERSION,
     toolVersion,
     // The base version, so ai-status compares like with like; the merged one ("+overrides") only labels generated files.
@@ -287,13 +301,16 @@ export function writeAiDir(
     // Active pins and added entries, so refresh can report what changed between runs.
     overridePins: Object.fromEntries(Object.entries(catalog.overridden?.pins ?? {}).map(([k, v]) => [k, v.status])),
     overrideAdded: catalog.overridden?.added ?? [],
-    generatedAt: now.toISOString(),
+    generatedAt,
     commit,
     mode,
     workspace,
     managed,
-    tools: hashTree(toolsAbs),
+    tools,
   });
+  const tools = hashTree(toolsAbs);
+  const renderManifest = (generatedAt) => JSON.stringify(manifestFor(generatedAt), null, 2) + '\n';
+  writeManifest(aiDir, manifestFor(stableStamp(path.join(aiDir, 'manifest.json'), now.toISOString(), renderManifest)));
   written.add('.ai/manifest.json');
 
   // local exclusion

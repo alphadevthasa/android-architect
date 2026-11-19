@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { renderProfileMarkdown } from './report.js';
+import { oneLine } from './overrides.js';
 
 const DEFAULT_TEMPLATES = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'templates', 'ai');
 const PLACEHOLDERS = ['toolVersion', 'catalogVersion', 'date', 'commit', 'mode', 'workspace'];
@@ -42,15 +43,15 @@ function renderArchitecture(profile, catalog) {
       const share = e.share === null || e.share === undefined ? 'present' : pct(e.share, e.units);
       const ev = e.evidence?.[0];
       const where = ev ? ` (evidence: ${ev.line === null || ev.line === undefined ? ev.file : `${ev.file}:${ev.line}`})` : '';
-      out.push(`- ${name} (${e.id}): ${share}${where}`);
+      out.push(`- ${oneLine(name)} (${e.id}): ${share}${where}`);
     }
     out.push('');
   }
   const ov = catalog.overridden;
   if (ov && (ov.added.length || ov.statusPinned.length)) {
     out.push('## Catalog overrides', '', 'Project-specific catalog changes from `.ai/catalog-overrides/` (not part of the shared catalog).', '');
-    for (const id of ov.added) out.push(`- Added entry: ${id} (${catalog.entry(id.slice(0, id.indexOf('.')), id.slice(id.indexOf('.') + 1))?.name ?? id})`);
-    for (const [id, p] of Object.entries(ov.pins)) out.push(`- Status pin: ${id} is ${p.status} (reason: ${p.reason})`);
+    for (const id of ov.added) out.push(`- Added entry: ${id} (${oneLine(catalog.entry(id.slice(0, id.indexOf('.')), id.slice(id.indexOf('.') + 1))?.name ?? id)})`);
+    for (const [id, p] of Object.entries(ov.pins)) out.push(`- Status pin: ${id} is ${p.status} (reason: ${oneLine(p.reason)})`);
     out.push('');
   }
   const { sdk } = profile;

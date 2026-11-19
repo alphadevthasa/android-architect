@@ -20,6 +20,7 @@ function scalar(raw, file, lineNo) {
   if (v[0] === '|' || v[0] === '>') throw bad('block scalar');
   if (v[0] === '[' || v[0] === '{') throw bad('flow collection');
   if (v[0] === "'") throw bad('single-quoted value');
+  if (v[0] === '#') throw new Error(`${file}: line ${lineNo}: a value starting with "#" is not supported (quote it if it is meant literally)`);
   if (/\s#/.test(v)) throw new Error(`${file}: line ${lineNo}: inline comments are not supported (quote the value if it contains " #")`);
   return v;
 }
