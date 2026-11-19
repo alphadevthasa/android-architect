@@ -1,5 +1,6 @@
 // Validates agent recommendations against the catalog graph and the detected profile.
 import { presentIds } from './candidates.js';
+import { activeRejections } from './adr.js';
 
 const LABELS = ['must', 'should', 'later', 'dont'];
 const TAGS = ['irreversible', 'decision'];
@@ -20,7 +21,7 @@ function reachableFrom(catalog, dimId, from) {
   return seen;
 }
 
-export function checkRecommendations(recs, catalog, profile) {
+export function checkRecommendations(recs, catalog, profile, { adrs = [] } = {}) {
   const violations = [];
   const add = (rule, message, extra = {}) => violations.push({ ...extra, rule, message });
 
@@ -195,6 +196,26 @@ export function checkRecommendations(recs, catalog, profile) {
         add('R6-anchor', `${where}: target "${d.target}" is neither present in the profile nor the target of any step`, { dimension: d.dimension });
       }
     }
+  }
+
+  // R7: remembered rejections (ADRs with status rejected) stay blocked until a reopenIf condition holds.
+  const { blocked } = activeRejections(adrs, profile);
+  const reject = (b, where, dimension, ref = {}) => add(
+    'R7-rejected',
+    `${where}: "${b.target}" in "${dimension}" was rejected in ${b.adr.file}; it can be reopened only when one of [${b.adr.reopenIf.join(', ') || 'no conditions listed'}] holds`,
+    { ...ref, dimension },
+  );
+  for (const b of blocked) {
+    for (const [i, d] of (Array.isArray(recs.dimensions) ? recs.dimensions : []).entries()) {
+      if (d && d.dimension === b.dimension && d.target === b.target && (d.label === 'must' || d.label === 'should')) {
+        reject(b, `dimensions[${i}]`, b.dimension);
+      }
+    }
+    steps.forEach((s, i) => {
+      if (s && s.dimension === b.dimension && s.to === b.target) {
+        reject(b, `step "${isStr(s.id) ? s.id : `steps[${i}]`}"`, b.dimension, { step: isStr(s.id) ? s.id : `steps[${i}]` });
+      }
+    });
   }
 
   return { ok: violations.length === 0, violations };

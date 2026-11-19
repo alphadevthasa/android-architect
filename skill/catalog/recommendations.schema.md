@@ -30,6 +30,27 @@ Rules enforced:
 - R3-order: `dependsOn` ids must exist, point to earlier steps, and form no cycles.
 - R4-unknown-id: dimension and entry ids must exist in the catalog.
 - R6-anchor: `from` must be present in the profile or be the `to` of a step reachable through `dependsOn` (same dimension), so chains cannot start from an entry the project does not use. A `from: null` step is rejected when the dimension already has a detected entry in the profile, or when a step in `dependsOn` already targets that dimension (chain from that step instead). Every `dimensions[].current` id must be present in the profile. A `target` (for labels `must`/`should`) must be present or be the `to` of some step in that dimension; `later`/`dont` need no step.
+- R7-rejected: a `dimensions[]` row with label `must` or `should` whose `target` is blocked, or a step whose `to` is blocked in that dimension, is rejected. A target is blocked by an ADR with `status: rejected` (matching `dimension` and `target`) unless one of its `reopenIf` conditions holds. Pass ADRs with `recommend-check.js --adr-dir <dir>`; the file `0000-template.md` is ignored.
 - R5-shape: required fields present, valid label and tags, matching `catalogVersion`.
 
 Use `node skill/scripts/candidates.js <projectRoot>` to list legal targets (`current`, `next`, `reachable`, `blockedBy`) before proposing steps.
+
+## ADR front matter
+
+ADR files (`.ai/knowledge/adr/*.md`) start with a front matter block between two `---` lines. Only `key: value` lines and `key:` followed by `- item` lines are supported (no anchors, tags, block scalars or flow collections). Values may be bare or in double quotes.
+
+```
+---
+id: "0001"
+title: Keep OkHttp and Retrofit
+status: rejected        # proposed | accepted | superseded | rejected
+date: 2026-11-19
+dimension: networking   # required when status is rejected
+target: ktor-client     # required when status is rejected
+reopenIf:
+  - present:kmp
+reason: "Why it was rejected."
+---
+```
+
+`reopenIf` conditions use `present:<entryId>` or `absent:<entryId>`, checked across all profile dimensions (an entry is present when `units > 0`, `share > 0`, or `share` is null). Any other text is a human note and never reopens the ADR.
