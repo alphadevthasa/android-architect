@@ -3,7 +3,7 @@ import path from 'node:path';
 
 export const MANIFEST_SCHEMA_VERSION = 1;
 
-/** Read <aiDir>/manifest.json; null when absent. Throws on bad JSON or a newer schema. */
+/** Read <aiDir>/manifest.json; null when absent. Throws on bad JSON, a non-object, a missing or non-integer schemaVersion, or a newer schema. */
 export function readManifest(aiDir) {
   const file = path.join(aiDir, 'manifest.json');
   let text;
@@ -19,9 +19,12 @@ export function readManifest(aiDir) {
   } catch (e) {
     throw new Error(`invalid manifest ${file}: ${e.message}`);
   }
-  if (!m || typeof m !== 'object' || m.schemaVersion > MANIFEST_SCHEMA_VERSION) {
+  if (m === null || typeof m !== 'object' || Array.isArray(m) || !Number.isInteger(m.schemaVersion) || m.schemaVersion < 1) {
+    throw new Error(`invalid manifest ${file}: expected an object with an integer schemaVersion`);
+  }
+  if (m.schemaVersion > MANIFEST_SCHEMA_VERSION) {
     throw new Error(
-      `manifest schemaVersion ${m?.schemaVersion} is newer than supported (${MANIFEST_SCHEMA_VERSION}); update android-architect`,
+      `manifest schemaVersion ${m.schemaVersion} is newer than supported (${MANIFEST_SCHEMA_VERSION}); update android-architect`,
     );
   }
   return m;

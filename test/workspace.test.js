@@ -86,6 +86,17 @@ test('init-ai --workspace writes hub repos.json and a thin member', () => {
   assert.ok(fs.existsSync(path.join(m, 'candidates.json')));
 });
 
+test('member pointer and README point at the hub workflows', () => {
+  assert.equal(init(['.', '--workspace', '../lib-core']).status, 0);
+  for (const f of ['AGENTS.md', 'CLAUDE.md', '.ai/README.md']) {
+    const text = fs.readFileSync(path.join(lib, f), 'utf8');
+    const line = text.split('\n').find((l) => /^(Follow|Workflows live)/.test(l));
+    assert.match(line, /`\.\.\/hub-app\/\.ai\/workflows\/`/, f);
+    assert.doesNotMatch(line, / `\.ai\/workflows\//, f);
+  }
+  assert.match(fs.readFileSync(path.join(hub, 'AGENTS.md'), 'utf8'), /Follow `\.ai\/workflows\/`/);
+});
+
 test('repos.json is user-owned after the first write', () => {
   assert.equal(init(['.', '--workspace', '../lib-core']).status, 0);
   const f = path.join(hub, '.ai/repos.json');

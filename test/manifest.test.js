@@ -55,3 +55,14 @@ test('newer schema and bad JSON throw', () => {
   fs.writeFileSync(path.join(dir, 'manifest.json'), '{nope');
   assert.throws(() => readManifest(dir), /manifest/);
 });
+
+test('a manifest that is not an object or lacks an integer schemaVersion is invalid, not newer', () => {
+  const dir = path.join(tmp, 'ai3');
+  fs.mkdirSync(dir);
+  const { schemaVersion, ...noSchema } = sample();
+  for (const value of [null, [], 42, '"x"', noSchema, { ...sample(), schemaVersion: '1' }, { ...sample(), schemaVersion: 1.5 }, { ...sample(), schemaVersion: 0 }]) {
+    fs.writeFileSync(path.join(dir, 'manifest.json'), typeof value === 'string' ? value : JSON.stringify(value));
+    assert.throws(() => readManifest(dir), /^Error: invalid manifest /, JSON.stringify(value));
+  }
+  assert.equal(schemaVersion, 1);
+});

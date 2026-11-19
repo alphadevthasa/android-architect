@@ -55,6 +55,13 @@ function workspaceLabel(workspace, repos) {
   return `hub (${n} ${n === 1 ? 'repo' : 'repos'})`;
 }
 
+/** Members have no workflows of their own: point the given text at the hub's. */
+function hubWorkflows(text, hub) {
+  return text
+    .replace('Follow `.ai/workflows/`', `Follow the hub's workflows in \`${hub}/.ai/workflows/\``)
+    .replace('Workflows live in `.ai/workflows/`', `Workflows live in the hub: \`${hub}/.ai/workflows/\``);
+}
+
 function memberNote(hub) {
   return `\n## Workspace member\n\nThis repo is a member of a workspace. The target architecture, ADRs, conventions and roadmap live in the hub repo at \`${hub}\` (see \`${hub}/.ai/README.md\`). This folder holds only generated knowledge for this repo.\n`;
 }
@@ -184,7 +191,7 @@ export function writeAiDir(
   const pointers = applyPointers(root, {
     local,
     appendPointers,
-    block: readTemplate('pointer.md', templatesDir),
+    block: isMember ? hubWorkflows(readTemplate('pointer.md', templatesDir), workspace.hub) : readTemplate('pointer.md', templatesDir),
     write: (rel, content) => put(rel, content),
   });
   const files = listFiles(root);
@@ -195,13 +202,11 @@ export function writeAiDir(
   const meta = { date, commit, catalogVersion: catalog.catalogVersion };
 
   // generated
-  putAi(
-    'README.md',
-    renderReadme(
-      { toolVersion, catalogVersion: catalog.catalogVersion, date, commit, mode, workspace: workspaceLabel(workspace, repos) },
-      templatesDir,
-    ) + (isMember ? memberNote(workspace.hub) : ''),
+  const readme = renderReadme(
+    { toolVersion, catalogVersion: catalog.catalogVersion, date, commit, mode, workspace: workspaceLabel(workspace, repos) },
+    templatesDir,
   );
+  putAi('README.md', isMember ? hubWorkflows(readme, workspace.hub) + memberNote(workspace.hub) : readme);
   for (const [rel, text] of Object.entries(renderKnowledge(profile, modules, catalog, meta))) putAi(rel, text);
   putAi(
     'candidates.json',
