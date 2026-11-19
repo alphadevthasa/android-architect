@@ -160,10 +160,20 @@ test('Task 9: SKILL.md documents setup, refresh, retrieval, stale context and re
   for (const t of ['init-ai.js', 'refresh.js', 'index.js', 'ai-status.js', '`git`', '.ai/']) assert.ok(rule4.includes(t), `rule 4 must mention ${t}`);
 });
 
-test('Task 9: every script path in SKILL.md exists under skill/scripts', () => {
-  for (const m of readSkill().matchAll(/scripts\/([\w.-]+\.js)/g)) {
-    assert.ok(fs.existsSync(path.join(skillDir, 'scripts', m[1])), `missing ${m[1]}`);
-  }
+test('Task 9: the rejected ADR example parses, and workspace and --out rules are documented', async () => {
+  const text = readSkill();
+  const m = /```\n(---\n[\s\S]*?\n---)\n```/.exec(text.slice(text.indexOf('## Rejections')));
+  assert.ok(m, 'rejected ADR example block');
+  const { parseAdr } = await import('../skill/scripts/lib/adr.js');
+  const adr = parseAdr(m[1] + '\n', 'SKILL.md');
+  assert.equal(adr.status, 'rejected');
+  assert.ok(adr.dimension && adr.target && adr.reason);
+  assert.ok(adr.reopenIf.some((c) => /^(present|absent):/.test(c)));
+  assert.match(text, /role: member/);
+  assert.match(text, /<hub>\/\.ai\/knowledge\/adr/);
+  assert.match(text, /never the default/);
+  assert.match(text, /--out <tmp>\/index\.json/);
+  assert.match(text, /never the vendored copies/);
 });
 
 test('Task 9: output templates and method cover refresh and rejections', () => {

@@ -85,7 +85,7 @@ Ordered; each step can be merged and released on its own.
 
 ## Validation
 
-recommend-check: <passed | not validated, with remaining violations listed verbatim>. JSON: `<tmp>/recommendations.json`.
+recommend-check: <passed | not validated, with remaining violations listed verbatim>. JSON: `.ai/recommendations.json` when `.ai/` exists, else `<tmp>/recommendations.json`.
 ```
 
 Keep the table and the steps consistent: every `must` or `should` target that differs from the current state has at least one step, and every step belongs to a dimension in the table.
@@ -139,4 +139,3 @@ Not migrating to <target> for now. <who decided, when>
 ## Consequences
 <what stays as is, what it costs, what would change the decision>
 ```
-

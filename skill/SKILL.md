@@ -44,10 +44,12 @@ Scripts for the `.ai/` folder (details in the commands below):
 |---|---|---|
 | `node <skill-dir>/scripts/init-ai.js <root> [--local] [--append-pointers] [--workspace [paths...]]` | Creates `<root>/.ai/` and prints `{ written, kept, conflicts, pointers: [{ file, action }], excluded }`. With `--workspace` it prints `{ hub, members, repos, proposed? }` | 0 ok, 1 usage error or refusal, 2 not a Gradle project |
 | `node <skill-dir>/scripts/refresh.js <root>` | Regenerates the generated files, prints `{ tool, catalog, candidates, recommendations, rejections, files, notes }` and writes `.ai/refresh-report.md` | 0 ok, 1 usage error or refusal, 2 no manifest or not a Gradle project |
-| `node <skill-dir>/scripts/ai-status.js [<root>]` | Prints `{ ok, stale, manifest }`; `stale` holds `no-manifest`, `commit-moved`, `catalog-moved` or `tools-modified` | 0 even when stale, 2 when there is no manifest |
-| `node <skill-dir>/scripts/index.js build <root> [--out <file>]` and `index.js query "<terms>" [--index <file>] [--limit N] [--kind source\|gradle\|doc]` | Builds and queries the retrieval index | 0 ok, 1 usage error |
+| `node <skill-dir>/scripts/ai-status.js <root>` | Prints `{ ok, stale, manifest }`; `stale` holds `commit-moved`, `catalog-moved` or `tools-modified` | 0 even when stale; 2 when there is no manifest (message on stderr, no JSON); 1 usage error |
+| `node <skill-dir>/scripts/index.js build <root> [--out <file>]` and `index.js query "<terms>" [--index <file>] [--limit N] [--kind source\|gradle\|doc]` | Builds and queries the retrieval index. `build` defaults `--out` to `<root>/.ai/index/index.json` and creates `.ai/` | 0 ok, 1 usage error |
 
-In a project that has `.ai/`, the vendored copies run as `node .ai/tools/scripts/index.js ...` and `node .ai/tools/scripts/ai-status.js`. `recommend-check.js` also takes `--adr-dir <dir>` and then applies rule R7-rejected.
+Always run the installed scripts from `<skill-dir>`, never the vendored copies in `.ai/tools/`. Those exist for teammates without the skill (the `.ai/workflows` call them). `recommend-check.js` also takes `--adr-dir <dir>` and then applies rule R7-rejected. If it exits 2 with "cannot read ADRs", an ADR file is invalid: fix it (show the file and the error to the user if they wrote it). That does not use up the recommendations retry budget, but it counts toward the 5-run cap.
+
+Workspaces: read `<root>/.ai/manifest.json`. If it has `workspace` with `role: member`, the member has no `knowledge/adr`, target, conventions or components: they live in the hub, `<hub> = <root>/<workspace.hub>`. Use `<hub>/.ai/knowledge/adr` for `--adr-dir`, and write ADRs, `architecture-target.md` and `recommendations.json` in `<hub>/.ai/`. Never create user-owned files in a member's `.ai/`.
 
 Reading the profile:
 
@@ -63,7 +65,7 @@ If `scan.js` exits 2, tell the user the directory is not a Gradle or Ant project
 When you need project knowledge, go from cheapest and most trusted to most expensive:
 
 1. `.ai/knowledge` and the accepted ADRs in `.ai/knowledge/adr` (ignore `proposed` and `superseded` ones as truth; mention them as pending).
-2. `node .ai/tools/scripts/index.js query "<terms>"` (or `<skill-dir>/scripts/index.js query` with `--index <file>` when there is no `.ai/`). Narrow with `--kind source|gradle|doc` and `--limit N`.
+2. `node <skill-dir>/scripts/index.js query "<terms>" --index <root>/.ai/index/index.json` (inside `.ai/` projects init and refresh maintain that index). With no `.ai/`, build only with `--out <tmp>/index.json` (never the default, which would create `.ai/`) and query with `--index <tmp>/index.json`. Narrow with `--kind source|gradle|doc` and `--limit N`.
 3. graphify, only if `graphify-out/` exists.
 4. `grep` / `rg` and reading files.
 
@@ -71,7 +73,7 @@ Whatever the source, cite `path:line` from the files themselves (ground rule 1).
 
 ## Stale context
 
-At the start of any command in a project that has `.ai/`, run `ai-status.js <root>`. If `stale` is non-empty, say why (`no-manifest`, `commit-moved`, `catalog-moved`, `tools-modified`) and suggest `refresh`. If `tools-modified` appears, warn that the vendored tools under `.ai/tools` changed since generation and do not run them until the user confirms (a full refusal arrives in a later version). The skill's own scripts in `<skill-dir>` are unaffected.
+At the start of any command in a project that has `.ai/`, run `node <skill-dir>/scripts/ai-status.js <root>`. Exit 2 means no `.ai/` is set up: offer `setup`. Otherwise, if `stale` is non-empty, say why (`commit-moved`: the repo moved since generation; `catalog-moved`: the skill catalog changed; `tools-modified`) and suggest `refresh`. If `tools-modified` appears, warn that the vendored tools under `.ai/tools` changed since generation and do not run them until the user confirms (you run `<skill-dir>` scripts anyway; teammates' workflows use the vendored ones).
 
 ## Command: audit
 
@@ -120,7 +122,7 @@ Goal: create the `.ai/` folder for the project and fill its user-owned files wit
 
 Goal: bring generated `.ai/` content up to date and tell the user what changed.
 
-1. Run `ai-status.js <root>`, then `node <skill-dir>/scripts/refresh.js <root>`. Exit 2 means no manifest or not a Gradle project: suggest `setup`.
+1. Run `node <skill-dir>/scripts/ai-status.js <root>`, then `node <skill-dir>/scripts/refresh.js <root>`. Exit 2 means no manifest or not a Gradle project: suggest `setup`.
 2. Read the report JSON (and `.ai/refresh-report.md`). Explain it in the user's language: catalog moved, new candidates, invalidated steps in `recommendations`, status changes, and `rejections` that reopened because a `reopenIf` condition now holds. Note `conflicts` and `notes` as they are.
 3. When the report shows violations or invalidated steps, propose a re-run of `recommend` and wait for a yes.
 4. Never edit user-owned files (`architecture-target.md`, `conventions.md`, `components.md`, `adr/**`, `migration/roadmap.md`, `recommendations.json`, `repos.json`) without asking. Generated files, tools and managed workflows are the scripts' business.
