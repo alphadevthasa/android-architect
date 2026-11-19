@@ -67,9 +67,11 @@ test('SKILL.md has the six required sections in order', () => {
 test('Not yet available lists every later command', () => {
   const body = readSkill();
   const section = body.slice(body.indexOf('## Not yet available'));
-  for (const cmd of ['setup', 'prioritize', 'migration-plan', 'data-migration', 'lib-update', 'review', 'refresh', 'fitness', 'run']) {
+  for (const cmd of ['prioritize', 'migration-plan', 'data-migration', 'lib-update', 'review', 'fitness', 'run']) {
     assert.match(section, new RegExp('`' + cmd + '`'), `missing ${cmd}`);
   }
+  const listed = section.slice(0, section.indexOf('When asked for one'));
+  for (const cmd of ['setup', 'refresh']) assert.doesNotMatch(listed, new RegExp('`' + cmd + '`'), `${cmd} is available`);
 });
 
 test('every script named in SKILL.md exists', () => {
@@ -144,4 +146,31 @@ test('I7: README scopes --json to doctor; architecture rubric follows the Google
   assert.match(s1, /UI layer must not depend on data sources directly/);
   assert.match(s1, /domain layer[^\n]*optional/i);
   assert.match(s1, /Only when the project claims Clean Architecture or dependency inversion/);
+});
+
+test('Task 9: SKILL.md documents setup, refresh, retrieval, stale context and rejections', () => {
+  const text = readSkill();
+  for (const h of ['## Command: setup', '## Command: refresh', '## Retrieval order', '## Stale context', '## Rejections']) {
+    assert.ok(text.includes(h), `missing ${h}`);
+  }
+  for (const t of ['--adr-dir', 'ai-status.js', '--append-pointers', 'status: rejected', 'status: proposed', 'tools-modified', 'needs-confirmation', 'reopenIf', 'R7-rejected', 'graphify-out/']) {
+    assert.ok(text.includes(t), `SKILL.md must mention ${t}`);
+  }
+  const rule4 = /4\. \*\*Read only[^\n]*/.exec(text)[0];
+  for (const t of ['init-ai.js', 'refresh.js', 'index.js', 'ai-status.js', '`git`', '.ai/']) assert.ok(rule4.includes(t), `rule 4 must mention ${t}`);
+});
+
+test('Task 9: every script path in SKILL.md exists under skill/scripts', () => {
+  for (const m of readSkill().matchAll(/scripts\/([\w.-]+\.js)/g)) {
+    assert.ok(fs.existsSync(path.join(skillDir, 'scripts', m[1])), `missing ${m[1]}`);
+  }
+});
+
+test('Task 9: output templates and method cover refresh and rejections', () => {
+  const tpl = fs.readFileSync(path.join(skillDir, 'references', 'output-templates.md'), 'utf8');
+  assert.match(tpl, /### Refresh report/);
+  assert.match(tpl, /### ADR \(rejected\)/);
+  assert.match(tpl, /status: rejected/);
+  const method = fs.readFileSync(path.join(skillDir, 'references', 'recommendation-method.md'), 'utf8');
+  assert.match(method, /R7-rejected/);
 });

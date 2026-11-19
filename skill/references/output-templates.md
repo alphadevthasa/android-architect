@@ -89,3 +89,54 @@ recommend-check: <passed | not validated, with remaining violations listed verba
 ```
 
 Keep the table and the steps consistent: every `must` or `should` target that differs from the current state has at least one step, and every step belongs to a dimension in the table.
+
+### Refresh report
+
+```markdown
+# Refresh: <project name>
+
+Tool <old> -> <new>, catalog <old> -> <new>. Last generated at <commit>, now <commit>.
+
+## What changed
+- Catalog: <moved | unchanged>, <what it means for this project>.
+- New candidates: <dimension: entry ids, or none>.
+- Invalidated steps: <step id, why, or none>.
+- Status changes: <entry id: old -> new, or none>.
+- Reopened rejections: <ADR id, which reopenIf condition now holds, or none>.
+
+## Files
+Written: <n>. Kept (user-owned): <list>. Conflicts (.new written): <list or none>.
+
+## Next step
+<propose re-running recommend when there are violations or invalidated steps; otherwise "nothing to do">
+```
+
+Mention `notes` from the script output verbatim. The full machine report is `.ai/refresh-report.md`.
+
+### ADR (rejected)
+
+```markdown
+---
+id: "0007"
+title: Keep RxJava in the data layer
+status: rejected
+date: 2026-11-19
+dimension: async
+target: coroutines
+reopenIf:
+- absent:rxjava
+reason: Team has no capacity before the Q1 release
+---
+
+# 0007 Keep RxJava in the data layer
+
+## Context
+<evidence with path:line, what was recommended>
+
+## Decision
+Not migrating to <target> for now. <who decided, when>
+
+## Consequences
+<what stays as is, what it costs, what would change the decision>
+```
+

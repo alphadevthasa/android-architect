@@ -52,3 +52,8 @@ Order the steps across dimensions using catalog prerequisites (for example Kotli
 - **Respect the team's bandwidth.** Do not run more than one or two large migrations in parallel. Say which steps can wait.
 
 The guardrail (`recommend-check.js`) enforces the legal parts of this: successor hops (R1), prerequisites first (R2), valid ordering (R3), known ids (R4), shape (R5), and anchoring every chain in what the project actually uses (R6). Passing it means the plan is legal, not that it is wise. The judgment stays yours.
+
+## 5. Rejections
+
+A rejected recommendation is a decision, not a gap. Record it as an ADR with `status: rejected`, its `dimension`, `target`, `reason` and machine-checkable `reopenIf` conditions (`present:<entryId>` or `absent:<entryId>`). `recommend-check.js --adr-dir <root>/.ai/knowledge/adr` then rejects a `must` or `should` target (or a step `to`) that a rejected ADR blocks (R7-rejected) until a condition holds. Propose the alternative or ask whether to reopen; never route around the ADR. `refresh` reports reopened rejections.
+
