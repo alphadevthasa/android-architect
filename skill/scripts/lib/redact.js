@@ -37,7 +37,8 @@ const VAL = '(?:"""(.*?)"""|(["\'])((?:\\\\.|(?!\\4)[^\\\\])*)\\4)'; // groups 3
 const valueOf = (raw, str) => (raw !== undefined ? raw : str);
 // Keys are bounded and anchored on a non-word boundary so the scan stays linear on long lines.
 const SIGNING_QUOTED = /\b((?:storePassword|keyPassword)\s*(?:[=:]\s*|\s+))(?:"""(.*?)"""|(["'])((?:\\.|(?!\3)[^\\])*)\3)/g;
-const SIGNING_BARE = /^(\s*(?:storePassword|keyPassword)\s*[=:]\s*)([^\s"'$()[\]][^\r\n"'()[\]]*?)(\s*)$/;
+const SIGNING_BARE_PREFIX = /^(\s*(?:storePassword|keyPassword)\s*[=:]\s*)([\s\S]*)$/; // the rest is checked without backtracking
+const SIGNING_BARE_VALUE = /^[^\s"'$()[\]][^\r\n"'()[\]]*$/;
 const BUILD_CONFIG = /(\bbuildConfigField\s*\(?\s*["']String["']\s*,\s*["']([\w.\-]{1,64})["']\s*,\s*(["'])\\?")((?:\\.|(?!\\?"\3)[^\\])*)(\\?"\3)/g;
 // key [: Type] (= | : | space) value   e.g. token = "x", const val API_KEY: String = "x", apiKey "x"
 const ASSIGN = new RegExp(`(?<![\\w.\\-])(["']?([\\w.\\-]{1,64})["']?(?:\\s*:\\s*[A-Za-z_][\\w.<>?]{0,40})?(?:\\s*[=:]\\s*|\\s+))${VAL}`, 'g');
@@ -59,11 +60,14 @@ function redactLine(line, lineNo, hits) {
     hit('signing-password');
     return raw !== undefined ? `${pre}"""${mark('signing-password')}"""` : `${pre}${q}${mark('signing-password')}${q}`;
   });
-  out = out.replace(SIGNING_BARE, (m, pre, v, tail) => {
-    if (isMarked(v)) return m;
-    hit('signing-password');
-    return `${pre}${mark('signing-password')}${tail}`;
-  });
+  const bare = SIGNING_BARE_PREFIX.exec(out);
+  if (bare) {
+    const value = bare[2].trimEnd();
+    if (SIGNING_BARE_VALUE.test(value) && !isMarked(value)) {
+      hit('signing-password');
+      out = `${bare[1]}${mark('signing-password')}${bare[2].slice(value.length)}`;
+    }
+  }
   out = out.replace(BUILD_CONFIG, (m, pre, key, _q, value, post) => {
     if (!cred(value) || !isCredentialKey(key)) return m;
     hit('credential');
@@ -71,6 +75,8 @@ function redactLine(line, lineNo, hits) {
   });
   const quoted = (m, pre, key, raw, q, str) => {
     const v = valueOf(raw, str);
+    // A key quote must be closed right after the key: "token=" + token is code inside a literal, not an assignment.
+    if (/["']/.test(pre[0]) && pre[1 + key.length] !== pre[0]) return m;
     if (raw !== undefined && !isCredentialKey(key)) return `${pre}"""${redactLine(raw, lineNo, hits)}"""`; // look inside
     if (!cred(v) || !isCredentialKey(key)) return m;
     hit('credential');

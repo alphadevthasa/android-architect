@@ -79,6 +79,8 @@ test('hits carry original line numbers, also after a multi-line private key', ()
 test('no false positives', () => {
   for (const s of [
     'versionName "1.2.3"',
+    'Log.d(TAG, "token=" + token + " loaded")',
+    'println("password: " + pwd)',
     'val token = BuildConfig.TOKEN',
     'storePassword = System.getenv("STORE_PASSWORD")',
     'storePassword = props["storePassword"]',
@@ -156,6 +158,9 @@ test('long single lines redact in linear time', () => {
     'a "'.repeat(300 * 1024),
     'k = '.repeat(250 * 1024),
     'a.b-'.repeat(256 * 1024),
+    ...['storePassword=x', 'keyPassword = ', 'storePassword "', 'token = ', 'const val API_KEY: String', 'export TOKEN=', '"k", ', 'buildConfigField "String", "API_KEY", "'].flatMap(
+      (head) => [head + ' '.repeat(1024 * 1024) + 'y', ' '.repeat(1024 * 1024) + head, (head + ' ').repeat(100 * 1024)],
+    ),
   ];
   for (const l of lines) {
     const t0 = Date.now();

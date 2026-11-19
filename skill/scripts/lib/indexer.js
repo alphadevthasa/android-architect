@@ -28,7 +28,7 @@ const tokenizeSafe = (text) => tokenize(redact(text).text);
 
 function sourceUnits(rel, lines) {
   lines = redactLines(lines);
-  const fileTokens = [...tokenize(path.posix.basename(rel))];
+  const fileTokens = [...tokenizeSafe(path.posix.basename(rel))];
   const decls = [];
   lines.forEach((text, i) => {
     const pkg = /^\s*package\s+([\w.]+)/.exec(text);
