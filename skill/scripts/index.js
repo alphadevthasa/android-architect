@@ -3,9 +3,9 @@
 //        node index.js query "<terms>" [--index <file>] [--limit N] [--kind source|gradle|doc]
 import fs from 'node:fs';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { loadCatalog } from './lib/catalog.js';
+import { headCommit } from './lib/git.js';
 import { buildIndex, queryIndex } from './lib/indexer.js';
 
 const USAGE =
@@ -47,18 +47,6 @@ function parseArgs(argv) {
   return opts;
 }
 
-function gitCommit(root) {
-  try {
-    return execFileSync('git', ['rev-parse', '--short', 'HEAD'], {
-      cwd: root,
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    }).trim() || null;
-  } catch {
-    return null;
-  }
-}
-
 function build(opts) {
   const root = path.resolve(opts.positional);
   let isDir = false;
@@ -70,7 +58,7 @@ function build(opts) {
   if (!isDir || !BUILD_FILES.some((f) => fs.existsSync(path.join(root, f)))) {
     fail(2, `not an Android/Gradle project: ${opts.positional}`);
   }
-  const commit = gitCommit(root);
+  const commit = headCommit(root);
   const index = buildIndex(root, {
     now: new Date(),
     commit,
