@@ -9,11 +9,12 @@ import { discoverModules } from './modules.js';
 import { listFiles } from './walk.js';
 import { buildIndex } from './indexer.js';
 import { headCommit, gitDir, topLevel, addToExclude, changedSince } from './git.js';
-import { sha256File, hashTree } from './hash.js';
+import { sha256File, hashTree, regularFiles } from './hash.js';
 import { MANIFEST_SCHEMA_VERSION, readManifest, writeManifest } from './manifest.js';
 import { readTemplate, renderReadme, renderKnowledge } from './knowledge.js';
 import { applyPointers } from './pointers.js';
 import { redact, redactJson } from './redact.js';
+import { collectVendorSources, verifyTools, selfCheckTools } from './integrity.js';
 
 const DEFAULT_SKILL_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const WORKFLOWS = ['01-read-context.md', '02-plan.md', '03-implement.md', '04-review.md'];
@@ -65,21 +66,6 @@ function hubWorkflows(text, hub) {
 
 function memberNote(hub) {
   return `\n## Workspace member\n\nThis repo is a member of a workspace. The target architecture, ADRs, conventions and roadmap live in the hub repo at \`${hub}\` (see \`${hub}/.ai/README.md\`). This folder holds only generated knowledge for this repo.\n`;
-}
-
-/** Every file under dir (regular files only); throws on symlinks. Paths relative to dir, sorted. */
-function regularFiles(dir) {
-  const out = [];
-  const walk = (abs, rel) => {
-    for (const e of fs.readdirSync(abs, { withFileTypes: true })) {
-      const r = rel ? `${rel}/${e.name}` : e.name;
-      if (e.isSymbolicLink()) throw new Error(`refusing to write through a symlink: ${r}`);
-      if (e.isDirectory()) walk(path.join(abs, e.name), r);
-      else if (e.isFile()) out.push(r);
-    }
-  };
-  walk(dir, '');
-  return out.sort(byText);
 }
 
 const refuse = (rel) => new Error(`refusing to write through a symlink: ${rel}`);
@@ -170,19 +156,7 @@ export function writeAiDir(
   preflight(root, { local });
 
   // Vendor sources are read into memory before the first write, and must not live inside .ai.
-  const realAi = fs.existsSync(aiDir) ? fs.realpathSync(aiDir) : path.join(realRoot, '.ai');
-  const vendorSources = [
-    ['tools/scripts', path.join(skillDir, 'scripts')],
-    ['tools/catalog', catalogDir],
-  ].flatMap(([destRel, srcDir]) => {
-    const realSrc = fs.realpathSync(srcDir);
-    if (realSrc === realAi || realSrc.startsWith(realAi + path.sep)) {
-      throw new Error(
-        `refusing to vendor from inside .ai (${srcDir}): a vendored copy cannot regenerate .ai; run the installed skill or npx android-architect`,
-      );
-    }
-    return regularFiles(srcDir).map((rel) => [`${destRel}/${rel}`, fs.readFileSync(path.join(srcDir, rel))]);
-  });
+  const vendorSources = collectVendorSources(skillDir, catalogDir, { aiDir });
   toolVersion = toolVersion ?? resolveToolVersion(skillDir, aiDir);
 
   const catalog = loadCatalog(catalogDir);
@@ -225,8 +199,7 @@ export function writeAiDir(
   // tools: tool-owned, wiped and rewritten from the running skill
   const toolsAbs = guard('.ai/tools');
   fs.rmSync(toolsAbs, { recursive: true, force: true });
-  for (const [rel, data] of vendorSources) putAi(rel, data);
-  putAi('tools/package.json', '{"type":"module","private":true}\n');
+  for (const [rel, data] of vendorSources) putAi(`tools/${rel}`, data);
 
   // managed workflows (hub and standalone only)
   const managed = {};
@@ -321,20 +294,22 @@ export function writeAiDir(
   };
 }
 
-/** Report how stale the .ai folder is. Stale is information, not failure. */
-export function aiStatus(root, { toolCatalogVersion }) {
+/**
+ * Report how stale the .ai folder is. Stale is information, not failure.
+ * The vendored tools are verified against the running skill (skillDir, catalogDir, toolVersion); with `selfCheck`
+ * (a vendored copy running itself) only against manifest.json, which is weaker and reported as trusted: false.
+ */
+export function aiStatus(root, { toolCatalogVersion, skillDir = DEFAULT_SKILL_DIR, catalogDir, toolVersion, selfCheck = false }) {
   const aiDir = path.join(root, '.ai');
   const manifest = readManifest(aiDir);
   if (!manifest) return { ok: false, stale: ['no-manifest'], manifest: null };
   const stale = [];
   if (commitMoved(root, manifest.commit ?? null, headCommit(root))) stale.push('commit-moved');
   if (toolCatalogVersion !== manifest.catalogVersion) stale.push('catalog-moved');
-  let tools = {};
-  try {
-    if (fs.existsSync(path.join(aiDir, 'tools'))) tools = hashTree(path.join(aiDir, 'tools'));
-  } catch {
-    tools = null;
-  }
-  if (tools === null || JSON.stringify(tools) !== JSON.stringify(manifest.tools ?? {})) stale.push('tools-modified');
-  return { ok: stale.length === 0, stale, manifest };
+  const tools = selfCheck
+    ? selfCheckTools(aiDir)
+    : verifyTools(root, { skillDir, catalogDir, toolVersion: toolVersion ?? resolveToolVersion(skillDir, aiDir) });
+  if (tools.status === 'modified') stale.push('tools-modified');
+  if (tools.status === 'unverifiable') stale.push('tools-unverifiable');
+  return { ok: stale.length === 0, stale, manifest, tools: { ...tools, trusted: !selfCheck } };
 }

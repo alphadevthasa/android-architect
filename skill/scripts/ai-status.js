@@ -1,11 +1,14 @@
 #!/usr/bin/env node
-// Usage: node ai-status.js [<root>]
+// Usage: node ai-status.js [<root>] [--trust-modified-tools]
 // Prints how stale <root>/.ai is. Exit 0 even when stale; exit 2 when there is no manifest.
+// Run from the installed skill, it verifies .ai/tools against that skill. Run from a vendored .ai/tools/scripts copy, it
+// only checks .ai/tools against .ai/manifest.json (weaker) and exits 3 when they differ, unless --trust-modified-tools.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadCatalog } from './lib/catalog.js';
 import { aiStatus } from './lib/aidir.js';
+import { TRUST_FLAG, MODIFIED_MESSAGE, vendoredAiDir, vendoredToolsRefused } from './lib/integrity.js';
 
 function fail(code, message) {
   process.stderr.write(message + '\n');
@@ -13,11 +16,13 @@ function fail(code, message) {
 }
 
 export function main(argv) {
-  if (argv.length > 1 || argv[0]?.startsWith('--')) fail(1, 'usage: node ai-status.js [<root>]');
-  const root = path.resolve(argv[0] ?? '.');
+  if (vendoredToolsRefused(import.meta.url, argv)) fail(3, MODIFIED_MESSAGE);
+  const args = argv.filter((a) => a !== TRUST_FLAG);
+  if (args.length > 1 || args[0]?.startsWith('--')) fail(1, `usage: node ai-status.js [<root>] [${TRUST_FLAG}]`);
+  const root = path.resolve(args[0] ?? '.');
   let status;
   try {
-    status = aiStatus(root, { toolCatalogVersion: loadCatalog().catalogVersion });
+    status = aiStatus(root, { toolCatalogVersion: loadCatalog().catalogVersion, selfCheck: vendoredAiDir(import.meta.url) !== null });
   } catch (e) {
     fail(1, e.message);
   }

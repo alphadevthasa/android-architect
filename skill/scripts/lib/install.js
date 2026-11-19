@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { loadCatalog } from './catalog.js';
+import { aiStatus } from './aidir.js';
 
 const NAME = 'android-architect';
 const HARNESSES = [
@@ -150,7 +151,11 @@ export function uninstall({ home, force = false }) {
   return { removed };
 }
 
-export function doctor({ home }) {
+/**
+ * Installed harnesses and optional tools. With `root`, also the project's .ai status, with its vendored tools verified
+ * against the installed skill of the first installed harness.
+ */
+export function doctor({ home, root }) {
   const harnesses = HARNESSES.map((h) => {
     const target = targetOf(home, h);
     const entry = { name: h.name, installed: false };
@@ -165,5 +170,21 @@ export function doctor({ home }) {
     return entry;
   });
   const graphify = HARNESSES.some((h) => fs.existsSync(path.join(home, h.dir, 'skills', 'graphify')));
-  return { node: process.version, harnesses, optional: { graphify } };
+  const result = { node: process.version, harnesses, optional: { graphify } };
+  if (root !== undefined) result.project = projectStatus(home, root, harnesses);
+  return result;
+}
+
+function projectStatus(home, root, harnesses) {
+  const first = harnesses.find((h) => h.installed);
+  if (!first) return { aiStatus: null, reason: 'no installed android-architect skill to verify against' };
+  const skillDir = targetOf(home, HARNESSES.find((h) => h.name === first.name));
+  const catalogDir = path.join(skillDir, 'catalog');
+  const status = aiStatus(root, {
+    toolCatalogVersion: loadCatalog(catalogDir).catalogVersion,
+    skillDir,
+    catalogDir,
+    toolVersion: first.version,
+  });
+  return { harness: first.name, aiStatus: status };
 }

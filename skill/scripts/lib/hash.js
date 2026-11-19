@@ -24,3 +24,18 @@ export function hashTree(dir, base = dir) {
   walk(dir);
   return Object.fromEntries(Object.entries(out).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
 }
+
+/** Every regular file under dir as a sorted POSIX path relative to dir. Throws on symlinks. */
+export function regularFiles(dir) {
+  const out = [];
+  const walk = (abs, rel) => {
+    for (const e of fs.readdirSync(abs, { withFileTypes: true })) {
+      const r = rel ? `${rel}/${e.name}` : e.name;
+      if (e.isSymbolicLink()) throw new Error(`refusing to write through a symlink: ${r}`);
+      if (e.isDirectory()) walk(path.join(abs, e.name), r);
+      else if (e.isFile()) out.push(r);
+    }
+  };
+  walk(dir, '');
+  return out.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+}

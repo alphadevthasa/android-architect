@@ -85,6 +85,24 @@ function printRefresh(r) {
   console.log(out.join('\n'));
 }
 
+function printProject(p) {
+  const s = p.aiStatus;
+  if (s === null) {
+    console.log(`tools: unverifiable (${p.reason})`);
+    return;
+  }
+  if (s.manifest === null) {
+    console.log('project: no .ai/manifest.json (run init first)');
+    return;
+  }
+  console.log(`project: ${s.ok ? 'up to date' : `stale (${s.stale.join(', ')})`}`);
+  const t = s.tools;
+  const n = t.changed.length + t.added.length + t.removed.length;
+  if (t.status === 'modified') console.log(`tools: modified (${n} files)`);
+  else if (t.status === 'unverifiable') console.log(`tools: unverifiable (${t.reason})`);
+  else console.log('tools: ok');
+}
+
 try {
   switch (cmd) {
     case 'install': {
@@ -133,7 +151,7 @@ try {
       break;
     }
     case 'doctor': {
-      const d = doctor({ home });
+      const d = doctor({ home, root: opts.values.root === undefined ? undefined : path.resolve(opts.values.root) });
       if (flag('json')) console.log(JSON.stringify(d, null, 2));
       else {
         console.log(`node: ${d.node}`);
@@ -141,6 +159,7 @@ try {
           console.log(`${h.name}: ${h.installed ? `installed v${h.version} (catalog ${h.catalogVersion})` : h.partial ? 'not installed (partial or foreign directory present, no .installed.json)' : 'not installed'}`);
         }
         console.log(`graphify (optional): ${d.optional.graphify ? 'found' : 'not found'}`);
+        if (d.project) printProject(d.project);
       }
       break;
     }

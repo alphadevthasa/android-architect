@@ -1,16 +1,19 @@
 #!/usr/bin/env node
 // Usage: node index.js build <root> [--out <file>]
 //        node index.js query "<terms>" [--index <file>] [--limit N] [--kind source|gradle|doc]
+// Run from a vendored .ai/tools/scripts copy, it first checks .ai/tools against .ai/manifest.json and exits 3 when they
+// differ, unless --trust-modified-tools is given.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadCatalog } from './lib/catalog.js';
 import { headCommit } from './lib/git.js';
 import { buildIndex, queryIndex } from './lib/indexer.js';
+import { TRUST_FLAG, MODIFIED_MESSAGE, vendoredToolsRefused } from './lib/integrity.js';
 
 const USAGE =
-  'usage: node index.js build <root> [--out <file>]\n' +
-  '       node index.js query "<terms>" [--index <file>] [--limit N] [--kind source|gradle|doc]';
+  'usage: node index.js build <root> [--out <file>] [--trust-modified-tools]\n' +
+  '       node index.js query "<terms>" [--index <file>] [--limit N] [--kind source|gradle|doc] [--trust-modified-tools]';
 const BUILD_FILES = ['build.gradle', 'build.gradle.kts', 'settings.gradle', 'settings.gradle.kts'];
 const KINDS = ['source', 'gradle', 'doc'];
 
@@ -89,7 +92,8 @@ function query(opts) {
 }
 
 export function main(argv) {
-  const opts = parseArgs(argv);
+  if (vendoredToolsRefused(import.meta.url, argv)) fail(3, MODIFIED_MESSAGE);
+  const opts = parseArgs(argv.filter((a) => a !== TRUST_FLAG));
   if (opts.cmd === 'build') build(opts);
   else query(opts);
 }

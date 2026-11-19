@@ -10,6 +10,7 @@ import { loadAdrs, activeRejections, adrWarnings } from './adr.js';
 import { MANIFEST_SCHEMA_VERSION, readManifest } from './manifest.js';
 import { writeAiDir, preflight, resolveToolVersion } from './aidir.js';
 import { generatedHeader } from './knowledge.js';
+import { verifyTools, selfCheckTools } from './integrity.js';
 
 const DEFAULT_SKILL_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const byText = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
@@ -130,6 +131,23 @@ function renderReport(report, meta) {
 }
 
 /**
+ * Refresh rewrites .ai/tools, so a modified copy does not block it; it only reports what was modified before the rewrite.
+ * Against this skill when the versions match, else (weaker) against manifest.json.
+ */
+function modifiedToolsNotes(root, aiDir, opts) {
+  let check = verifyTools(root, opts);
+  let against = 'the running android-architect';
+  if (check.status === 'unverifiable') {
+    check = selfCheckTools(aiDir);
+    against = '.ai/manifest.json';
+  }
+  if (check.status !== 'modified') return [];
+  const files = [...check.changed, ...check.added, ...check.removed].sort(byText);
+  const detail = files.length ? `: ${files.join(', ')}` : check.reason ? ` (${check.reason})` : '';
+  return [`.ai/tools differed from ${against} before this refresh and was rewritten${detail}`];
+}
+
+/**
  * Regenerate .ai (same ownership rules as init) and diff against what was there before.
  * Keeps the project's mode and workspace role. A hub refresh does not touch members: run refresh per repo.
  */
@@ -177,6 +195,7 @@ export function refreshAiDir(root, { now = new Date(), catalogDir, skillDir = DE
   }
 
   const toolTo = toolVersion ?? resolveToolVersion(skillDir, aiDir);
+  notes.push(...modifiedToolsNotes(root, aiDir, { skillDir, catalogDir, toolVersion: toolTo }));
   const report = {
     tool: { from: manifest.toolVersion ?? null, to: toolTo },
     catalog: { from: manifest.catalogVersion ?? null, to: newCatalog.catalogVersion },

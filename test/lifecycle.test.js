@@ -69,14 +69,15 @@ test('lifecycle: init, commit, status, re-init, refresh with a bumped catalog', 
   const report = refreshAiDir(root, { now: new Date('2026-12-01T00:00:00Z'), catalogDir: cat, toolVersion: '9.9.9' });
   assert.deepEqual(report.catalog, { from, to: '2099.01.0' });
   assert.equal(json(path.join(root, '.ai/manifest.json')).catalogVersion, '2099.01.0');
+  // The refresh vendored another tool version and catalog, so the installed skill cannot vouch for .ai/tools.
   r = node([STATUS, root], root);
-  assert.deepEqual(JSON.parse(r.stdout).stale, ['catalog-moved']);
+  assert.deepEqual(JSON.parse(r.stdout).stale, ['catalog-moved', 'tools-unverifiable']);
 
   // A source change moves the commit.
   fs.appendFileSync(path.join(root, 'build.gradle'), '\n// changed\n');
   git(root, 'commit', '-am', 'change');
   r = node([STATUS, root], root);
-  assert.deepEqual(JSON.parse(r.stdout).stale, ['commit-moved', 'catalog-moved']);
+  assert.deepEqual(JSON.parse(r.stdout).stale, ['commit-moved', 'catalog-moved', 'tools-unverifiable']);
 });
 
 test('lifecycle: bare workspace proposes siblings, explicit paths confirm them', () => {

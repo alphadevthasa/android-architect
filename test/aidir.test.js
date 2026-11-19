@@ -216,16 +216,16 @@ test('recommendations.json and repos.json are listed as kept, never created', ()
 });
 
 test('aiStatus: fresh, tools-modified, catalog-moved, no-manifest', () => {
-  assert.deepEqual(aiStatus(root, { toolCatalogVersion: 'x' }), { ok: false, stale: ['no-manifest'], manifest: null });
+  assert.deepEqual(aiStatus(root, { toolCatalogVersion: 'x', toolVersion: '9.9.9' }), { ok: false, stale: ['no-manifest'], manifest: null });
   run();
   const cv = loadCatalog().catalogVersion;
-  const s = aiStatus(root, { toolCatalogVersion: cv });
+  const s = aiStatus(root, { toolCatalogVersion: cv, toolVersion: '9.9.9' });
   assert.equal(s.ok, true);
   assert.deepEqual(s.stale, []);
   assert.equal(s.manifest.toolVersion, '9.9.9');
-  assert.ok(aiStatus(root, { toolCatalogVersion: 'other' }).stale.includes('catalog-moved'));
+  assert.ok(aiStatus(root, { toolCatalogVersion: 'other', toolVersion: '9.9.9' }).stale.includes('catalog-moved'));
   fs.appendFileSync(path.join(root, '.ai/tools/scripts/index.js'), '\n// x\n');
-  assert.ok(aiStatus(root, { toolCatalogVersion: cv }).stale.includes('tools-modified'));
+  assert.ok(aiStatus(root, { toolCatalogVersion: cv, toolVersion: '9.9.9' }).stale.includes('tools-modified'));
 });
 
 test('aiStatus reports commit-moved', { skip: !hasGit }, () => {
@@ -234,12 +234,12 @@ test('aiStatus reports commit-moved', { skip: !hasGit }, () => {
   g(root, 'commit', '-m', 'a');
   run();
   const cv = loadCatalog().catalogVersion;
-  assert.equal(aiStatus(root, { toolCatalogVersion: cv }).ok, true);
+  assert.equal(aiStatus(root, { toolCatalogVersion: cv, toolVersion: '9.9.9' }).ok, true);
   g(root, 'commit', '--allow-empty', '-m', 'b');
-  assert.deepEqual(aiStatus(root, { toolCatalogVersion: cv }).stale, [], 'an empty commit changes no project file');
+  assert.deepEqual(aiStatus(root, { toolCatalogVersion: cv, toolVersion: '9.9.9' }).stale, [], 'an empty commit changes no project file');
   fs.appendFileSync(path.join(root, 'settings.gradle.kts'), '\n// changed\n');
   g(root, 'commit', '-am', 'c');
-  assert.deepEqual(aiStatus(root, { toolCatalogVersion: cv }).stale, ['commit-moved']);
+  assert.deepEqual(aiStatus(root, { toolCatalogVersion: cv, toolVersion: '9.9.9' }).stale, ['commit-moved']);
 });
 
 test('committed mode: committing .ai and pointer files is not commit-moved; a source change is', { skip: !hasGit }, () => {
@@ -250,14 +250,14 @@ test('committed mode: committing .ai and pointer files is not commit-moved; a so
   g(root, 'add', '.');
   g(root, 'commit', '-m', 'add .ai');
   const cv = loadCatalog().catalogVersion;
-  assert.deepEqual(aiStatus(root, { toolCatalogVersion: cv }).stale, []);
+  assert.deepEqual(aiStatus(root, { toolCatalogVersion: cv, toolVersion: '9.9.9' }).stale, []);
   // Re-running with no project change does not dirty the committed files.
   run();
   assert.equal(g(root, 'status', '--porcelain'), '');
-  assert.deepEqual(aiStatus(root, { toolCatalogVersion: cv }).stale, []);
+  assert.deepEqual(aiStatus(root, { toolCatalogVersion: cv, toolVersion: '9.9.9' }).stale, []);
   fs.appendFileSync(path.join(root, 'settings.gradle.kts'), '\n// changed\n');
   g(root, 'commit', '-am', 'src');
-  assert.deepEqual(aiStatus(root, { toolCatalogVersion: cv }).stale, ['commit-moved']);
+  assert.deepEqual(aiStatus(root, { toolCatalogVersion: cv, toolVersion: '9.9.9' }).stale, ['commit-moved']);
 });
 
 test('commit-moved in a repo subdirectory looks only at the root', { skip: !hasGit }, () => {
@@ -275,10 +275,10 @@ test('commit-moved in a repo subdirectory looks only at the root', { skip: !hasG
   const cv = loadCatalog().catalogVersion;
   fs.appendFileSync(path.join(repo, 'other.txt'), 'y');
   g(repo, 'commit', '-am', 'outside');
-  assert.deepEqual(aiStatus(root, { toolCatalogVersion: cv }).stale, []);
+  assert.deepEqual(aiStatus(root, { toolCatalogVersion: cv, toolVersion: '9.9.9' }).stale, []);
   fs.appendFileSync(path.join(root, 'settings.gradle.kts'), '\n// changed\n');
   g(repo, 'commit', '-am', 'inside');
-  assert.deepEqual(aiStatus(root, { toolCatalogVersion: cv }).stale, ['commit-moved']);
+  assert.deepEqual(aiStatus(root, { toolCatalogVersion: cv, toolVersion: '9.9.9' }).stale, ['commit-moved']);
 });
 
 test('an unknown or malformed manifest commit counts as moved', { skip: !hasGit }, () => {
@@ -292,7 +292,7 @@ test('an unknown or malformed manifest commit counts as moved', { skip: !hasGit 
     const m = JSON.parse(fs.readFileSync(file, 'utf8'));
     m.commit = commit;
     fs.writeFileSync(file, JSON.stringify(m));
-    assert.deepEqual(aiStatus(root, { toolCatalogVersion: cv }).stale, ['commit-moved'], String(commit));
+    assert.deepEqual(aiStatus(root, { toolCatalogVersion: cv, toolVersion: '9.9.9' }).stale, ['commit-moved'], String(commit));
   }
   assert.equal(fs.existsSync(path.join(root, 'x')), false);
 });
