@@ -8,7 +8,7 @@ import { candidatePaths } from './candidates.js';
 import { discoverModules } from './modules.js';
 import { listFiles } from './walk.js';
 import { buildIndex } from './indexer.js';
-import { headCommit, gitDir, addToExclude } from './git.js';
+import { headCommit, gitDir, topLevel, addToExclude } from './git.js';
 import { sha256File, hashTree } from './hash.js';
 import { MANIFEST_SCHEMA_VERSION, readManifest, writeManifest } from './manifest.js';
 import { readTemplate, renderReadme, renderKnowledge } from './knowledge.js';
@@ -73,7 +73,6 @@ export function writeAiDir(
   const aiDir = path.join(root, '.ai');
   const templatesDir = path.join(skillDir, 'templates', 'ai');
   catalogDir = catalogDir ?? path.join(skillDir, 'catalog');
-  toolVersion = toolVersion ?? resolveToolVersion(skillDir, aiDir);
   if (local && !gitDir(root)) throw new Error('--local needs a git repository');
 
   const written = new Set();
@@ -84,7 +83,7 @@ export function writeAiDir(
   // Every component from root down to rel must not be a symlink, and the target must stay in root.
   const guard = (rel) => {
     const abs = path.resolve(root, rel);
-    if (!abs.startsWith(realRoot + path.sep) && !abs.startsWith(path.resolve(root) + path.sep)) {
+    if (!path.resolve(realRoot, rel).startsWith(realRoot + path.sep)) {
       throw new Error(`refusing to write outside the project: ${rel}`);
     }
     let cur = root;
@@ -115,6 +114,22 @@ export function writeAiDir(
   guard('.ai');
   if (fs.existsSync(aiDir)) regularFiles(aiDir);
   for (const f of ['AGENTS.md', 'CLAUDE.md', 'CLAUDE.local.md']) guard(f);
+
+  // Vendor sources are read into memory before the first write, and must not live inside .ai.
+  const realAi = fs.existsSync(aiDir) ? fs.realpathSync(aiDir) : path.join(realRoot, '.ai');
+  const vendorSources = [
+    ['tools/scripts', path.join(skillDir, 'scripts')],
+    ['tools/catalog', catalogDir],
+  ].flatMap(([destRel, srcDir]) => {
+    const realSrc = fs.realpathSync(srcDir);
+    if (realSrc === realAi || realSrc.startsWith(realAi + path.sep)) {
+      throw new Error(
+        `refusing to vendor from inside .ai (${srcDir}): a vendored copy cannot regenerate .ai; run the installed skill or npx android-architect`,
+      );
+    }
+    return regularFiles(srcDir).map((rel) => [`${destRel}/${rel}`, fs.readFileSync(path.join(srcDir, rel))]);
+  });
+  toolVersion = toolVersion ?? resolveToolVersion(skillDir, aiDir);
 
   const catalog = loadCatalog(catalogDir);
   const commit = headCommit(root);
@@ -148,11 +163,7 @@ export function writeAiDir(
   // tools: tool-owned, wiped and rewritten from the running skill
   const toolsAbs = guard('.ai/tools');
   fs.rmSync(toolsAbs, { recursive: true, force: true });
-  const vendor = (srcDir, destRel) => {
-    for (const rel of regularFiles(srcDir)) putAi(`${destRel}/${rel}`, fs.readFileSync(path.join(srcDir, rel)));
-  };
-  vendor(path.join(skillDir, 'scripts'), 'tools/scripts');
-  vendor(catalogDir, 'tools/catalog');
+  for (const [rel, data] of vendorSources) putAi(rel, data);
   putAi('tools/package.json', '{"type":"module","private":true}\n');
 
   // managed workflows
@@ -203,8 +214,13 @@ export function writeAiDir(
     block: readTemplate('pointer.md', templatesDir),
     write: (rel, content) => put(rel, content),
   });
-  const excluded = local ? ['.ai/', 'CLAUDE.local.md'] : [];
-  if (local) addToExclude(root, excluded);
+  let excluded = [];
+  if (local) {
+    const sub = path.relative(fs.realpathSync(topLevel(root)), realRoot).split(path.sep).filter(Boolean).join('/');
+    const prefix = sub ? `/${sub}/` : '/';
+    excluded = [`${prefix}.ai/`, `${prefix}CLAUDE.local.md`];
+    addToExclude(root, excluded);
+  }
 
   return {
     written: [...written].sort(byText),

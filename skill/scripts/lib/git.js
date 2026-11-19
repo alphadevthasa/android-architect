@@ -24,6 +24,11 @@ export function gitDir(root) {
   return git(root, ['rev-parse', '--absolute-git-dir']) || null;
 }
 
+/** Absolute top-level directory of the working tree containing root, or null. */
+export function topLevel(root) {
+  return git(root, ['rev-parse', '--show-toplevel']) || null;
+}
+
 /** Absolute common git dir (shared by linked worktrees), or null. */
 function commonGitDir(root) {
   const out = git(root, ['rev-parse', '--git-common-dir']);

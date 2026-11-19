@@ -86,7 +86,7 @@ test('vendored index.js query works from the project root', () => {
     ['.ai/tools/scripts/index.js', 'query', 'compose', '--index', path.join(root, '.ai/index/index.json')],
     { cwd: root, encoding: 'utf8' },
   );
-  assert.ok(Array.isArray(JSON.parse(out)));
+  assert.ok(JSON.parse(out).length >= 1);
 });
 
 test('user-owned files are kept byte for byte', () => {
@@ -147,7 +147,7 @@ test('--local keeps git status clean and uses CLAUDE.local.md', { skip: !hasGit 
     { file: 'CLAUDE.local.md', action: 'created' },
     { file: 'CLAUDE.md', action: 'skipped-local' },
   ]);
-  assert.deepEqual(r.excluded, ['.ai/', 'CLAUDE.local.md']);
+  assert.deepEqual(r.excluded, ['/.ai/', '/CLAUDE.local.md']);
   const m = readManifest(path.join(root, '.ai'));
   assert.equal(m.mode, 'local');
   assert.equal(m.commit.length, 7);
@@ -237,4 +237,36 @@ test('aiStatus reports commit-moved', { skip: !hasGit }, () => {
   assert.equal(aiStatus(root, { toolCatalogVersion: cv }).ok, true);
   g(root, 'commit', '--allow-empty', '-m', 'b');
   assert.deepEqual(aiStatus(root, { toolCatalogVersion: cv }).stale, ['commit-moved']);
+});
+
+test('--local with root in a repo subdirectory anchors exclude patterns', { skip: !hasGit }, () => {
+  const repo = path.join(tmp, 'repo');
+  fs.mkdirSync(repo);
+  fs.renameSync(root, path.join(repo, 'sub'));
+  root = path.join(repo, 'sub');
+  g(repo, 'init');
+  g(repo, 'add', '.');
+  g(repo, 'commit', '-m', 'fixture');
+  const r = run({ local: true });
+  assert.deepEqual(r.excluded, ['/sub/.ai/', '/sub/CLAUDE.local.md']);
+  assert.equal(g(repo, 'status', '--porcelain'), '');
+});
+
+const snapshot = () => JSON.stringify([hashTree(path.join(root, '.ai/tools')), read('.ai/manifest.json')]);
+
+test('a symlink in the vendor sources aborts before anything is changed', () => {
+  run();
+  const before = snapshot();
+  const skill = path.join(tmp, 'skill');
+  fs.cpSync(path.resolve('skill'), skill, { recursive: true });
+  fs.symlinkSync(path.join(tmp, 'outside'), path.join(skill, 'scripts', 'evil.js'));
+  assert.throws(() => run({ skillDir: skill }), /refusing to write through a symlink/);
+  assert.equal(snapshot(), before);
+});
+
+test('vendoring from inside .ai is refused and .ai/tools stays intact', () => {
+  run();
+  const before = snapshot();
+  assert.throws(() => run({ skillDir: path.join(root, '.ai', 'tools') }), /refusing to vendor from inside \.ai/);
+  assert.equal(snapshot(), before);
 });

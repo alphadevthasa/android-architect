@@ -3,7 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { writeAiDir, resolveToolVersion } from './lib/aidir.js';
+import { writeAiDir } from './lib/aidir.js';
 
 const USAGE = 'usage: node init-ai.js <root> [--local] [--append-pointers] [--workspace [path ...]]';
 const BUILD_FILES = ['build.gradle', 'build.gradle.kts', 'settings.gradle', 'settings.gradle.kts'];
@@ -49,7 +49,6 @@ export function main(argv) {
       local: opts.local,
       appendPointers: opts.appendPointers,
       workspace: opts.workspace,
-      toolVersion: resolveToolVersion(undefined, path.join(root, '.ai')),
     });
   } catch (e) {
     fail(1, e.message);
