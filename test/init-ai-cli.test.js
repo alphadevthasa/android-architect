@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawnSync, execFileSync } from 'node:child_process';
 
 const INIT = path.resolve('skill/scripts/init-ai.js');
 const STATUS = path.resolve('skill/scripts/ai-status.js');
@@ -83,4 +83,40 @@ test('ai-status: exit 2 without manifest, exit 0 with stale info, vendored copy 
   r = node(STATUS, [root]);
   assert.equal(r.status, 0);
   assert.ok(JSON.parse(r.stdout).stale.includes('tools-modified'));
+});
+
+test('re-running plain init on a --local project stays local and creates no AGENTS.md/CLAUDE.md', () => {
+  execFileSync('git', ['init'], { cwd: root, stdio: 'ignore' });
+  assert.equal(node(INIT, [root, '--local']).status, 0);
+  const r = node(INIT, [root]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(root, '.ai/manifest.json'), 'utf8')).mode, 'local');
+  assert.equal(fs.existsSync(path.join(root, 'AGENTS.md')), false);
+  assert.equal(fs.existsSync(path.join(root, 'CLAUDE.md')), false);
+  assert.ok(fs.existsSync(path.join(root, 'CLAUDE.local.md')));
+});
+
+test('init flags that would switch mode or role exit 1 and name the current setup', () => {
+  execFileSync('git', ['init'], { cwd: root, stdio: 'ignore' });
+  assert.equal(node(INIT, [root]).status, 0);
+  const before = fs.readFileSync(path.join(root, '.ai/manifest.json'), 'utf8');
+  let r = node(INIT, [root, '--local']);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /committed mode/);
+  assert.match(r.stderr, /remove \.ai\/ and run init again/);
+  const lib = path.join(tmp, 'lib');
+  fs.cpSync(path.resolve('test/fixtures/workspace/lib-core'), lib, { recursive: true });
+  r = node(INIT, [root, '--workspace', '../lib']);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /standalone/);
+  assert.equal(fs.existsSync(path.join(lib, '.ai')), false);
+  assert.equal(fs.readFileSync(path.join(root, '.ai/manifest.json'), 'utf8'), before);
+});
+
+test('first init does not list the ADR template as both written and kept', () => {
+  const out = JSON.parse(node(INIT, [root]).stdout);
+  assert.ok(out.written.includes('.ai/knowledge/adr/0000-template.md'));
+  assert.ok(!out.kept.includes('.ai/knowledge/adr/0000-template.md'));
+  const again = JSON.parse(node(INIT, [root]).stdout);
+  assert.ok(again.kept.includes('.ai/knowledge/adr/0000-template.md'));
 });

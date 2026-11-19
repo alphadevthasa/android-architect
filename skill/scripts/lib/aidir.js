@@ -122,7 +122,8 @@ export function preflight(root, { local = false } = {}) {
 
 /**
  * Write the .ai folder. See task 4 for the ownership table.
- * `workspace` is null, { role: 'hub', hub: '.' } (with `repos`, the repos.json content, written only when missing)
+ * `workspace` is null, { role: 'hub', hub: '.' } (with `repos`, the repos.json content: written when missing or when the
+ * existing one is only a proposal, else written as repos.json.new on a difference)
  * or { role: 'member', hub: <relative path> } (thin .ai: no workflows, no user-owned files).
  * `extraGenerated` is { name: text } or a function of { written, kept, conflicts, commit } returning that: extra generated
  * files written at the top of .ai (always rewritten, through the same guarded writer).
@@ -236,19 +237,40 @@ export function writeAiDir(
     }
   }
 
+  // repos.json: created when missing; a tool-proposed one (every repo confirmed:false) is replaced; an identical one is
+  // left alone; any other difference goes to repos.json.new as a conflict.
+  const writeRepos = (next) => {
+    const rel = 'repos.json';
+    const text = JSON.stringify(next, null, 2) + '\n';
+    const current = readJson(path.join(aiDir, rel));
+    const exists = fs.existsSync(path.join(aiDir, rel));
+    const proposedOnly = Array.isArray(current?.repos) && current.repos.length > 0 && current.repos.every((r) => r?.confirmed === false);
+    if (exists && JSON.stringify(current) === JSON.stringify(next)) {
+      fs.rmSync(guard(`.ai/${rel}.new`), { force: true });
+    } else if (!exists || proposedOnly) {
+      putAi(rel, text);
+      fs.rmSync(guard(`.ai/${rel}.new`), { force: true });
+    } else {
+      putAi(`${rel}.new`, text);
+      conflicts.push(`.ai/${rel}`);
+    }
+  };
+
   // user-owned: create only when missing (never in a member repo)
   for (const rel of isMember ? [] : USER_TEMPLATES) {
     if (fs.existsSync(path.join(aiDir, rel))) kept.add(`.ai/${rel}`);
     else putAi(rel, readTemplate(rel, templatesDir));
   }
   if (!isMember) {
-    if (workspace?.role === 'hub' && repos && !fs.existsSync(path.join(aiDir, 'repos.json'))) {
-      putAi('repos.json', JSON.stringify(repos, null, 2) + '\n');
+    if (workspace?.role === 'hub' && repos) writeRepos(repos);
+    for (const rel of USER_OPTIONAL) {
+      if (!written.has(`.ai/${rel}`) && fs.existsSync(path.join(aiDir, rel))) kept.add(`.ai/${rel}`);
     }
-    for (const rel of USER_OPTIONAL) if (fs.existsSync(path.join(aiDir, rel))) kept.add(`.ai/${rel}`);
   }
   const adrDir = path.join(aiDir, 'knowledge', 'adr');
-  if (!isMember && fs.existsSync(adrDir)) for (const f of regularFiles(adrDir)) kept.add(`.ai/knowledge/adr/${f}`);
+  if (!isMember && fs.existsSync(adrDir)) {
+    for (const f of regularFiles(adrDir)) if (!written.has(`.ai/knowledge/adr/${f}`)) kept.add(`.ai/knowledge/adr/${f}`);
+  }
 
   // The index covers .ai/knowledge, so it is built once the knowledge files above exist.
   putAi('index/index.json', JSON.stringify(buildIndex(root, { now, commit, catalogVersion: catalog.catalogVersion })) + '\n');

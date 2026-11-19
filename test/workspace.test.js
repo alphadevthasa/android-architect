@@ -94,6 +94,65 @@ test('repos.json is user-owned after the first write', () => {
   assert.equal(fs.readFileSync(f, 'utf8'), '{"mine":true}\n');
   assert.ok(out.hub.kept.includes('.ai/repos.json'));
   assert.ok(!out.hub.written.includes('.ai/repos.json'));
+  assert.deepEqual(out.hub.conflicts, ['.ai/repos.json']);
+  assert.ok(fs.existsSync(f + '.new'));
+});
+
+test('confirming a proposed workspace overwrites the unconfirmed repos.json', () => {
+  assert.equal(init(['.', '--workspace']).status, 0);
+  const r = init(['.', '--workspace', '../lib-core']);
+  assert.equal(r.status, 0, r.stderr);
+  const out = JSON.parse(r.stdout);
+  const repos = json(path.join(hub, '.ai/repos.json')).repos;
+  assert.equal(repos.find((x) => x.name === 'lib-core').confirmed, true);
+  assert.ok(out.hub.written.includes('.ai/repos.json'));
+  assert.ok(!out.hub.kept.includes('.ai/repos.json'));
+  assert.deepEqual(out.hub.conflicts, []);
+  // Same confirmed set again: kept, no conflict.
+  const same = JSON.parse(init(['.', '--workspace', '../lib-core']).stdout);
+  assert.ok(same.hub.kept.includes('.ai/repos.json'));
+  assert.deepEqual(same.hub.conflicts, []);
+  // A changed confirmed set: the new content goes to repos.json.new and is a conflict.
+  fs.cpSync(lib, path.join(tmp, 'lib-extra'), { recursive: true });
+  fs.rmSync(path.join(tmp, 'lib-extra', '.ai'), { recursive: true, force: true });
+  const before = fs.readFileSync(path.join(hub, '.ai/repos.json'), 'utf8');
+  const changed = JSON.parse(init(['.', '--workspace', '../lib-core', '../lib-extra']).stdout);
+  assert.deepEqual(changed.hub.conflicts, ['.ai/repos.json']);
+  assert.equal(fs.readFileSync(path.join(hub, '.ai/repos.json'), 'utf8'), before);
+  assert.equal(json(path.join(hub, '.ai/repos.json.new')).repos.length, 3);
+});
+
+test('re-running init in a member keeps the member role and creates no user-owned files', () => {
+  assert.equal(init(['.', '--workspace', '../lib-core']).status, 0);
+  const r = init(['.'], lib);
+  assert.equal(r.status, 0, r.stderr);
+  const m = path.join(lib, '.ai');
+  assert.deepEqual(json(path.join(m, 'manifest.json')).workspace, { role: 'member', hub: '../hub-app' });
+  for (const gone of ['knowledge/architecture-target.md', 'knowledge/adr', 'migration/roadmap.md', 'workflows', 'repos.json']) {
+    assert.equal(fs.existsSync(path.join(m, gone)), false, gone);
+  }
+  const bad = init(['.', '--workspace', '../hub-app'], lib);
+  assert.equal(bad.status, 1);
+  assert.match(bad.stderr, /member of \.\.\/hub-app/);
+});
+
+test('plain init on a hub keeps the hub role and its repos.json', () => {
+  assert.equal(init(['.', '--workspace', '../lib-core']).status, 0);
+  const before = fs.readFileSync(path.join(hub, '.ai/repos.json'), 'utf8');
+  const out = JSON.parse(init(['.']).stdout);
+  assert.deepEqual(json(path.join(hub, '.ai/manifest.json')).workspace, { role: 'hub', hub: '.' });
+  assert.equal(fs.readFileSync(path.join(hub, '.ai/repos.json'), 'utf8'), before);
+  assert.ok(out.kept.includes('.ai/repos.json'));
+  assert.match(fs.readFileSync(path.join(hub, '.ai/README.md'), 'utf8'), /Workspace: hub \(1 repo\)/);
+});
+
+test('a standalone repo cannot be pulled into a workspace as a member', () => {
+  assert.equal(init(['.'], lib).status, 0);
+  const r = init(['.', '--workspace', '../lib-core']);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /lib-core/);
+  assert.match(r.stderr, /standalone/);
+  assert.equal(fs.existsSync(path.join(hub, '.ai')), false);
 });
 
 test('bare --workspace proposes sibling repos as unconfirmed and writes only the hub', () => {
