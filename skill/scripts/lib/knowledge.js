@@ -60,6 +60,11 @@ function renderArchitecture(profile, catalog) {
     out.push('', '## Compliance not verifiable statically', '');
     for (const c of unknown) out.push(line(c));
   }
+  const findings = profile.security?.findings ?? [];
+  const count = (sev) => findings.filter((f) => f.severity === sev).length;
+  out.push('', '## Security signals', '');
+  out.push(`- high: ${count('high')}, medium: ${count('medium')}, low: ${count('low')}`);
+  for (const f of findings.slice(0, 10)) out.push(`- [${f.severity}] ${f.id}: ${f.file}:${f.line} (${f.detail})`);
   return out.join('\n') + '\n';
 }
 

@@ -3,6 +3,7 @@ import path from 'node:path';
 import { listFiles, readLines } from './walk.js';
 import { discoverModules } from './modules.js';
 import { globToRegExp } from './glob.js';
+import { securityFindings } from './security.js';
 
 export const PROFILE_SCHEMA_VERSION = 1;
 const MAX_EVIDENCE = 5;
@@ -458,5 +459,6 @@ export function detectStack(root, catalog) {
     modules: modules.map((m) => ({ path: m.path, dir: m.dir, projectDeps: m.projectDeps })),
     dimensions,
     compliance: evaluateCompliance(sdk, catalog),
+    security: { findings: securityFindings(ctx) },
   };
 }

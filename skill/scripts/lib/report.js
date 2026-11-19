@@ -31,5 +31,9 @@ export function renderProfileMarkdown(profile, catalog = loadCatalog()) {
     out.push('', `## ${dimName('compliance')}`, '');
     for (const c of profile.compliance) out.push(`- ${entryName('compliance', c.id)}: ${c.status} (${c.detail})`);
   }
+  const findings = profile.security?.findings ?? [];
+  out.push('', '## Security', '');
+  if (findings.length === 0) out.push('- no security signals found');
+  for (const f of findings) out.push(`- [${f.severity}] ${f.id}: ${f.file}:${f.line} (${f.detail})`);
   return out.join('\n') + '\n';
 }
