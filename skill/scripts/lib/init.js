@@ -36,7 +36,7 @@ function planWorkspace(root, { local, workspace }) {
     if (inside(hub, abs) || inside(abs, hub)) throw new Error(`workspace path must be outside the hub and must not contain it: ${p}`);
     if (members.some((m) => m.abs === abs)) throw new Error(`workspace path listed twice: ${p}`);
     if (path.basename(abs) === path.basename(hub) || members.some((m) => m.name === path.basename(abs))) throw new Error(`workspace repos need distinct names: ${path.basename(abs)}`);
-    preflight(abs, { local });
+    if (confirmed) preflight(abs, { local });
     members.push({
       abs,
       name: path.basename(abs),
@@ -48,7 +48,7 @@ function planWorkspace(root, { local, workspace }) {
 
 /**
  * Initialize .ai for one repo, or for a workspace hub and its members when `workspace` is an array of paths
- * (empty = propose sibling repos). Returns the writeAiDir result, or { hub, members, repos } in workspace mode.
+ * (empty = propose sibling repos: only the hub is written, with `confirmed: false`, and `proposed` lists them). Returns the writeAiDir result, or { hub, members, repos } in workspace mode.
  * `skillDir`, `catalogDir` and `toolVersion` pass through to writeAiDir.
  */
 export function initProject(root, { now = new Date(), local = false, appendPointers = false, workspace = null, skillDir, catalogDir, toolVersion } = {}) {
@@ -57,6 +57,12 @@ export function initProject(root, { now = new Date(), local = false, appendPoint
   const plan = planWorkspace(root, { local, workspace });
   const hub = writeAiDir(root, { ...base, workspace: { role: 'hub', hub: '.' }, repos: plan.repos });
   const members = {};
+  if (workspace.length === 0) {
+    // Detected siblings are only proposed: write the hub, leave the siblings untouched until the user confirms paths.
+    const hubReal = fs.realpathSync(root);
+    const proposed = plan.members.map((m) => path.relative(hubReal, m.abs).split(path.sep).join('/'));
+    return { hub, members, repos: plan.repos, proposed };
+  }
   for (const m of plan.members) {
     members[m.name] = writeAiDir(m.abs, { ...base, workspace: { role: 'member', hub: m.hubRel } });
   }

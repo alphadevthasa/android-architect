@@ -78,10 +78,10 @@ For several related repos (an app plus its libraries), `init --workspace` makes 
 
 ```
 npx android-architect init --workspace ../lib-a ../lib-b
-npx android-architect init --workspace        # proposes sibling Gradle repos; nothing is linked until you confirm paths
+npx android-architect init --workspace        # detects sibling Gradle repos and proposes them; writes only the hub
 ```
 
-All repos are validated before anything is written. The hub holds the target architecture, ADRs, conventions, roadmap and `repos.json` (which repos publish and consume which artifacts); members get a thin `.ai/` that points to the hub. Run `refresh` once per repo.
+With explicit paths, all repos are validated before anything is written and each member gets its `.ai/`. Without paths, only the hub is written: its `repos.json` lists the detected siblings with `confirmed: false`, nothing is written into the siblings, and `init` prints the repos it proposes plus the exact command to confirm them (`npx android-architect init --workspace <paths>`). The hub holds the target architecture, ADRs, conventions, roadmap and `repos.json` (which repos publish and consume which artifacts); members get a thin `.ai/` that points to the hub. Run `refresh` once per repo.
 
 ## Usage
 

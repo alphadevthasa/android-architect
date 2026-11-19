@@ -321,3 +321,23 @@ test('refresh after init prints the catalog line, and --json the report', () => 
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('bare init --workspace proposes siblings: writes only the hub and prints the confirm command', () => {
+  const dir = tmp();
+  try {
+    const hub = path.join(dir, 'hub');
+    const lib = path.join(dir, 'lib-core');
+    fs.cpSync(FIXTURE, hub, { recursive: true });
+    fs.cpSync(FIXTURE, lib, { recursive: true });
+    const out = ok(['init', '--root', hub, '--workspace']);
+    assert.match(out, /npx android-architect init --workspace \.\.\/lib-core/);
+    assert.ok(!fs.existsSync(path.join(lib, '.ai')));
+    const repos = JSON.parse(fs.readFileSync(path.join(hub, '.ai/repos.json'), 'utf8'));
+    assert.equal(repos.repos.find((r) => r.name === 'lib-core').confirmed, false);
+    const json = JSON.parse(ok(['init', '--root', hub, '--workspace', '--json']));
+    assert.deepEqual(json.proposed, ['../lib-core']);
+    assert.deepEqual(json.members, {});
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

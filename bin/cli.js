@@ -107,6 +107,10 @@ try {
       else if (opts.workspace === null) console.log(summarize('Initialized .ai: ', r));
       else {
         console.log(summarize('Hub .ai: ', r.hub));
+        if (r.proposed) {
+          console.log(`Detected sibling repos (nothing written to them yet): ${r.proposed.join(', ')}`);
+          console.log(`To confirm and initialize them, run: npx android-architect init --workspace ${r.proposed.join(' ')}`);
+        }
         for (const [name, m] of Object.entries(r.members)) console.log(summarize(`Member ${name}: `, m));
       }
       break;

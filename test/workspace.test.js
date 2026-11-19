@@ -96,10 +96,13 @@ test('repos.json is user-owned after the first write', () => {
   assert.ok(!out.hub.written.includes('.ai/repos.json'));
 });
 
-test('bare --workspace uses sibling repos as unconfirmed', () => {
+test('bare --workspace proposes sibling repos as unconfirmed and writes only the hub', () => {
   const out = JSON.parse(init(['.', '--workspace']).stdout);
-  assert.deepEqual(Object.keys(out.members), ['lib-core']);
+  assert.deepEqual(out.members, {});
+  assert.deepEqual(out.proposed, ['../lib-core']);
   assert.equal(out.repos.repos[1].confirmed, false);
+  assert.equal(fs.existsSync(path.join(lib, '.ai')), false);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(hub, '.ai/repos.json'), 'utf8')).repos[1].confirmed, false);
 });
 
 test('invalid workspace paths exit 1 before anything is written', () => {
