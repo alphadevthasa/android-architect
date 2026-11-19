@@ -1,13 +1,13 @@
 #!/usr/bin/env node
-// Usage: node skill/scripts/candidates.js <projectRoot>
+// Usage: node skill/scripts/candidates.js <projectRoot> [--no-overrides]
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { loadCatalog } from './lib/catalog.js';
+import { loadCatalogWithOverrides } from './lib/overrides.js';
 import { detectStack } from './lib/detect.js';
 import { candidatePaths } from './lib/candidates.js';
 
-const USAGE = 'usage: node candidates.js <projectRoot>';
+const USAGE = 'usage: node candidates.js <projectRoot> [--no-overrides]';
 const BUILD_FILES = ['build.gradle', 'build.gradle.kts', 'settings.gradle', 'settings.gradle.kts', 'build.xml'];
 
 function fail(code, message) {
@@ -16,8 +16,10 @@ function fail(code, message) {
 }
 
 export function main(argv) {
-  if (argv.length !== 1 || argv[0].startsWith('--')) fail(1, USAGE);
-  const root = path.resolve(argv[0]);
+  const args = argv.filter((a) => a !== '--no-overrides');
+  if (args.length !== 1 || args[0].startsWith('--') || argv.length - args.length > 1) fail(1, USAGE);
+  const overrides = args.length === argv.length;
+  const root = path.resolve(args[0]);
   let isDir = false;
   try {
     isDir = fs.statSync(root).isDirectory();
@@ -25,11 +27,12 @@ export function main(argv) {
     isDir = false;
   }
   if (!isDir || !BUILD_FILES.some((f) => fs.existsSync(path.join(root, f)))) {
-    fail(2, `not an Android/Gradle project: ${argv[0]}`);
+    fail(2, `not an Android/Gradle project: ${args[0]}`);
   }
-  const catalog = loadCatalog();
+  let catalog;
   let profile;
   try {
+    catalog = loadCatalogWithOverrides(undefined, root, { overrides }).catalog;
     profile = detectStack(root, catalog);
   } catch (e) {
     fail(1, e.message);

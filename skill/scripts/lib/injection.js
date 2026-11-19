@@ -125,9 +125,17 @@ function mdFiles(aiDir, sub, recursive) {
   return out;
 }
 
+function jsonFiles(aiDir, sub) {
+  try {
+    return fs.readdirSync(path.join(aiDir, sub)).filter((n) => n.endsWith('.json')).sort().map((n) => `${sub}/${n}`);
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Scan the files of .ai that a person or agent may have edited: knowledge, migration and workflow Markdown,
- * recommendations.json and repos.json. Generated knowledge files are skipped. Returns sorted [{ file, line, rule }]
+ * catalog-overrides/*.json, recommendations.json and repos.json. Generated knowledge files are skipped. Returns sorted [{ file, line, rule }]
  * with file relative to root (".ai/...").
  */
 export function scanAiDir(root) {
@@ -136,6 +144,7 @@ export function scanAiDir(root) {
     ...mdFiles(aiDir, 'knowledge', true).filter((f) => !GENERATED_KNOWLEDGE.includes(f)),
     ...mdFiles(aiDir, 'migration', true),
     ...mdFiles(aiDir, 'workflows', false),
+    ...jsonFiles(aiDir, 'catalog-overrides'),
     'recommendations.json',
     'repos.json',
   ];

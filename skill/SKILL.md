@@ -125,7 +125,7 @@ Goal: bring generated `.ai/` content up to date and tell the user what changed.
 1. Run `node <skill-dir>/scripts/ai-status.js <root>`, then `node <skill-dir>/scripts/refresh.js <root>`. Exit 2 means no manifest or not a Gradle project: suggest `setup`.
 2. Read the report JSON (and `.ai/refresh-report.md`). Explain it in the user's language: catalog moved, new candidates, invalidated steps in `recommendations`, status changes, and `rejections` that reopened because a `reopenIf` condition now holds. Note `conflicts` and `notes` as they are.
 3. When the report shows violations or invalidated steps, propose a re-run of `recommend` and wait for a yes.
-4. Never edit user-owned files (`.ai/knowledge/architecture-target.md`, `.ai/knowledge/conventions.md`, `.ai/knowledge/components.md`, `.ai/knowledge/adr/**`, `migration/roadmap.md`, `recommendations.json`, `repos.json`) without asking. Generated files, tools and managed workflows are the scripts' business.
+4. Never edit user-owned files (`.ai/knowledge/architecture-target.md`, `.ai/knowledge/conventions.md`, `.ai/knowledge/components.md`, `.ai/knowledge/adr/**`, `migration/roadmap.md`, `recommendations.json`, `repos.json`, `catalog-overrides/**`) without asking. Generated files, tools and managed workflows are the scripts' business.
 
 ## Rejections
 

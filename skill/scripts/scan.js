@@ -1,13 +1,13 @@
 #!/usr/bin/env node
-// Usage: node skill/scripts/scan.js <projectRoot> [--format json|md] [--out <file>]
+// Usage: node skill/scripts/scan.js <projectRoot> [--format json|md] [--out <file>] [--no-overrides]
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { loadCatalog } from './lib/catalog.js';
+import { loadCatalogWithOverrides } from './lib/overrides.js';
 import { detectStack } from './lib/detect.js';
 import { renderProfileMarkdown } from './lib/report.js';
 
-const USAGE = 'usage: node scan.js <projectRoot> [--format json|md] [--out <file>]';
+const USAGE = 'usage: node scan.js <projectRoot> [--format json|md] [--out <file>] [--no-overrides]';
 const BUILD_FILES = ['build.gradle', 'build.gradle.kts', 'settings.gradle', 'settings.gradle.kts', 'build.xml'];
 
 function fail(code, message) {
@@ -16,10 +16,11 @@ function fail(code, message) {
 }
 
 function parseArgs(argv) {
-  const opts = { root: null, format: 'json', out: null };
+  const opts = { root: null, format: 'json', out: null, overrides: true };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a === '--format' || a === '--out') {
+    if (a === '--no-overrides') opts.overrides = false;
+    else if (a === '--format' || a === '--out') {
       const v = argv[++i];
       if (v === undefined) fail(1, `missing value for ${a}\n${USAGE}`);
       if (a === '--format') opts.format = v;
@@ -49,9 +50,10 @@ export function main(argv) {
   if (!isDir || !BUILD_FILES.some((f) => fs.existsSync(path.join(root, f)))) {
     fail(2, `not an Android/Gradle project: ${opts.root}`);
   }
-  const catalog = loadCatalog();
+  let catalog;
   let profile;
   try {
+    catalog = loadCatalogWithOverrides(undefined, root, { overrides: opts.overrides }).catalog;
     profile = detectStack(root, catalog);
   } catch (e) {
     fail(1, e.message);

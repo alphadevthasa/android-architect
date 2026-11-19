@@ -30,8 +30,11 @@ export function checkRecommendations(recs, catalog, profile, { adrs = [] } = {})
     return { ok: false, violations };
   }
   if (recs.schemaVersion !== 1) add('R5-shape', `schemaVersion must be 1, got ${JSON.stringify(recs.schemaVersion)}`);
-  if (recs.catalogVersion !== catalog.catalogVersion) {
-    add('R5-shape', `catalogVersion "${recs.catalogVersion}" does not match loaded catalog "${catalog.catalogVersion}"`);
+  // With project overrides the loaded catalog is "<base>+overrides"; the base version is what is expected, and the
+  // merged label is accepted too (profiles and candidates.json carry it).
+  const expected = catalog.baseCatalogVersion ?? catalog.catalogVersion;
+  if (recs.catalogVersion !== expected && recs.catalogVersion !== catalog.catalogVersion) {
+    add('R5-shape', `catalogVersion "${recs.catalogVersion}" does not match loaded catalog "${expected}"`);
   }
   if (!isStr(recs.generatedAt)) add('R5-shape', 'generatedAt must be a non-empty string');
   if (!Array.isArray(recs.dimensions)) add('R5-shape', 'dimensions must be an array');

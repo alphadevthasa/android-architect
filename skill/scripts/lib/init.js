@@ -39,9 +39,9 @@ const refuseSwitch = (where, setup, what) =>
   new Error(`${where} is set up in ${setup.mode} mode as ${setup.label}; ${what} would switch it, and ${SWITCH_HINT}`);
 
 /** Validate every workspace repo before anything is written. Relative paths resolve against the hub. */
-function planWorkspace(root, { local, workspace }) {
+function planWorkspace(root, { local, workspace, catalogDir }) {
   const hub = fs.realpathSync(root);
-  preflight(root, { local });
+  preflight(root, { local, catalogDir });
   const confirmed = workspace.length > 0;
   const given = confirmed ? workspace : siblingRepos(hub);
   if (!given.length) throw new Error('no sibling Gradle repos found; pass repo paths to --workspace');
@@ -59,7 +59,7 @@ function planWorkspace(root, { local, workspace }) {
     if (members.some((m) => m.abs === abs)) throw new Error(`workspace path listed twice: ${p}`);
     if (path.basename(abs) === path.basename(hub) || members.some((m) => m.name === path.basename(abs))) throw new Error(`workspace repos need distinct names: ${path.basename(abs)}`);
     if (confirmed) {
-      preflight(abs, { local });
+      preflight(abs, { local, catalogDir });
       const setup = existingSetup(abs);
       if (setup && (setup.role !== 'member' || setup.mode !== (local ? 'local' : 'committed'))) {
         throw refuseSwitch(p, setup, `making it a ${local ? 'local' : 'committed'} workspace member`);
@@ -96,7 +96,7 @@ export function initProject(root, { now = new Date(), local = false, appendPoint
     return writeAiDir(root, { ...base, workspace: { role: 'hub', hub: '.' }, repos: readJson(path.join(root, '.ai', 'repos.json')) });
   }
   if (workspace === null) return writeAiDir(root, base);
-  const plan = planWorkspace(root, { local, workspace });
+  const plan = planWorkspace(root, { local, workspace, catalogDir });
   const hub = writeAiDir(root, { ...base, workspace: { role: 'hub', hub: '.' }, repos: plan.repos });
   const members = {};
   if (workspace.length === 0) {

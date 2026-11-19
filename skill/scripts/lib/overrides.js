@@ -1,0 +1,258 @@
+// Project catalog overrides: <root>/.ai/catalog-overrides/*.json add entries to existing dimensions and pin statuses.
+// Override files live in the repo, so they are untrusted input: everything is validated before use, regexes and globs
+// are bounded, and nothing is evaluated.
+import fs from 'node:fs';
+import path from 'node:path';
+import { CatalogError, loadCatalog, validateEntry, SUPPORTED_SCHEMA_VERSION } from './catalog.js';
+import { globToRegExp } from './glob.js';
+
+export const OVERRIDES_DIR = 'catalog-overrides';
+export const MAX_FILES = 20;
+export const MAX_ENTRIES_PER_FILE = 50;
+const MAX_PATTERN = 200;
+const MAX_STRING = 500;
+const MAX_FILE_BYTES = 256 * 1024;
+const MAX_DOUBLE_STAR = 5;
+const STATUSES = ['current', 'legacy', 'deprecated'];
+
+const isStr = (v) => typeof v === 'string' && v.length > 0;
+const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+
+/**
+ * True when `src` is an acceptable detection regex: at most 200 characters, compiles without flags, and has no nested
+ * quantifier (a group that itself contains + * or {n,m} and is followed by + * or {), the classic catastrophic shape.
+ */
+export function safeRegex(src) {
+  if (typeof src !== 'string' || src.length === 0 || src.length > MAX_PATTERN) return false;
+  try {
+    new RegExp(src);
+  } catch {
+    return false;
+  }
+  const stack = [];
+  const mark = () => {
+    if (stack.length) stack[stack.length - 1] = true;
+  };
+  for (let i = 0; i < src.length; i++) {
+    const c = src[i];
+    if (c === '\\') i++;
+    else if (c === '[') {
+      for (i++; i < src.length && src[i] !== ']'; i++) if (src[i] === '\\') i++;
+    } else if (c === '(') stack.push(false);
+    else if (c === ')') {
+      const inner = stack.pop();
+      const after = src[i + 1];
+      const quantified = after === '+' || after === '*' || after === '{';
+      if (inner && quantified) return false;
+      if (inner || quantified) mark();
+    } else if (c === '+' || c === '*') mark();
+    else if (c === '{' && /^\{\d+(,\d*)?\}/.test(src.slice(i))) mark();
+  }
+  return true;
+}
+
+function globProblem(glob) {
+  if (typeof glob !== 'string' || glob.length === 0) return 'must be a non-empty string';
+  if (glob.length > MAX_PATTERN) return `is longer than ${MAX_PATTERN} characters`;
+  if (glob.split('**').length - 1 > MAX_DOUBLE_STAR) return `has more than ${MAX_DOUBLE_STAR} "**"`;
+  try {
+    globToRegExp(glob);
+  } catch {
+    return 'is not a valid glob';
+  }
+  return null;
+}
+
+/** Walks string leaves of a JSON value; calls fn(string). */
+function eachString(v, fn) {
+  if (typeof v === 'string') fn(v);
+  else if (Array.isArray(v)) for (const x of v) eachString(x, fn);
+  else if (isObj(v)) for (const x of Object.values(v)) eachString(x, fn);
+}
+
+/** Extra rules for an override entry, beyond validateEntry. Errors are not prefixed. */
+function safetyErrors(dimId, e) {
+  const errs = [];
+  const where = `${dimId}.${e.id}`;
+  let tooLong = false;
+  eachString(e, (s) => {
+    if (s.length > MAX_STRING) tooLong = true;
+  });
+  if (tooLong) errs.push(`${where}: strings must be at most ${MAX_STRING} characters`);
+  const detect = isObj(e.detect) ? e.detect : {};
+  if (detect.computed !== undefined) errs.push(`${where}: detect.computed is not allowed in overrides`);
+  for (const g of Array.isArray(detect.files) ? detect.files : []) {
+    const p = globProblem(g);
+    if (p) errs.push(`${where}: detect.files glob ${p}`);
+  }
+  for (const c of Array.isArray(detect.content) ? detect.content : []) {
+    if (!isObj(c)) continue;
+    if (isStr(c.glob)) {
+      const p = globProblem(c.glob);
+      if (p) errs.push(`${where}: detect.content glob ${p}`);
+    }
+    if (isStr(c.regex) && !safeRegex(c.regex)) {
+      errs.push(`${where}: detect.content regex is rejected (at most ${MAX_PATTERN} characters, no nested quantifiers)`);
+    }
+  }
+  return errs;
+}
+
+function readOverrideFile(abs, name) {
+  const st = fs.lstatSync(abs);
+  if (!st.isFile()) throw new Error('must be a regular file (symlinks are not followed)');
+  if (st.size > MAX_FILE_BYTES) throw new Error(`is larger than ${MAX_FILE_BYTES} bytes`);
+  try {
+    return JSON.parse(fs.readFileSync(abs, 'utf8'));
+  } catch (err) {
+    throw new Error(`is not valid JSON (${err.message})`);
+  }
+}
+
+/**
+ * Read and validate every *.json file of `dir` (sorted; README.md and other files are skipped) against the base catalog.
+ * Returns { entries: [{ file, dimension, entry }], status: [{ file, dimension, id, status, reason }], files }.
+ * Throws CatalogError listing every problem, each prefixed with its file name.
+ */
+export function loadOverrides(dir, base = loadCatalog()) {
+  const empty = { entries: [], status: [], files: [] };
+  let names;
+  try {
+    names = fs.readdirSync(dir).filter((n) => n.endsWith('.json')).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  } catch {
+    return empty;
+  }
+  if (names.length > MAX_FILES) throw new CatalogError([`${OVERRIDES_DIR}: too many override files (${names.length}, at most ${MAX_FILES})`]);
+  const errs = [];
+  const docs = [];
+  for (const name of names) {
+    try {
+      const doc = readOverrideFile(path.join(dir, name), name);
+      if (!isObj(doc)) errs.push(`${name}: must be a JSON object`);
+      else if (doc.schemaVersion !== SUPPORTED_SCHEMA_VERSION) {
+        errs.push(`${name}: unsupported schemaVersion ${JSON.stringify(doc.schemaVersion)} (supported: ${SUPPORTED_SCHEMA_VERSION})`);
+      } else docs.push({ name, doc });
+    } catch (err) {
+      errs.push(`${name}: ${err.message}`);
+    }
+  }
+
+  // Pass 1: structure and ids, so successors and prerequisites may reference entries of any override file.
+  const added = new Map(); // dimId -> Set(ids)
+  const items = [];
+  for (const { name, doc } of docs) {
+    const entries = doc.entries ?? [];
+    if (!Array.isArray(entries)) { errs.push(`${name}: entries must be an array`); continue; }
+    if (entries.length > MAX_ENTRIES_PER_FILE) {
+      errs.push(`${name}: too many entries (${entries.length}, at most ${MAX_ENTRIES_PER_FILE})`);
+      continue;
+    }
+    for (const [i, item] of entries.entries()) {
+      if (!isObj(item) || !isStr(item.dimension) || !isObj(item.entry)) {
+        errs.push(`${name}: entries[${i}] needs dimension and entry`);
+        continue;
+      }
+      const { dimension, entry } = item;
+      if (!base.dimensions.some((d) => d.id === dimension)) {
+        errs.push(`${name}: entries[${i}] unknown dimension "${dimension}" (overrides cannot add dimensions)`);
+        continue;
+      }
+      if (!isStr(entry.id)) { errs.push(`${name}: entries[${i}] entry needs an id`); continue; }
+      if (base.entry(dimension, entry.id) || added.get(dimension)?.has(entry.id)) {
+        errs.push(`${name}: ${dimension}.${entry.id} already exists (overrides can only add new entries)`);
+        continue;
+      }
+      if (!added.has(dimension)) added.set(dimension, new Set());
+      added.get(dimension).add(entry.id);
+      items.push({ file: name, dimension, entry });
+    }
+  }
+
+  // Pass 2: per-entry rules (the catalog's own), safety rules, then cycles among override entries.
+  const ctx = {
+    allowComputed: false,
+    hasDimension: (id) => base.dimensions.some((d) => d.id === id),
+    hasEntry: (dim, id) => base.entry(dim, id) !== undefined || added.get(dim)?.has(id) === true,
+  };
+  for (const { file, dimension, entry } of items) {
+    for (const m of [...validateEntry(dimension, entry, ctx), ...safetyErrors(dimension, entry)]) errs.push(`${file}: ${m}`);
+  }
+  for (const [dim, ids] of added) {
+    const graph = new Map(items.filter((x) => x.dimension === dim).map((x) => [x.entry.id, x]));
+    const state = new Map();
+    const visit = (id, stack) => {
+      if (!ids.has(id) || state.get(id) === 2) return;
+      if (state.get(id) === 1) {
+        errs.push(`${graph.get(id).file}: ${dim}: successor cycle ${[...stack.slice(stack.indexOf(id)), id].join(' -> ')}`);
+        return;
+      }
+      state.set(id, 1);
+      for (const s of Array.isArray(graph.get(id).entry.successors) ? graph.get(id).entry.successors : []) visit(s, [...stack, id]);
+      state.set(id, 2);
+    };
+    for (const id of graph.keys()) visit(id, []);
+  }
+
+  // Status pins: base or override entries only.
+  const status = [];
+  for (const { name, doc } of docs) {
+    const pins = doc.status ?? [];
+    if (!Array.isArray(pins)) { errs.push(`${name}: status must be an array`); continue; }
+    for (const [i, p] of pins.entries()) {
+      if (!isObj(p) || !isStr(p.dimension) || !isStr(p.id) || !STATUSES.includes(p.status) || !isStr(p.reason)) {
+        errs.push(`${name}: status[${i}] needs dimension, id, status (${STATUSES.join('|')}) and reason`);
+      } else if (p.reason.length > MAX_STRING) {
+        errs.push(`${name}: status[${i}] reason must be at most ${MAX_STRING} characters`);
+      } else if (!ctx.hasEntry(p.dimension, p.id)) {
+        errs.push(`${name}: status[${i}] unknown entry ${p.dimension}.${p.id}`);
+      } else status.push({ file: name, dimension: p.dimension, id: p.id, status: p.status, reason: p.reason });
+    }
+  }
+  if (errs.length) throw new CatalogError(errs);
+  return { entries: items, status, files: docs.map((d) => d.name) };
+}
+
+/** A new catalog: base plus the override entries, with status pins applied. The base object is not modified. */
+export function applyOverrides(catalog, overrides) {
+  if (!overrides.entries.length && !overrides.status.length) return catalog;
+  const dimensions = structuredClone(catalog.dimensions);
+  const find = (dim) => dimensions.find((d) => d.id === dim);
+  const addedList = [];
+  for (const { dimension, entry } of overrides.entries) {
+    const d = find(dimension);
+    if (!d || d.entries.some((e) => e.id === entry.id)) throw new CatalogError([`${dimension}.${entry.id}: cannot add override entry`]);
+    d.entries.push(structuredClone(entry));
+    addedList.push(`${dimension}.${entry.id}`);
+  }
+  const pinned = [];
+  for (const p of overrides.status) {
+    const e = find(p.dimension)?.entries.find((x) => x.id === p.id);
+    if (!e) throw new CatalogError([`${p.dimension}.${p.id}: cannot pin status of an unknown entry`]);
+    e.status = p.status;
+    e.statusPin = { reason: p.reason };
+    pinned.push(`${p.dimension}.${p.id}`);
+  }
+  return {
+    ...catalog,
+    catalogVersion: `${catalog.catalogVersion}+overrides`,
+    baseCatalogVersion: catalog.catalogVersion,
+    dimensions,
+    entry: (dimId, entryId) => dimensions.find((d) => d.id === dimId)?.entries.find((e) => e.id === entryId),
+    overridden: { added: addedList, statusPinned: [...new Set(pinned)] },
+  };
+}
+
+/** The base catalog version, without the "+overrides" suffix a merged catalog carries. */
+export const baseVersion = (catalog) => catalog.baseCatalogVersion ?? catalog.catalogVersion;
+
+/**
+ * Load the base catalog and, unless `overrides` is false, merge <root>/.ai/catalog-overrides when it exists.
+ * Returns { catalog, base, files } (files: the override file names applied; empty when none).
+ */
+export function loadCatalogWithOverrides(catalogDir, root, { overrides = true } = {}) {
+  const base = catalogDir === undefined ? loadCatalog() : loadCatalog(catalogDir);
+  const dir = path.join(root, '.ai', OVERRIDES_DIR);
+  if (!overrides || !fs.existsSync(dir)) return { catalog: base, base, files: [] };
+  const loaded = loadOverrides(dir, base);
+  return { catalog: applyOverrides(base, loaded), base, files: loaded.files };
+}

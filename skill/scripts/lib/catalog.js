@@ -90,6 +90,66 @@ function validateVulnerable(where, e, errs) {
   }
 }
 
+/**
+ * Validate one catalog entry. `ctx` is { hasDimension(id), hasEntry(dimId, id), allowComputed? }: the lookups resolve
+ * successor and prerequisite references; `allowComputed` (boolean) overrides the built-in computed-signal allowlist.
+ * Returns error strings (empty when valid), each prefixed "<dim>.<id>: ".
+ */
+export function validateEntry(dimId, e, ctx) {
+  const errs = [];
+  if (!isObj(e) || !isStr(e.id)) return [`${dimId}: entry must have an id`];
+  const where = `${dimId}.${e.id}`;
+  if (!isStr(e.name)) errs.push(`${where}: name required`);
+  if (!Number.isInteger(e.era) || e.era < 1) errs.push(`${where}: era must be an integer >= 1`);
+  if (!STATUSES.includes(e.status)) errs.push(`${where}: bad status "${e.status}"`);
+  for (const k of ['since', 'deprecatedSince']) {
+    if (e[k] !== undefined && !(typeof e[k] === 'string' && DATE_RE.test(e[k]))) {
+      errs.push(`${where}: ${k} must be YYYY or YYYY-MM`);
+    }
+  }
+  if (e.policy !== undefined) {
+    if (!isObj(e.policy)) errs.push(`${where}: policy must be an object`);
+    else {
+      if (e.policy.kind !== undefined && !isStr(e.policy.kind)) errs.push(`${where}: policy.kind must be a non-empty string`);
+      if (e.policy.kind === 'targetSdkMin' && !Number.isInteger(e.policy.value)) {
+        errs.push(`${where}: policy.value must be an integer for targetSdkMin`);
+      }
+      if (e.policy.effective !== undefined && !(typeof e.policy.effective === 'string' && ISO_DATE_RE.test(e.policy.effective))) {
+        errs.push(`${where}: policy.effective must be YYYY-MM-DD`);
+      }
+    }
+  }
+  if (!Array.isArray(e.successors)) {
+    errs.push(`${where}: successors must be an array`);
+  } else {
+    for (const s of e.successors) {
+      if (!ctx.hasEntry(dimId, s)) errs.push(`${where}: unknown successor "${s}"`);
+    }
+  }
+  if (e.prerequisites !== undefined) {
+    if (!Array.isArray(e.prerequisites)) errs.push(`${where}: prerequisites must be an array`);
+    else {
+      for (const p of e.prerequisites) {
+        if (!isObj(p) || !Array.isArray(p.anyOf)) {
+          errs.push(`${where}: prerequisite needs dimension and anyOf`);
+        } else if (!ctx.hasDimension(p.dimension)) {
+          errs.push(`${where}: prerequisite references unknown dimension "${p.dimension}"`);
+        } else {
+          for (const x of p.anyOf) {
+            if (!ctx.hasEntry(p.dimension, x)) {
+              errs.push(`${where}: prerequisite references unknown entry "${x}" in "${p.dimension}"`);
+            }
+          }
+        }
+      }
+    }
+  }
+  if (e.vulnerableVersions !== undefined) validateVulnerable(where, e, errs);
+  validateDetect(where, e.detect, errs,
+    ctx.allowComputed ?? (COMPUTED_DIMENSIONS.includes(dimId) || COMPUTED_ENTRIES.includes(where)));
+  return errs;
+}
+
 export function validateCatalog(raw) {
   const errs = [];
   const meta = raw?.meta;
@@ -119,6 +179,7 @@ export function validateCatalog(raw) {
     index.set(d.id, ids);
   }
 
+  const ctx = { hasDimension: (id) => index.has(id), hasEntry: (dim, id) => index.get(dim)?.has(id) === true };
   for (const d of dims) {
     if (!isObj(d) || !Array.isArray(d.entries)) continue;
     const graph = new Map();
@@ -127,56 +188,8 @@ export function validateCatalog(raw) {
         errs.push(`${d.id}: entry must have an id`);
         continue;
       }
-      const where = `${d.id}.${e.id}`;
-      if (!isStr(e.name)) errs.push(`${where}: name required`);
-      if (!Number.isInteger(e.era) || e.era < 1) errs.push(`${where}: era must be an integer >= 1`);
-      if (!STATUSES.includes(e.status)) errs.push(`${where}: bad status "${e.status}"`);
-      for (const k of ['since', 'deprecatedSince']) {
-        if (e[k] !== undefined && !(typeof e[k] === 'string' && DATE_RE.test(e[k]))) {
-          errs.push(`${where}: ${k} must be YYYY or YYYY-MM`);
-        }
-      }
-      if (e.policy !== undefined) {
-        if (!isObj(e.policy)) errs.push(`${where}: policy must be an object`);
-        else {
-          if (e.policy.kind !== undefined && !isStr(e.policy.kind)) errs.push(`${where}: policy.kind must be a non-empty string`);
-          if (e.policy.kind === 'targetSdkMin' && !Number.isInteger(e.policy.value)) {
-            errs.push(`${where}: policy.value must be an integer for targetSdkMin`);
-          }
-          if (e.policy.effective !== undefined && !(typeof e.policy.effective === 'string' && ISO_DATE_RE.test(e.policy.effective))) {
-            errs.push(`${where}: policy.effective must be YYYY-MM-DD`);
-          }
-        }
-      }
-      if (!Array.isArray(e.successors)) {
-        errs.push(`${where}: successors must be an array`);
-      } else {
-        graph.set(e.id, e.successors);
-        for (const s of e.successors) {
-          if (!index.get(d.id).has(s)) errs.push(`${where}: unknown successor "${s}"`);
-        }
-      }
-      if (e.prerequisites !== undefined) {
-        if (!Array.isArray(e.prerequisites)) errs.push(`${where}: prerequisites must be an array`);
-        else {
-          for (const p of e.prerequisites) {
-            if (!isObj(p) || !Array.isArray(p.anyOf)) {
-              errs.push(`${where}: prerequisite needs dimension and anyOf`);
-            } else if (!index.has(p.dimension)) {
-              errs.push(`${where}: prerequisite references unknown dimension "${p.dimension}"`);
-            } else {
-              for (const x of p.anyOf) {
-                if (!index.get(p.dimension).has(x)) {
-                  errs.push(`${where}: prerequisite references unknown entry "${x}" in "${p.dimension}"`);
-                }
-              }
-            }
-          }
-        }
-      }
-      if (e.vulnerableVersions !== undefined) validateVulnerable(where, e, errs);
-      validateDetect(where, e.detect, errs,
-        COMPUTED_DIMENSIONS.includes(d.id) || COMPUTED_ENTRIES.includes(where));
+      errs.push(...validateEntry(d.id, e, ctx));
+      if (Array.isArray(e.successors)) graph.set(e.id, e.successors);
     }
     // Cycle detection by DFS over successors.
     const state = new Map();

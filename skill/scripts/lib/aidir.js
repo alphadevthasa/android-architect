@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { loadCatalog } from './catalog.js';
+import { loadCatalogWithOverrides } from './overrides.js';
 import { detectStack } from './detect.js';
 import { candidatePaths } from './candidates.js';
 import { discoverModules } from './modules.js';
@@ -25,6 +25,7 @@ const USER_TEMPLATES = [
   'knowledge/components.md',
   'knowledge/adr/0000-template.md',
   'migration/roadmap.md',
+  'catalog-overrides/README.md',
 ];
 // Generated knowledge files (rewritten on every run; the instruction-injection scan skips them).
 export const GENERATED_KNOWLEDGE = [
@@ -110,10 +111,11 @@ function makeGuard(root, realRoot) {
 }
 
 /**
- * Checks run before any write: --local needs a repo; .ai (and anything in it) and the pointer files must not be symlinks.
+ * Checks run before any write: --local needs a repo; .ai (and anything in it) and the pointer files must not be symlinks;
+ * .ai/catalog-overrides (when present) must be valid against the catalog in `catalogDir` (default: this skill's).
  * writeAiDir runs this itself; workspace mode runs it for every repo first.
  */
-export function preflight(root, { local = false } = {}) {
+export function preflight(root, { local = false, catalogDir = path.join(DEFAULT_SKILL_DIR, 'catalog') } = {}) {
   const realRoot = fs.realpathSync(root);
   const aiDir = path.join(root, '.ai');
   if (local && !gitDir(root)) throw new Error('--local needs a git repository');
@@ -121,6 +123,7 @@ export function preflight(root, { local = false } = {}) {
   guard('.ai');
   if (fs.existsSync(aiDir)) regularFiles(aiDir);
   for (const f of ['AGENTS.md', 'CLAUDE.md', 'CLAUDE.local.md']) guard(f);
+  loadCatalogWithOverrides(catalogDir, root);
 }
 
 /**
@@ -162,13 +165,14 @@ export function writeAiDir(
   // manifest (hashes) are written as they are.
   const putRedacted = (rel, text) => putAi(rel, redact(text).text);
 
-  preflight(root, { local });
+  preflight(root, { local, catalogDir });
 
   // Vendor sources are read into memory before the first write, and must not live inside .ai.
   const vendorSources = collectVendorSources(skillDir, catalogDir, { aiDir });
   toolVersion = toolVersion ?? resolveToolVersion(skillDir, aiDir);
 
-  const catalog = loadCatalog(catalogDir);
+  // Detection and candidates use base + project overrides; vendoring (above) copies the base catalog only.
+  const { catalog, base, files: overrideFiles } = loadCatalogWithOverrides(catalogDir, root);
   const previous = readManifest(aiDir);
   const head = headCommit(root);
   // Keep the recorded commit when only .ai or pointer files changed since, so committing .ai does not churn headers.
@@ -275,7 +279,9 @@ export function writeAiDir(
   writeManifest(aiDir, {
     schemaVersion: MANIFEST_SCHEMA_VERSION,
     toolVersion,
-    catalogVersion: catalog.catalogVersion,
+    // The base version, so ai-status compares like with like; the merged one ("+overrides") only labels generated files.
+    catalogVersion: base.catalogVersion,
+    overrides: overrideFiles,
     generatedAt: now.toISOString(),
     commit,
     mode,

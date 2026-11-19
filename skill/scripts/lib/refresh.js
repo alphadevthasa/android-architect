@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadCatalog } from './catalog.js';
+import { loadCatalogWithOverrides, baseVersion } from './overrides.js';
 import { detectStack } from './detect.js';
 import { candidatePaths } from './candidates.js';
 import { checkRecommendations } from './guardrail.js';
@@ -65,11 +66,11 @@ function tryLoadCatalog(dir) {
 
 function diffRecommendations(recs, oldCatalog, newCatalog, profile, adrs, notes) {
   const checked = recs !== null && typeof recs === 'object' && !Array.isArray(recs);
-  if (checked && recs.catalogVersion !== newCatalog.catalogVersion) {
-    notes.push(`recommendations.json was written for catalog ${recs.catalogVersion}; checked against ${newCatalog.catalogVersion}`);
+  if (checked && recs.catalogVersion !== baseVersion(newCatalog) && recs.catalogVersion !== newCatalog.catalogVersion) {
+    notes.push(`recommendations.json was written for catalog ${recs.catalogVersion}; checked against ${baseVersion(newCatalog)}`);
   }
   const violations = checkRecommendations(
-    checked ? { ...recs, catalogVersion: newCatalog.catalogVersion } : recs,
+    checked ? { ...recs, catalogVersion: baseVersion(newCatalog) } : recs,
     newCatalog,
     profile,
     { adrs },
@@ -162,7 +163,7 @@ export function refreshAiDir(root, { now = new Date(), catalogDir, skillDir = DE
   const local = manifest.mode === 'local';
   const workspace = manifest.workspace ?? null;
   const isMember = workspace?.role === 'member';
-  preflight(root, { local });
+  preflight(root, { local, catalogDir });
   migrateLayout(aiDir, manifest.schemaVersion, now);
 
   const notes = [];
@@ -172,9 +173,11 @@ export function refreshAiDir(root, { now = new Date(), catalogDir, skillDir = DE
   if (!oldCatalog) notes.push('the previous catalog could not be read from .ai/tools/catalog; status and new-option diffs are empty');
   if (!oldSnapshot?.candidates) notes.push('the previous .ai/candidates.json could not be read; candidate diff is empty');
 
-  const newCatalog = loadCatalog(catalogDir);
-  if (manifest.catalogVersion !== newCatalog.catalogVersion) {
-    notes.push(`catalog moved from ${manifest.catalogVersion} to ${newCatalog.catalogVersion}; re-check recommendations.json and architecture-target.md`);
+  // New side = base + project overrides. The old side stays the previously vendored base catalog, so a status pin shows
+  // up as a status change the first time it is applied.
+  const newCatalog = loadCatalogWithOverrides(catalogDir, root).catalog;
+  if (manifest.catalogVersion !== baseVersion(newCatalog)) {
+    notes.push(`catalog moved from ${manifest.catalogVersion} to ${baseVersion(newCatalog)}; re-check recommendations.json and architecture-target.md`);
   }
   const profile = detectStack(root, newCatalog);
   const newCands = candidatePaths(profile, newCatalog);
@@ -199,7 +202,7 @@ export function refreshAiDir(root, { now = new Date(), catalogDir, skillDir = DE
   notes.push(...modifiedToolsNotes(root, aiDir, { skillDir, catalogDir, toolVersion: toolTo }));
   const report = {
     tool: { from: manifest.toolVersion ?? null, to: toolTo },
-    catalog: { from: manifest.catalogVersion ?? null, to: newCatalog.catalogVersion },
+    catalog: { from: manifest.catalogVersion ?? null, to: baseVersion(newCatalog) },
     candidates,
     recommendations,
     rejections,
