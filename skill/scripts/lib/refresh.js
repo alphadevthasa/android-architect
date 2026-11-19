@@ -10,7 +10,6 @@ import { loadAdrs, activeRejections } from './adr.js';
 import { MANIFEST_SCHEMA_VERSION, readManifest } from './manifest.js';
 import { writeAiDir, preflight, resolveToolVersion } from './aidir.js';
 import { generatedHeader } from './knowledge.js';
-import { headCommit } from './git.js';
 
 const DEFAULT_SKILL_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const byText = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
@@ -186,7 +185,6 @@ export function refreshAiDir(root, { now = new Date(), catalogDir, skillDir = DE
     files: { written: [], kept: [], conflicts: [] },
     notes,
   };
-  const meta = { date: now.toISOString().slice(0, 10), commit: headCommit(root), catalogVersion: newCatalog.catalogVersion };
   const withOwn = (names) => [...new Set([...names, '.ai/manifest.json', '.ai/refresh-report.md'])].sort(byText);
 
   const result = writeAiDir(root, {
@@ -200,6 +198,7 @@ export function refreshAiDir(root, { now = new Date(), catalogDir, skillDir = DE
     catalogDir,
     extraGenerated: (files) => {
       report.files = { written: withOwn(files.written), kept: files.kept, conflicts: files.conflicts };
+      const meta = { date: now.toISOString().slice(0, 10), commit: files.commit, catalogVersion: newCatalog.catalogVersion };
       return { 'refresh-report.md': renderReport(report, meta) };
     },
   });

@@ -19,6 +19,26 @@ export function headCommit(root) {
   return git(root, ['rev-parse', '--short=7', 'HEAD']) || null;
 }
 
+const SHA = /^[0-9a-f]{4,40}$/;
+
+/**
+ * True when files under root (minus the `exclude` pathspecs, relative to root) differ between `commit` and HEAD.
+ * An unknown, unreachable or malformed commit, or no git, counts as changed.
+ */
+export function changedSince(root, commit, exclude = []) {
+  if (typeof commit !== 'string' || !SHA.test(commit)) return true;
+  try {
+    execFileSync(
+      'git',
+      ['diff', '--quiet', '--no-ext-diff', '--no-textconv', commit, 'HEAD', '--', '.', ...exclude.map((p) => `:(exclude)${p}`)],
+      { cwd: root, stdio: 'ignore' },
+    );
+    return false;
+  } catch {
+    return true;
+  }
+}
+
 /** Absolute git dir of the repo containing root, or null. */
 export function gitDir(root) {
   return git(root, ['rev-parse', '--absolute-git-dir']) || null;

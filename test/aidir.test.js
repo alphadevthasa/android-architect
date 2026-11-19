@@ -236,7 +236,65 @@ test('aiStatus reports commit-moved', { skip: !hasGit }, () => {
   const cv = loadCatalog().catalogVersion;
   assert.equal(aiStatus(root, { toolCatalogVersion: cv }).ok, true);
   g(root, 'commit', '--allow-empty', '-m', 'b');
+  assert.deepEqual(aiStatus(root, { toolCatalogVersion: cv }).stale, [], 'an empty commit changes no project file');
+  fs.appendFileSync(path.join(root, 'settings.gradle.kts'), '\n// changed\n');
+  g(root, 'commit', '-am', 'c');
   assert.deepEqual(aiStatus(root, { toolCatalogVersion: cv }).stale, ['commit-moved']);
+});
+
+test('committed mode: committing .ai and pointer files is not commit-moved; a source change is', { skip: !hasGit }, () => {
+  g(root, 'init');
+  g(root, 'add', '.');
+  g(root, 'commit', '-m', 'a');
+  run();
+  g(root, 'add', '.');
+  g(root, 'commit', '-m', 'add .ai');
+  const cv = loadCatalog().catalogVersion;
+  assert.deepEqual(aiStatus(root, { toolCatalogVersion: cv }).stale, []);
+  // Re-running with no project change does not dirty the committed files.
+  run();
+  assert.equal(g(root, 'status', '--porcelain'), '');
+  assert.deepEqual(aiStatus(root, { toolCatalogVersion: cv }).stale, []);
+  fs.appendFileSync(path.join(root, 'settings.gradle.kts'), '\n// changed\n');
+  g(root, 'commit', '-am', 'src');
+  assert.deepEqual(aiStatus(root, { toolCatalogVersion: cv }).stale, ['commit-moved']);
+});
+
+test('commit-moved in a repo subdirectory looks only at the root', { skip: !hasGit }, () => {
+  const repo = path.join(tmp, 'repo');
+  fs.mkdirSync(repo);
+  fs.renameSync(root, path.join(repo, 'proj'));
+  root = path.join(repo, 'proj');
+  fs.writeFileSync(path.join(repo, 'other.txt'), 'x');
+  g(repo, 'init');
+  g(repo, 'add', '.');
+  g(repo, 'commit', '-m', 'a');
+  run();
+  g(repo, 'add', '.');
+  g(repo, 'commit', '-m', 'ai');
+  const cv = loadCatalog().catalogVersion;
+  fs.appendFileSync(path.join(repo, 'other.txt'), 'y');
+  g(repo, 'commit', '-am', 'outside');
+  assert.deepEqual(aiStatus(root, { toolCatalogVersion: cv }).stale, []);
+  fs.appendFileSync(path.join(root, 'settings.gradle.kts'), '\n// changed\n');
+  g(repo, 'commit', '-am', 'inside');
+  assert.deepEqual(aiStatus(root, { toolCatalogVersion: cv }).stale, ['commit-moved']);
+});
+
+test('an unknown or malformed manifest commit counts as moved', { skip: !hasGit }, () => {
+  g(root, 'init');
+  g(root, 'add', '.');
+  g(root, 'commit', '-m', 'a');
+  run();
+  const cv = loadCatalog().catalogVersion;
+  const file = path.join(root, '.ai/manifest.json');
+  for (const commit of ['deadbee', '--output=x', null]) {
+    const m = JSON.parse(fs.readFileSync(file, 'utf8'));
+    m.commit = commit;
+    fs.writeFileSync(file, JSON.stringify(m));
+    assert.deepEqual(aiStatus(root, { toolCatalogVersion: cv }).stale, ['commit-moved'], String(commit));
+  }
+  assert.equal(fs.existsSync(path.join(root, 'x')), false);
 });
 
 test('--local with root in a repo subdirectory anchors exclude patterns', { skip: !hasGit }, () => {

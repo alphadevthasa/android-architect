@@ -8,7 +8,7 @@ import { candidatePaths } from './candidates.js';
 import { discoverModules } from './modules.js';
 import { listFiles } from './walk.js';
 import { buildIndex } from './indexer.js';
-import { headCommit, gitDir, topLevel, addToExclude } from './git.js';
+import { headCommit, gitDir, topLevel, addToExclude, changedSince } from './git.js';
 import { sha256File, hashTree } from './hash.js';
 import { MANIFEST_SCHEMA_VERSION, readManifest, writeManifest } from './manifest.js';
 import { readTemplate, renderReadme, renderKnowledge } from './knowledge.js';
@@ -24,6 +24,8 @@ const USER_TEMPLATES = [
   'migration/roadmap.md',
 ];
 const USER_OPTIONAL = ['recommendations.json', 'repos.json'];
+// Paths whose changes do not make .ai stale: .ai itself and the pointer files init writes.
+const OWN_PATHS = ['.ai', 'AGENTS.md', 'CLAUDE.md', 'CLAUDE.local.md'];
 const byText = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
 const sha = (text) => crypto.createHash('sha256').update(text).digest('hex');
 
@@ -74,6 +76,13 @@ function regularFiles(dir) {
 
 const refuse = (rel) => new Error(`refusing to write through a symlink: ${rel}`);
 
+/** True when the project changed between the recorded commit and HEAD (ignoring .ai and pointer files). */
+function commitMoved(root, recorded, head) {
+  if (head === recorded) return false;
+  if (head === null || recorded === null) return true;
+  return changedSince(root, recorded, OWN_PATHS);
+}
+
 /** Returns guard(rel): throws when rel escapes root or passes through a symlink; else the absolute path. */
 function makeGuard(root, realRoot) {
   // Every component from root down to rel must not be a symlink, and the target must stay in root.
@@ -115,7 +124,7 @@ export function preflight(root, { local = false } = {}) {
  * Write the .ai folder. See task 4 for the ownership table.
  * `workspace` is null, { role: 'hub', hub: '.' } (with `repos`, the repos.json content, written only when missing)
  * or { role: 'member', hub: <relative path> } (thin .ai: no workflows, no user-owned files).
- * `extraGenerated` is { name: text } or a function of { written, kept, conflicts } returning that: extra generated
+ * `extraGenerated` is { name: text } or a function of { written, kept, conflicts, commit } returning that: extra generated
  * files written at the top of .ai (always rewritten, through the same guarded writer).
  * Returns { written, kept, conflicts, pointers, excluded } with paths relative to root, sorted.
  */
@@ -164,14 +173,25 @@ export function writeAiDir(
   toolVersion = toolVersion ?? resolveToolVersion(skillDir, aiDir);
 
   const catalog = loadCatalog(catalogDir);
-  const commit = headCommit(root);
+  const previous = readManifest(aiDir);
+  const head = headCommit(root);
+  // Keep the recorded commit when only .ai or pointer files changed since, so committing .ai does not churn headers.
+  const recorded = previous?.commit ?? null;
+  const commit = recorded !== null && head !== null && !commitMoved(root, recorded, head) ? recorded : head;
+
+  // Pointers first, so the file counts and index below already include them and a re-run does not change them.
+  const pointers = applyPointers(root, {
+    local,
+    appendPointers,
+    block: readTemplate('pointer.md', templatesDir),
+    write: (rel, content) => put(rel, content),
+  });
   const files = listFiles(root);
   const profile = detectStack(root, catalog);
   const modules = discoverModules(root, files);
   const date = now.toISOString().slice(0, 10);
   const mode = local ? 'local' : 'committed';
   const meta = { date, commit, catalogVersion: catalog.catalogVersion };
-  const previous = readManifest(aiDir);
 
   // generated
   putAi(
@@ -190,7 +210,6 @@ export function writeAiDir(
       2,
     ) + '\n',
   );
-  putAi('index/index.json', JSON.stringify(buildIndex(root, { now, commit, catalogVersion: catalog.catalogVersion })) + '\n');
 
   // tools: tool-owned, wiped and rewritten from the running skill
   const toolsAbs = guard('.ai/tools');
@@ -231,8 +250,11 @@ export function writeAiDir(
   const adrDir = path.join(aiDir, 'knowledge', 'adr');
   if (!isMember && fs.existsSync(adrDir)) for (const f of regularFiles(adrDir)) kept.add(`.ai/knowledge/adr/${f}`);
 
+  // The index covers .ai/knowledge, so it is built once the knowledge files above exist.
+  putAi('index/index.json', JSON.stringify(buildIndex(root, { now, commit, catalogVersion: catalog.catalogVersion })) + '\n');
+
   const extra = typeof extraGenerated === 'function'
-    ? extraGenerated({ written: [...written].sort(byText), kept: [...kept].sort(byText), conflicts: [...conflicts].sort(byText) })
+    ? extraGenerated({ written: [...written].sort(byText), kept: [...kept].sort(byText), conflicts: [...conflicts].sort(byText), commit })
     : extraGenerated ?? {};
   for (const [rel, text] of Object.entries(extra)) putAi(rel, text);
 
@@ -249,13 +271,7 @@ export function writeAiDir(
   });
   written.add('.ai/manifest.json');
 
-  // pointers and local exclusion
-  const pointers = applyPointers(root, {
-    local,
-    appendPointers,
-    block: readTemplate('pointer.md', templatesDir),
-    write: (rel, content) => put(rel, content),
-  });
+  // local exclusion
   let excluded = [];
   if (local) {
     const sub = path.relative(fs.realpathSync(topLevel(root)), realRoot).split(path.sep).filter(Boolean).join('/');
@@ -279,7 +295,7 @@ export function aiStatus(root, { toolCatalogVersion }) {
   const manifest = readManifest(aiDir);
   if (!manifest) return { ok: false, stale: ['no-manifest'], manifest: null };
   const stale = [];
-  if (headCommit(root) !== (manifest.commit ?? null)) stale.push('commit-moved');
+  if (commitMoved(root, manifest.commit ?? null, headCommit(root))) stale.push('commit-moved');
   if (toolCatalogVersion !== manifest.catalogVersion) stale.push('catalog-moved');
   let tools = {};
   try {
