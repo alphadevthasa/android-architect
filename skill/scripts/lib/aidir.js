@@ -14,6 +14,7 @@ import { MANIFEST_SCHEMA_VERSION, readManifest, writeManifest } from './manifest
 import { readTemplate, renderReadme, renderKnowledge } from './knowledge.js';
 import { applyPointers } from './pointers.js';
 import { redact, redactJson } from './redact.js';
+import { scanAiDir } from './injection.js';
 import { collectVendorSources, verifyTools, selfCheckTools } from './integrity.js';
 
 const DEFAULT_SKILL_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -24,6 +25,14 @@ const USER_TEMPLATES = [
   'knowledge/components.md',
   'knowledge/adr/0000-template.md',
   'migration/roadmap.md',
+];
+// Generated knowledge files (rewritten on every run; the instruction-injection scan skips them).
+export const GENERATED_KNOWLEDGE = [
+  'knowledge/stack-profile.md',
+  'knowledge/architecture-current.md',
+  'knowledge/module-map.md',
+  'knowledge/dependencies.md',
+  'knowledge/feature-map.md',
 ];
 const USER_OPTIONAL = ['recommendations.json', 'repos.json'];
 // Paths whose changes do not make .ai stale: .ai itself and the pointer files init writes.
@@ -311,5 +320,5 @@ export function aiStatus(root, { toolCatalogVersion, skillDir = DEFAULT_SKILL_DI
     : verifyTools(root, { skillDir, catalogDir, toolVersion: toolVersion ?? resolveToolVersion(skillDir, aiDir) });
   if (tools.status === 'modified') stale.push('tools-modified');
   if (tools.status === 'unverifiable') stale.push('tools-unverifiable');
-  return { ok: stale.length === 0, stale, manifest, tools: { ...tools, trusted: !selfCheck } };
+  return { ok: stale.length === 0, stale, manifest, tools: { ...tools, trusted: !selfCheck }, suspicious: scanAiDir(root) };
 }

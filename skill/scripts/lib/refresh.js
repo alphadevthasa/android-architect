@@ -10,6 +10,7 @@ import { loadAdrs, activeRejections, adrWarnings } from './adr.js';
 import { MANIFEST_SCHEMA_VERSION, readManifest } from './manifest.js';
 import { writeAiDir, preflight, resolveToolVersion } from './aidir.js';
 import { generatedHeader } from './knowledge.js';
+import { scanAiDir } from './injection.js';
 import { verifyTools, selfCheckTools } from './integrity.js';
 
 const DEFAULT_SKILL_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -217,6 +218,12 @@ export function refreshAiDir(root, { now = new Date(), catalogDir, skillDir = DE
     skillDir,
     catalogDir,
     extraGenerated: (files) => {
+      // Scan after the managed and user-owned files are settled, before the report is rendered.
+      const byFile = new Map();
+      for (const f of scanAiDir(root)) byFile.set(f.file, [...(byFile.get(f.file) ?? []), f.line]);
+      for (const [file, lines] of byFile) {
+        notes.push(`suspicious instruction-like text in ${file} (lines ${[...new Set(lines)].join(', ')}): review before trusting it`);
+      }
       report.files = { written: withOwn(files.written), kept: files.kept, conflicts: files.conflicts };
       const meta = { date: now.toISOString().slice(0, 10), commit: files.commit, catalogVersion: newCatalog.catalogVersion };
       return { 'refresh-report.md': renderReport(report, meta) };
