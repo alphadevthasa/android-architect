@@ -2,10 +2,16 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
+// Stable English git messages regardless of the user's locale.
+function gitEnv() {
+  return { ...process.env, LC_ALL: 'C', LANGUAGE: 'C' };
+}
+
 function git(root, args) {
   try {
     return execFileSync('git', args, {
       cwd: root,
+      env: gitEnv(),
       stdio: ['ignore', 'pipe', 'ignore'],
       encoding: 'utf8',
     }).trim();
@@ -31,7 +37,7 @@ export function changedSince(root, commit, exclude = []) {
     execFileSync(
       'git',
       ['diff', '--quiet', '--no-ext-diff', '--no-textconv', commit, 'HEAD', '--', '.', ...exclude.map((p) => `:(exclude)${p}`)],
-      { cwd: root, stdio: 'ignore' },
+      { cwd: root, env: gitEnv(), stdio: 'ignore' },
     );
     return false;
   } catch {
@@ -92,6 +98,7 @@ export function ignoredPaths(root, relPaths) {
   try {
     out = execFileSync('git', ['check-ignore', '-z', '--stdin'], {
       cwd: root,
+      env: gitEnv(),
       input: relPaths.join('\0'),
       encoding: 'utf8',
       stdio: ['pipe', 'pipe', 'pipe'],

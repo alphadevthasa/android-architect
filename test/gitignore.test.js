@@ -165,3 +165,19 @@ test('names with spaces, unicode and newlines are filtered correctly', () => {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('plain non-repo dir gives an empty set under a localized environment', () => {
+  const root = fixture({ git: false });
+  const saved = { LANG: process.env.LANG, LC_ALL: process.env.LC_ALL };
+  process.env.LANG = 'de_DE.UTF-8';
+  process.env.LC_ALL = 'de_DE.UTF-8';
+  try {
+    assert.equal(ignoredPaths(root, ['secret-notes.md']).size, 0);
+  } finally {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
