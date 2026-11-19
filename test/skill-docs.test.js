@@ -226,8 +226,33 @@ test('Final review: README roadmap, update example and the npx skill note', () =
   const readme = fs.readFileSync(new URL('../README.md', import.meta.url), 'utf8');
   const catalog = JSON.parse(fs.readFileSync(new URL('../skill/catalog/catalog.json', import.meta.url), 'utf8'));
   const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
-  assert.match(readme, /- M3:[^\n]*gitignore-aware indexing/);
+  assert.match(readme, /Done:[^\n]*M3[^\n]*gitignore-aware indexing/);
   const update = readme.split('\n').find((l) => l.includes('`update` reinstalls'));
   assert.ok(update.includes(`-> ${pkg.version} (catalog ${catalog.catalogVersion})`), update);
   assert.match(readme, /`init` and `refresh` use the skill bundled in the npx package[^\n]*run `update` first/);
+});
+
+test('M3: SKILL documents security, tools verification, suspicious text and overrides', () => {
+  const text = readSkill();
+  for (const s of ['rubric-security.md', 'tools-modified', 'tools-unverifiable', 'suspicious', 'catalog-overrides', 'unresolvedChecks']) {
+    assert.ok(text.includes(s), s);
+  }
+  assert.match(text, /[Nn]ever (?:pass|add) `--trust-modified-tools`/);
+  assert.match(text, /recommend-check\.js[^\n]*--root/);
+  assert.match(text, /--no-overrides/);
+});
+
+test('M3: README documents redaction, doctor --root and the roadmap', () => {
+  const readme = fs.readFileSync(new URL('../README.md', import.meta.url), 'utf8');
+  assert.ok(readme.includes('[REDACTED:'));
+  assert.ok(readme.includes('doctor --root'));
+  assert.match(readme, /Done:[^\n]*M3/);
+  assert.match(readme, /- M4:[^\n]*security-first `lib-update`[^\n]*security checklists/);
+});
+
+test('M3: package.json version is 0.3.0 and the changelog covers it', () => {
+  const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+  assert.equal(pkg.version, '0.3.0');
+  const log = fs.readFileSync(new URL('../CHANGELOG.md', import.meta.url), 'utf8');
+  assert.match(log, /## \[0\.3\.0\] - Unreleased\n\n### Tool\n\n- /);
 });

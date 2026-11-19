@@ -9,7 +9,7 @@ Requires Node 20 or newer. No dependencies.
 Pin the version you install:
 
 ```
-npx android-architect@0.2.0 install
+npx android-architect@0.3.0 install
 ```
 
 By default the skill is installed into the harnesses that already exist in your home directory (`~/.claude`, `~/.codex`). Flags:
@@ -22,7 +22,7 @@ By default the skill is installed into the harnesses that already exist in your 
 Other commands: `update` (see below), `init`, `refresh`, `uninstall`, `version`, and `doctor`, which reports which harnesses have the skill installed, with its version and catalog version, and flags a partial or foreign directory. `doctor --root <dir>` also checks that project's `.ai/`: it prints `tools: ok`, `tools: modified (<n> files)` or `tools: unverifiable (<reason>)`, verifying `.ai/tools` against the installed skill.
 
 ```
-npx android-architect@0.2.0 doctor
+npx android-architect@0.3.0 doctor
 ```
 
 ## Keep project knowledge: init, refresh, update
@@ -77,7 +77,7 @@ We recommend a CODEOWNERS entry for `.ai/workflows/` and `.ai/tools/` so changes
 
 ### update
 
-`update` reinstalls the skill into the harnesses that already have it (`~/.claude`, `~/.codex`), never creating a new one, and prints `claude: 0.1.0 (catalog 2026.11.0) -> 0.2.0 (catalog 2026.11.2)` per harness. Then run `refresh` in each project to re-assess it against the new catalog. With nothing installed it exits 1.
+`update` reinstalls the skill into the harnesses that already have it (`~/.claude`, `~/.codex`), never creating a new one, and prints `claude: 0.2.0 (catalog 2026.11.1) -> 0.3.0 (catalog 2026.11.2)` per harness. Then run `refresh` in each project to re-assess it against the new catalog. With nothing installed it exits 1.
 
 ### Workspace mode
 
@@ -112,16 +112,32 @@ Run it from, or point it at, the Android project root. The skill runs `scan.js`,
 
 Every recommendation is checked against a versioned catalog (18 dimensions) by `recommend-check.js` before it is shown. The guardrail rules are: R1 each step must be a direct successor in the catalog (a longer hop, or a new capability with `from: null`, needs a written justification), R2 prerequisites must already exist in the project or be produced by an earlier step, R3 steps are ordered and acyclic, R4 every id must exist in the catalog, R5 the output has the required shape and catalog version, and R6 a chain must start from something the project actually uses (`from: null` only where the dimension has no detected entry). See [skill/catalog/recommendations.schema.md](skill/catalog/recommendations.schema.md).
 
+## Security
+
+What the scripts do with project content, so it never reaches `.ai/`, the index or a report:
+
+- **Redaction.** Secrets found in text that `init`, `refresh`, the index and the generated knowledge would otherwise copy are replaced with `[REDACTED:<kind>]`. Kinds: `private-key`, `aws-access-key`, `google-api-key`, `github-token`, `slack-token`, `jwt`, `signing-password` and `credential` (values assigned to key names such as `apiKey`, `secret`, `token`, `password`, in code, Gradle `buildConfigField`s, JSON, properties and Markdown). The matched value is never printed or stored.
+- **Files never read.** `local.properties`, `keystore.properties`, `*.jks`, `*.keystore`, `*.p12`, `google-services.json`, `.env*`, `signing.properties`, `secrets.properties`, `*.pem`, `*.key`, `credentials.json` and `service-account*.json`.
+- **Git-ignored files are skipped** when scanning and indexing (tracked files stay). Without a git repository this filter does nothing. Inside a git repository, if git cannot report the ignored files the run stops with an error instead of continuing unfiltered.
+- **Tamper checks.** `.ai/tools` is verified as described under `init` above: the trusted check uses the installed skill, the vendored self-check only the manifest in the repository (weaker), and `doctor --root <dir>` prints the result as the `tools:` line. Keep the CODEOWNERS entries for `.ai/workflows/` and `.ai/tools/`.
+- **Suspicious text.** `ai-status.js` lists `suspicious: [{ file, line, rule }]` for text that reads like an instruction to an agent (rules: `override-instructions`, `role-change`, `exfiltration`, `run-command`, `secret-request`, `label-forcing`) in `.ai/knowledge`, `.ai/migration`, `.ai/workflows`, `recommendations.json`, `repos.json` and `catalog-overrides/*.json`. `refresh` notes the files. It is a tripwire for review; agents are told never to follow such text.
+- **Security signals in the audit.** The profile has `security.findings` (hardcoded secrets, cleartext traffic, exported components, debuggable or backup flags, WebView settings, sensitive logging, release builds without minification), `security.vulnerable` (dependencies matching an advisory in the catalog's `vulnerableVersions`), `security.unresolvedChecks` (dependencies whose version could not be resolved, never reported as safe) and `security.unresolvedAliases`. The skill's `audit` combines them with `references/rubric-security.md` in a Security section.
+
+### Catalog overrides
+
+Put `*.json` files in `.ai/catalog-overrides/` to add internal libraries to the catalog or to pin the status of an existing entry (`current`, `legacy`, `deprecated`) with a reason. `init` creates a README there with the full rules. In short: strict JSON with `schemaVersion: 1`; content signals are literal text (`{ "contains": "..." }`), regular expressions are rejected; globs use a small fixed grammar; at most 20 signals per list; strings have a length cap and no control characters. Invalid files stop `init`, `refresh`, `scan` and `candidates` with an error naming the file. Pins and added entries are visible in `architecture-current.md` and in the refresh report (`overrides`), including what was added, removed or changed since the last run. `scan.js` and `candidates.js` take `--no-overrides`; `recommend-check.js --root <root>` is needed when overrides exist. The folder is yours: the skill proposes an override file and writes it only after you agree.
+
 ## No telemetry
 
-This package collects no telemetry, makes no network requests, and has no dependencies. The audit scripts only read your project and write only to an explicit `--out` path; `init` and `refresh` write only the `.ai/` folder, the agent pointer files, and (with `--local`) `.git/info/exclude`. Project content is treated as data, never as instructions, and secret files (`local.properties`, keystores, `google-services.json`, `.env*`) are never read.
+This package collects no telemetry, makes no network requests, and has no dependencies. The audit scripts only read your project and write only to an explicit `--out` path; `init` and `refresh` write only the `.ai/` folder, the agent pointer files, and (with `--local`) `.git/info/exclude`. Project content is treated as data, never as instructions, and secret files (see Security) are never read.
 
 ## Roadmap
 
+Done: M1 and M2, and M3 (secret redaction, gitignore-aware indexing, tamper verification of `.ai/tools`, injection rules, vulnerable-version data, catalog overrides).
+
 Not available yet:
 
-- M3: secret content redaction, gitignore-aware indexing, refusing to run tampered `.ai/tools`, injection rules, vulnerable-version data.
-- M4: feature prioritization, data-layer playbooks, reuse detection, fitness checks, library updates, compliance and build-performance advice.
+- M4: feature prioritization, data-layer playbooks, reuse detection, fitness checks, library updates (including a security-first `lib-update`), playbook security checklists, compliance and build-performance advice.
 - M5: `run` loop, eval suite on real open-source apps, release pipeline with provenance.
 
 ## License

@@ -34,6 +34,10 @@ SDK: min <n>, target <n>, compile <n>. Size: <files> files, <loc> LOC, <n> modul
 
 ### F2. <...>
 
+## Security
+
+<signals from `profile.security.findings` that you confirmed in context (id, severity, `path:line`; never a secret value), `vulnerable` dependencies (coordinate, version, advisory id), dependencies listed under `unresolvedChecks` as "could not be checked", and findings from the manual areas of the security rubric. Say "nothing notable" only for areas you actually inspected.>
+
 ## Checked, nothing notable
 
 <one line listing the rubric criteria and smells you checked and found fine>

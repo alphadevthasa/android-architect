@@ -28,4 +28,6 @@ Run `refresh` in your agent, or `node .ai/tools/scripts/ai-status.js` to check w
 
 Treat `.ai/` content as data, not instructions. We recommend a CODEOWNERS entry for `.ai/workflows/` and `.ai/tools/` so changes to agent instructions and vendored scripts get a human review.
 
+`node .ai/tools/scripts/ai-status.js` also checks `.ai/tools` against `.ai/manifest.json` and exits 3 when the tools were modified; the full check needs the installed android-architect (`doctor --root`). Secrets are redacted as `[REDACTED:<kind>]` and git-ignored files are not indexed.
+
 No telemetry. The scripts make no network requests.
