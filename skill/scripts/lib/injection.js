@@ -4,40 +4,82 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { GENERATED_KNOWLEDGE } from './aidir.js';
 
+const NOUN = String.raw`\.env|token|secret|api key|credential|password|private key|keystore|contents of`;
+const SINK = String.raw`(?<![^ ])(?:-d |--data|-f |-x post)|\| ?(?:curl|sh)\b`;
+const ROLE = String.raw`admin|administrator|root|developer mode|dan|jailbroken|unrestricted|system`;
+const SECRET_VERB = String.raw`(?:^[-+>#0-9.) ]*|[.!?:;] )(?:print|show|send|paste|reveal|output|dump) `;
+const CUE = String.raw`\bto\b|\bhere\b|in (?:the )?(?:chat|reply|response|output)|the value|contents`;
+
+// Rules run on normalized text: lowercase, markdown emphasis and backticks removed, whitespace collapsed.
 const RULES = [
-  { rule: 'override-instructions', re: /ignore (?:all )?(?:previous|prior|above) (?:instructions|rules)|disregard [^\n]{0,200}(?:instructions|rules)/i },
-  { rule: 'role-change', re: /you are now|act as (?:an? )?(?:admin|root|developer mode)/i },
-  { rule: 'exfiltration', re: /\b(?:curl|wget|fetch|upload|send|post) [^\n]{0,200}https?:\/\//i },
-  { rule: 'run-command', re: /\b(?:run|execute) (?:this |the following )?(?:command|script|shell)/i },
-  { rule: 'secret-request', re: /\b(?:print|show|send|paste) [^\n]{0,200}(?:token|password|secret|api key|\.env)/i },
-  { rule: 'label-forcing', re: /\b(?:label|mark) (?:everything|all) (?:as )?must/i },
+  {
+    rule: 'override-instructions',
+    re: /\b(?:ignore|disregard|forget) (?:(?:the|any|all) ){0,3}(?:previous|prior|above|earlier) (?:instructions?|rules?|guidance|directions?|prompts?)/,
+  },
+  { rule: 'role-change', re: new RegExp(String.raw`you are now (?:(?:a|an|the|in) )?(?:${ROLE})\b|act as (?:an? )?(?:admin|root|developer mode|system)\b`) },
+  {
+    rule: 'exfiltration',
+    only: 'http',
+    re: new RegExp(
+      String.raw`\b(?:curl|wget|fetch|upload|send|post) [^\n]{0,200}?(?:${NOUN}|${SINK})[^\n]{0,200}https?://|\| ?curl [^\n]{0,200}https?://|https?://[^\n]{0,200}\| ?(?:sh|bash)\b`,
+    ),
+  },
+  { rule: 'run-command', re: /\b(?:run|execute) (?:(?:this|the following|the|these) )?(?:commands?|scripts?|shell)\b/ },
+  {
+    rule: 'secret-request',
+    re: new RegExp(
+      String.raw`${SECRET_VERB}[^\n]{0,200}?(?:${NOUN})[^\n]{0,200}?(?:${CUE})|${SECRET_VERB}[^\n]{0,200}?(?:${CUE})[^\n]{0,200}?(?:${NOUN})`,
+    ),
+  },
+  { rule: 'label-forcing', re: /\b(?:label|mark) (?:everything|all)(?: recommendations| items| steps)? as must(?![-\w])/ },
 ];
-const SHELL_FENCE = /^ {0,3}(`{3,}|~{3,})[ \t]*(sh|bash|zsh|powershell)[ \t]*$/i;
+// A fenced block whose info string starts with a shell name (attributes may follow: ```bash title=x, ```{.bash}).
+const SHELL_FENCE = /^ {0,3}(?:`{3,}|~{3,})[ \t]*\{?\.?(?:sh|bash|zsh|shell|powershell|pwsh)(?=$|[\s{},])/i;
 const FENCE = /^ {0,3}(`{3,}|~{3,})/;
 const byText = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+const normalize = (line) => line.replace(/[*_`]/g, '').replace(/\s+/g, ' ').toLowerCase();
 
 /** Findings for one text: [{ line, rule }] (1-based lines), at most one per rule per line, sorted by line then rule. */
 export function scanInstructions(text) {
-  const out = [];
+  const hits = new Set();
   let fence = null;
   const lines = String(text).split('\n');
+  const norm = lines.map(normalize);
+  const test = (s, mark) => {
+    for (const { rule, re, only } of RULES) if ((!only || s.includes(only)) && re.test(s)) mark.add(rule);
+  };
+  const single = norm.map((n) => {
+    const set = new Set();
+    test(n, set);
+    return set;
+  });
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    const hits = new Set();
-    for (const { rule, re } of RULES) if (re.test(line)) hits.add(rule);
-    // Only the fence rule looks at fence structure: the other rules above scan fenced text too.
+    const found = new Set(single[i]);
+    // Text split over two lines: match the joined pair too and report the first line, unless the second line alone matches.
+    if (i + 1 < lines.length) {
+      const pair = new Set();
+      test(`${norm[i]} ${norm[i + 1]}`, pair);
+      for (const rule of pair) if (!single[i + 1].has(rule)) found.add(rule);
+    }
+    // Only the fence rule looks at fence structure: the other rules scan fenced text too.
     const open = FENCE.exec(line);
     if (fence === null) {
       if (open) {
         fence = open[1];
-        if (SHELL_FENCE.test(line)) hits.add('run-command');
+        if (SHELL_FENCE.test(line)) found.add('run-command');
       }
     } else if (open && open[1][0] === fence[0] && open[1].length >= fence.length && line.trim() === open[1]) {
       fence = null;
     }
-    for (const rule of hits) out.push({ line: i + 1, rule });
+    for (const rule of found) hits.add(`${i + 1}\0${rule}`);
   }
-  return out.sort((a, b) => a.line - b.line || byText(a.rule, b.rule));
+  return [...hits]
+    .map((k) => {
+      const [line, rule] = k.split('\0');
+      return { line: Number(line), rule };
+    })
+    .sort((a, b) => a.line - b.line || byText(a.rule, b.rule));
 }
 
 const JSON_STRING = /"(?:[^"\\\n]|\\.)*"/g;

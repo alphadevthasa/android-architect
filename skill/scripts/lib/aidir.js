@@ -311,7 +311,7 @@ export function writeAiDir(
 export function aiStatus(root, { toolCatalogVersion, skillDir = DEFAULT_SKILL_DIR, catalogDir, toolVersion, selfCheck = false }) {
   const aiDir = path.join(root, '.ai');
   const manifest = readManifest(aiDir);
-  if (!manifest) return { ok: false, stale: ['no-manifest'], manifest: null };
+  if (!manifest) return { ok: false, stale: ['no-manifest'], manifest: null, suspicious: [] };
   const stale = [];
   if (commitMoved(root, manifest.commit ?? null, headCommit(root))) stale.push('commit-moved');
   if (toolCatalogVersion !== manifest.catalogVersion) stale.push('catalog-moved');

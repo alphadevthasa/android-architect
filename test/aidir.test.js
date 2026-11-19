@@ -216,7 +216,7 @@ test('recommendations.json and repos.json are listed as kept, never created', ()
 });
 
 test('aiStatus: fresh, tools-modified, catalog-moved, no-manifest', () => {
-  assert.deepEqual(aiStatus(root, { toolCatalogVersion: 'x', toolVersion: '9.9.9' }), { ok: false, stale: ['no-manifest'], manifest: null });
+  assert.deepEqual(aiStatus(root, { toolCatalogVersion: 'x', toolVersion: '9.9.9' }), { ok: false, stale: ['no-manifest'], manifest: null, suspicious: [] });
   run();
   const cv = loadCatalog().catalogVersion;
   const s = aiStatus(root, { toolCatalogVersion: cv, toolVersion: '9.9.9' });
