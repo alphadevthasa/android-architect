@@ -256,3 +256,16 @@ test('M3: package.json version is 0.3.0 and the changelog covers it', () => {
   const log = fs.readFileSync(new URL('../CHANGELOG.md', import.meta.url), 'utf8');
   assert.match(log, /## \[0\.3\.0\] - Unreleased\n\n### Tool\n\n- /);
 });
+
+test('SKILL ground rule 5 lists every secret file pattern and SKILL names every redaction kind', async () => {
+  const { SECRET_FILE_PATTERNS } = await import('../skill/scripts/lib/walk.js');
+  const { SECRET_RULES } = await import('../skill/scripts/lib/redact.js');
+  const text = readSkill();
+  const rule5 = text.split('\n').find((l) => l.startsWith('5. **Leave secrets alone.**'));
+  assert.ok(rule5);
+  const mentions = [...rule5.matchAll(/`([^`]+)`/g)].map((m) => m[1].replace(/\*/g, ''));
+  for (const re of SECRET_FILE_PATTERNS) {
+    assert.ok(mentions.some((n) => re.test(n)), `ground rule 5 does not mention ${re}`);
+  }
+  for (const { kind } of SECRET_RULES) assert.ok(text.includes(`\`${kind}\``), `SKILL.md misses redaction kind ${kind}`);
+});

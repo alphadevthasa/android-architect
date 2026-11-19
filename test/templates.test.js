@@ -74,7 +74,7 @@ test('only README.md.tpl has placeholders, all English known names', () => {
 
 test('workflow 01 covers modified tools and suspicious text', () => {
   const t = read('workflows/01-read-context.md');
-  assert.ok(/exit(?:s with code)? 3/.test(t));
+  assert.ok(/exits? (?:with code )?3/.test(t));
   assert.ok(t.includes('--trust-modified-tools'));
   assert.ok(/never (?:pass|add)[^\n]*--trust-modified-tools/i.test(t));
 });
