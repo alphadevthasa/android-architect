@@ -129,9 +129,9 @@ export function buildIndex(root, { now = new Date(), commit = null, catalogVersi
     docs: entries.map((e, i) => ({
       id: e.id,
       kind: e.kind,
-      path: e.path,
+      path: redact(e.path).text,
       line: e.line,
-      title: e.title,
+      title: redact(e.title).text,
       len: model.docs[i].len,
       tf: model.docs[i].tf,
     })),

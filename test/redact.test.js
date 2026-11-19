@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { redact, findSecrets, SECRET_RULES } from '../skill/scripts/lib/redact.js';
+import { redact, redactJson, findSecrets, SECRET_RULES } from '../skill/scripts/lib/redact.js';
 import { listFiles, SECRET_FILE_PATTERNS } from '../skill/scripts/lib/walk.js';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -25,6 +25,18 @@ const CASES = [
   ['credential', 'val apiKey = "fake-api-key-value"'],
   ['credential', 'String token = "fake-token-value";'],
   ['credential', 'API_SECRET = "fake-secret-value"'],
+  ['credential', 'const val API_KEY: String = "fake-const-api-key-1"'],
+  ['credential', 'private val clientSecret: String = "fake-client-secret-1"'],
+  ['credential', 'manifestPlaceholders["MAPS_API_KEY"] = "fake-maps-api-key-1"'],
+  ['credential', 'val m = mapOf("api_key" to "fake-map-api-key-1")'],
+  ['credential', 'client.addHeader("X-Api-Key", "fake-header-api-key-1")'],
+  ['credential', 'val authToken = """fake-raw-string-secret"""'],
+  ['credential', 'val raw = """{"token": "fake-raw-token-12345"}"""'],
+  ['credential', 'export SERVICE_TOKEN=fake-env-token-12345'],
+  ['credential', 'DB_PASSWORD: fake-env-password-1'],
+  ['credential', 'api.key=fake-local-secret'],
+  ['private-key', '-----BEGIN ENCRYPTED PRIVATE KEY-----\nFAKEKEYFAKEKEY\n-----END ENCRYPTED PRIVATE KEY-----'],
+  ['private-key', '-----BEGIN PGP PRIVATE KEY BLOCK-----\nFAKEKEYFAKEKEY\n-----END PGP PRIVATE KEY BLOCK-----'],
   ['credential', 'buildConfigField "String", "API_KEY", "\\"fake-api-key-value-123\\""'],
 ];
 
@@ -74,6 +86,9 @@ test('no false positives', () => {
     'author = "John Smith Long"',
     'tokenizerName = "abcdefghij"',
     'secretary = "abcdefghijkl"',
+    'val token = BuildConfig.TOKEN',
+    'token = BuildConfig.TOKEN',
+    'password: String,',
     'implementation "com.squareup.retrofit2:retrofit:2.9.0"',
   ]) {
     assert.equal(redact(s).hits.length, 0, `false positive on: ${s}`);
@@ -82,7 +97,7 @@ test('no false positives', () => {
 });
 
 test('credential key matches on segment boundaries, case-insensitively', () => {
-  for (const s of ['PASSWORD = "abcdefghij"', 'db.password = "abcdefghij"', 'api-key: "abcdefghij"', 'Credentials = "abcdefghij"', 'AUTH_TOKEN = "abcdefghij"']) {
+  for (const s of ['myApiKey = "abcdefghij"', 'clientSecret = "abcdefghij"', 'secretKey = "abcdefghij"', 'authToken = "abcdefghij"', 'apiToken = "abcdefghij"', 'PASSWORD = "abcdefghij"', 'db.password = "abcdefghij"', 'api-key: "abcdefghij"', 'Credentials = "abcdefghij"', 'AUTH_TOKEN = "abcdefghij"']) {
     assert.deepEqual(redact(s).hits.map((h) => h.kind), ['credential'], s);
   }
 });
@@ -109,5 +124,42 @@ test('walk skips the new secret file names', () => {
     assert.deepEqual(listFiles(root), ['ok.kt']);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('unterminated private key block redacts to the end and keeps the line count', () => {
+  const text = 'a\n-----BEGIN RSA PRIVATE KEY-----\nFAKEKEY\nFAKEKEY2\n';
+  const r = redact(text);
+  assert.ok(!r.text.includes('FAKEKEY'));
+  assert.equal(r.text.split('\n').length, text.split('\n').length);
+  assert.deepEqual(r.hits, [{ kind: 'private-key', line: 2 }]);
+});
+
+test('escaped quotes in a value stay inside the value', () => {
+  assert.equal(redact('token = "abcdefgh\\"ij-fake"').text, 'token = "[REDACTED:credential]"');
+});
+
+test('redactJson keeps JSON valid and redacts credential values and secret strings', () => {
+  const out = redactJson({ token: 'abcdefgh"ij', note: `see ${GH}`, list: ['AKIAFAKEFAKEFAKEFAKE', 'plain'], n: 3, author: 'John Smith Long' });
+  const back = JSON.parse(JSON.stringify(out, null, 2));
+  assert.equal(back.token, '[REDACTED:credential]');
+  assert.equal(back.note, 'see [REDACTED:github-token]');
+  assert.deepEqual(back.list, ['[REDACTED:aws-access-key]', 'plain']);
+  assert.equal(back.n, 3);
+  assert.equal(back.author, 'John Smith Long');
+});
+
+test('long single lines redact in linear time', () => {
+  const lines = [
+    'a'.repeat(1024 * 1024),
+    'deadbeef'.repeat(128 * 1024),
+    'a "'.repeat(300 * 1024),
+    'k = '.repeat(250 * 1024),
+    'a.b-'.repeat(256 * 1024),
+  ];
+  for (const l of lines) {
+    const t0 = Date.now();
+    redact(l);
+    assert.ok(Date.now() - t0 < 1000, 'redact is too slow on a long line');
   }
 });

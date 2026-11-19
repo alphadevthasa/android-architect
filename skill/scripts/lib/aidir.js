@@ -13,7 +13,7 @@ import { sha256File, hashTree } from './hash.js';
 import { MANIFEST_SCHEMA_VERSION, readManifest, writeManifest } from './manifest.js';
 import { readTemplate, renderReadme, renderKnowledge } from './knowledge.js';
 import { applyPointers } from './pointers.js';
-import { redact } from './redact.js';
+import { redact, redactJson } from './redact.js';
 
 const DEFAULT_SKILL_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const WORKFLOWS = ['01-read-context.md', '02-plan.md', '03-implement.md', '04-review.md'];
@@ -213,10 +213,10 @@ export function writeAiDir(
   );
   putRedacted('README.md', isMember ? hubWorkflows(readme, workspace.hub) + memberNote(workspace.hub) : readme);
   for (const [rel, text] of Object.entries(renderKnowledge(profile, modules, catalog, meta))) putRedacted(rel, text);
-  putRedacted(
+  putAi(
     'candidates.json',
     JSON.stringify(
-      { catalogVersion: catalog.catalogVersion, generatedAt: now.toISOString(), candidates: candidatePaths(profile, catalog) },
+      redactJson({ catalogVersion: catalog.catalogVersion, generatedAt: now.toISOString(), candidates: candidatePaths(profile, catalog) }),
       null,
       2,
     ) + '\n',
