@@ -61,3 +61,14 @@ test('addToExclude is idempotent', { skip: !hasGit }, () => {
 test('addToExclude throws outside a repo', { skip: !hasGit }, () => {
   assert.throws(() => addToExclude(plain, ['.ai/']), /--local needs a git repository/);
 });
+
+test('addToExclude in a linked worktree writes to the common git dir', { skip: !hasGit }, () => {
+  const wt = path.join(tmp, 'wt');
+  g(repo, 'worktree', 'add', wt, '-b', 'wt-branch');
+  assert.deepEqual(addToExclude(wt, ['CLAUDE.local.md']), { added: ['CLAUDE.local.md'] });
+  const common = path.join(repo, '.git', 'info', 'exclude');
+  assert.match(fs.readFileSync(common, 'utf8'), /^CLAUDE\.local\.md$/m);
+  fs.writeFileSync(path.join(wt, 'CLAUDE.local.md'), 'x');
+  const status = execFileSync('git', ['status', '--porcelain'], { cwd: wt, encoding: 'utf8' });
+  assert.equal(status, '');
+});

@@ -24,9 +24,15 @@ export function gitDir(root) {
   return git(root, ['rev-parse', '--absolute-git-dir']) || null;
 }
 
-/** Append missing lines to <gitDir>/info/exclude. Idempotent. */
+/** Absolute common git dir (shared by linked worktrees), or null. */
+function commonGitDir(root) {
+  const out = git(root, ['rev-parse', '--git-common-dir']);
+  return out ? path.resolve(root, out) : null;
+}
+
+/** Append missing lines to <commonGitDir>/info/exclude (works in linked worktrees). Idempotent. */
 export function addToExclude(root, patterns) {
-  const dir = gitDir(root);
+  const dir = commonGitDir(root);
   if (!dir) throw new Error('--local needs a git repository');
   const file = path.join(dir, 'info', 'exclude');
   fs.mkdirSync(path.dirname(file), { recursive: true });
