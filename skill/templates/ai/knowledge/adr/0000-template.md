@@ -6,9 +6,10 @@ date: YYYY-MM-DD
 dimension: ""
 target: ""
 reopenIf:
-  - ""
 reason: ""
 ---
+
+<!-- reopenIf example: add list items such as "- present:kmp" under reopenIf above -->
 
 # 0000 Short decision title
 

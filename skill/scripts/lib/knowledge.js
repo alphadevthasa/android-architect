@@ -50,10 +50,16 @@ function renderArchitecture(profile, catalog) {
   out.push('## Overview', '');
   out.push(`- Modules: ${profile.modules.length}`);
   out.push(`- SDK: min ${sdk.minSdk ?? '?'}, target ${sdk.targetSdk ?? '?'}, compile ${sdk.compileSdk ?? '?'}`);
+  const line = (c) => `- ${catalog.entry('compliance', c.id)?.name ?? c.id}: ${c.status} (${c.detail})`;
+  const gaps = profile.compliance.filter((c) => c.status === 'gap');
+  const unknown = profile.compliance.filter((c) => c.status === 'unknown');
   out.push('', '## Compliance gaps', '');
-  const gaps = profile.compliance.filter((c) => c.status !== 'pass' && c.status !== 'ok');
   if (gaps.length === 0) out.push('- none');
-  for (const c of gaps) out.push(`- ${catalog.entry('compliance', c.id)?.name ?? c.id}: ${c.status} (${c.detail})`);
+  for (const c of gaps) out.push(line(c));
+  if (unknown.length) {
+    out.push('', '## Compliance not verifiable statically', '');
+    for (const c of unknown) out.push(line(c));
+  }
   return out.join('\n') + '\n';
 }
 

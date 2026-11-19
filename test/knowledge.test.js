@@ -61,3 +61,18 @@ test('renderReadme fills placeholders and rejects missing or unknown', () => {
   assert.throws(() => renderReadme({ ...v, toolVersion: undefined }), /toolVersion/);
   assert.throws(() => renderReadme(v, path.join(root, '..', 'no-such-dir')));
 });
+
+test('compliance sections separate gap from unknown and omit ok', () => {
+  const ids = catalog.dimensions.find((d) => d.id === 'compliance')?.entries.map((e) => e.id) ?? ['a', 'b', 'c'];
+  const p = { ...profile, compliance: [
+    { id: ids[0] ?? 'a', status: 'ok', detail: 'DETAIL_OK' },
+    { id: 'x-gap', status: 'gap', detail: 'DETAIL_GAP' },
+    { id: 'x-unk', status: 'unknown', detail: 'DETAIL_UNK' },
+  ] };
+  const md = renderKnowledge(p, modules, catalog, meta)['knowledge/architecture-current.md'];
+  const gapSec = md.slice(md.indexOf('## Compliance gaps'), md.indexOf('## Compliance not verifiable statically'));
+  const unkSec = md.slice(md.indexOf('## Compliance not verifiable statically'));
+  assert.ok(gapSec.includes('DETAIL_GAP') && !gapSec.includes('DETAIL_UNK'));
+  assert.ok(unkSec.includes('DETAIL_UNK') && !unkSec.includes('DETAIL_GAP'));
+  assert.ok(!md.includes('DETAIL_OK'));
+});

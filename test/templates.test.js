@@ -57,3 +57,17 @@ test('user-owned templates and ADR front matter', () => {
     assert.ok(read(f).includes('TODO: run "setup" in your agent'), f);
   }
 });
+
+test('only README.md.tpl has placeholders, all English known names', () => {
+  const allowed = ['toolVersion', 'catalogVersion', 'date', 'commit', 'mode', 'workspace'];
+  const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : [path.join(d, e.name)]));
+  for (const f of walk(dir)) {
+    const rel = path.relative(dir, f);
+    const t = fs.readFileSync(f, 'utf8');
+    if (rel === 'README.md.tpl') {
+      for (const m of t.matchAll(/\{\{([^}]*)\}\}/g)) assert.ok(allowed.includes(m[1]), m[1]);
+    } else {
+      assert.ok(!t.includes('{{'), rel);
+    }
+  }
+});
