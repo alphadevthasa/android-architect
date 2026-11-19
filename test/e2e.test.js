@@ -82,3 +82,22 @@ test('M7: installed copy runs scan --out, candidates and recommend-check end to 
     fs.rmSync(work, { recursive: true, force: true });
   }
 });
+
+test('M2: installed init-ai.js, then the vendored ai-status.js reports ok', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'aa-e2e-'));
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'aa-e2e-work-'));
+  try {
+    node([path.join(root, 'bin/cli.js'), 'install', '--claude', '--home', home]);
+    const project = path.join(work, 'proj');
+    fs.cpSync(path.join(root, 'test/fixtures/legacy-java-mvp'), project, { recursive: true });
+    node([path.join(home, '.claude/skills/android-architect/scripts/init-ai.js'), project]);
+    const manifest = JSON.parse(fs.readFileSync(path.join(project, '.ai/manifest.json'), 'utf8'));
+    const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+    assert.equal(manifest.toolVersion, pkg.version);
+    const status = JSON.parse(node([path.join(project, '.ai/tools/scripts/ai-status.js'), project]));
+    assert.equal(status.ok, true);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(work, { recursive: true, force: true });
+  }
+});

@@ -195,3 +195,129 @@ test('M5: --home without a value, or followed by another flag, is a usage error'
     assert.match(r.stderr, /--home/, args.join(' '));
   }
 });
+
+const FIXTURE = path.join(root, 'test/fixtures/legacy-java-mvp');
+const fixtureCopy = () => {
+  const dir = tmp();
+  const proj = path.join(dir, 'proj');
+  fs.cpSync(FIXTURE, proj, { recursive: true });
+  return { dir, proj };
+};
+
+test('usage lists all seven commands', () => {
+  const r = run([]);
+  assert.equal(r.status, 1);
+  for (const c of ['install', 'uninstall', 'update', 'init', 'refresh', 'doctor', 'version']) assert.ok(r.stderr.includes(c), c);
+});
+
+test('update reinstalls into harnesses that have an install and prints the arrow line', () => {
+  const home = tmp();
+  ok(['install', '--claude', '--home', home]);
+  const metaFile = path.join(home, '.claude/skills/android-architect/.installed.json');
+  const meta = JSON.parse(fs.readFileSync(metaFile, 'utf8'));
+  fs.writeFileSync(metaFile, JSON.stringify({ ...meta, version: '0.1.0' }));
+  const out = ok(['update', '--home', home]);
+  assert.match(out, new RegExp(`claude: 0\\.1\\.0 \\(catalog ${meta.catalogVersion}\\) -> ${pkg.version.replace(/\./g, '\\.')} \\(catalog ${meta.catalogVersion}\\)`));
+  assert.ok(!out.includes('codex:'));
+  assert.match(out, /Run "refresh" in each project/);
+  assert.equal(JSON.parse(fs.readFileSync(metaFile, 'utf8')).version, pkg.version);
+  assert.ok(!fs.existsSync(path.join(home, '.codex')));
+});
+
+test('update with nothing installed exits 1', () => {
+  const home = tmp();
+  fs.mkdirSync(path.join(home, '.claude'));
+  const r = run(['update', '--home', home]);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /nothing installed/);
+});
+
+test('init --json writes .ai and reports written', () => {
+  const { dir, proj } = fixtureCopy();
+  try {
+    const out = JSON.parse(ok(['init', '--root', proj, '--json']));
+    assert.ok(out.written.includes('.ai/manifest.json'));
+    assert.equal(JSON.parse(fs.readFileSync(path.join(proj, '.ai/manifest.json'), 'utf8')).toolVersion, pkg.version);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('init prints a human summary with the pointer rerun command', () => {
+  const { dir, proj } = fixtureCopy();
+  try {
+    fs.writeFileSync(path.join(proj, 'AGENTS.md'), '# mine\n');
+    const out = ok(['init', '--root', proj]);
+    assert.match(out, /written/i);
+    assert.match(out, /npx android-architect init --append-pointers/);
+    assert.equal(fs.readFileSync(path.join(proj, 'AGENTS.md'), 'utf8'), '# mine\n');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('init defaults --root to the cwd', () => {
+  const { dir, proj } = fixtureCopy();
+  try {
+    execFileSync(process.execPath, ['--import', helper, cli, 'init'], { cwd: proj, encoding: 'utf8' });
+    assert.ok(fs.existsSync(path.join(proj, '.ai/manifest.json')));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('init rejects unknown flags and non-Gradle roots', () => {
+  const { dir, proj } = fixtureCopy();
+  try {
+    assert.equal(run(['init', '--root', proj, '--bogus']).status, 1);
+    const empty = path.join(dir, 'empty');
+    fs.mkdirSync(empty);
+    const r = run(['init', '--root', empty]);
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /not an Android\/Gradle project/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('init --workspace initializes hub and members', () => {
+  const dir = tmp();
+  try {
+    const hub = path.join(dir, 'hub');
+    const member = path.join(dir, 'member');
+    fs.cpSync(FIXTURE, hub, { recursive: true });
+    fs.cpSync(FIXTURE, member, { recursive: true });
+    const out = JSON.parse(ok(['init', '--root', hub, '--workspace', member, '--json']));
+    assert.ok(out.hub.written.includes('.ai/manifest.json'));
+    assert.ok(out.members.member.written.includes('.ai/manifest.json'));
+    assert.ok(fs.existsSync(path.join(hub, '.ai/repos.json')));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('refresh without init exits 1 and says to run init first', () => {
+  const { dir, proj } = fixtureCopy();
+  try {
+    const r = run(['refresh', '--root', proj]);
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /run init first/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('refresh after init prints the catalog line, and --json the report', () => {
+  const { dir, proj } = fixtureCopy();
+  try {
+    ok(['init', '--root', proj]);
+    const out = ok(['refresh', '--root', proj]);
+    assert.match(out, /Catalog: \S+ -> \S+/);
+    assert.match(out, /Candidates/);
+    const json = JSON.parse(ok(['refresh', '--root', proj, '--json']));
+    assert.equal(json.tool.to, pkg.version);
+    assert.ok(Array.isArray(json.notes));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

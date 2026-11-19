@@ -24,7 +24,7 @@ test('init-ai prints the result JSON and exits 0', () => {
   assert.equal(r.status, 0, r.stderr);
   const out = JSON.parse(r.stdout);
   assert.ok(out.written.includes('.ai/manifest.json'));
-  assert.equal(JSON.parse(fs.readFileSync(path.join(root, '.ai/manifest.json'), 'utf8')).toolVersion, '0.1.0');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(root, '.ai/manifest.json'), 'utf8')).toolVersion, JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version);
 });
 
 test('init-ai exits 2 for a non-Gradle dir and 1 for usage errors', () => {

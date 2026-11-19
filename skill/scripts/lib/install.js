@@ -116,6 +116,27 @@ export function install({ home, claude = false, codex = false, force = false, so
   return { installed };
 }
 
+function readInstalled(home, h) {
+  try {
+    const meta = JSON.parse(fs.readFileSync(path.join(targetOf(home, h), '.installed.json'), 'utf8'));
+    return { version: meta.version, catalogVersion: meta.catalogVersion };
+  } catch {
+    return null;
+  }
+}
+
+/** Reinstall into every harness that already has a valid install (.installed.json). Never creates a new harness. */
+export function update({ home, sourceDir }) {
+  const present = HARNESSES.map((h) => ({ h, from: readInstalled(home, h) })).filter((x) => x.from);
+  if (present.length === 0) throw new Error('nothing installed: run "npx android-architect install" first');
+  const updated = [];
+  for (const { h, from } of present) {
+    install({ home, sourceDir, [h.name]: true });
+    updated.push({ harness: h.name, from, to: readInstalled(home, h) });
+  }
+  return { updated };
+}
+
 export function uninstall({ home, force = false }) {
   const plans = [];
   for (const h of HARNESSES) {
