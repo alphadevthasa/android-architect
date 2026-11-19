@@ -92,7 +92,7 @@ function knowledgeFiles(root) {
 }
 
 export function buildIndex(root, { now = new Date(), commit = null, catalogVersion = null } = {}) {
-  const files = listFiles(root);
+  const files = listFiles(root, { gitignore: true });
   const entries = []; // {id, kind, path, line, title, tokens}
   const add = (kind, rel, units) => {
     for (const u of units) {

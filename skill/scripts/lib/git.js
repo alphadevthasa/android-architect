@@ -70,3 +70,24 @@ export function addToExclude(root, patterns) {
   }
   return { added };
 }
+
+/**
+ * Subset of relPaths (relative to root, POSIX) that git ignores, via one `git check-ignore --stdin` process.
+ * Tracked files are not reported as ignored. Not a repo, git missing, or none ignored gives an empty set.
+ */
+export function ignoredPaths(root, relPaths) {
+  if (relPaths.length === 0) return new Set();
+  let out = '';
+  try {
+    out = execFileSync('git', ['check-ignore', '-z', '--stdin'], {
+      cwd: root,
+      input: relPaths.join('\0'),
+      encoding: 'utf8',
+      stdio: ['pipe', 'pipe', 'ignore'],
+      maxBuffer: 64 * 1024 * 1024,
+    });
+  } catch {
+    return new Set(); // exit 1 = none ignored; other failures = no usable git
+  }
+  return new Set(out.split('\0').filter(Boolean));
+}

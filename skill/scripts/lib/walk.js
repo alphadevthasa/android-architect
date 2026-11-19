@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { ignoredPaths } from './git.js';
 
 export const IGNORED_DIRS = ['build', '.gradle', '.git', '.idea', 'node_modules', '.ai', 'graphify-out'];
 
@@ -32,6 +33,7 @@ function isInside(realRoot, p) {
 /**
  * List regular files under root as sorted POSIX-style relative paths.
  * Symlinks are followed only when their real path stays inside the real root.
+ * With `gitignore: true`, paths git ignores (per .gitignore rules; tracked files stay) are dropped.
  */
 export function listFiles(root, opts = {}) {
   const ignored = new Set([...IGNORED_DIRS, ...(opts.extraIgnoreDirs ?? [])]);
@@ -95,7 +97,10 @@ export function listFiles(root, opts = {}) {
       walkReal(link.abs, link.rel);
     }
   }
-  return results.sort();
+  results.sort();
+  if (!opts.gitignore) return results;
+  const hidden = ignoredPaths(root, results);
+  return hidden.size === 0 ? results : results.filter((f) => !hidden.has(f));
 }
 
 /** Read a UTF-8 file as lines; index i is line i + 1. Strips a leading BOM. */

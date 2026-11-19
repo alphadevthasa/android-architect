@@ -397,7 +397,7 @@ function applyFileExclusions(dimId, accs) {
 
 /** Map an Android project onto every catalog dimension. */
 export function detectStack(root, catalog) {
-  const files = listFiles(root);
+  const files = listFiles(root, { gitignore: true });
   const read = makeReader(root);
   const modules = discoverModules(root, files);
   const globCache = new Map();
