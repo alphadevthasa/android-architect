@@ -24,7 +24,10 @@ test('installed scan.js works on every fixture', () => {
     node([path.join(root, 'bin/cli.js'), 'install', '--claude', '--home', home]);
     const scan = path.join(home, '.claude/skills/android-architect/scripts/scan.js');
     const fx = path.join(root, 'test/fixtures');
-    const dirs = fs.readdirSync(fx);
+    // test/fixtures/workspace holds several repos; scan each repo rather than the container.
+    const dirs = fs.readdirSync(fx).flatMap((d) =>
+      d === 'workspace' ? fs.readdirSync(path.join(fx, d)).map((r) => `${d}/${r}`) : [d],
+    );
     assert.ok(dirs.length >= 3);
     for (const d of dirs) {
       const profile = JSON.parse(node([scan, path.join(fx, d), '--format', 'json']));

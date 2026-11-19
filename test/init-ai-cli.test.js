@@ -60,10 +60,13 @@ test('init-ai --append-pointers appends to an existing AGENTS.md', () => {
 });
 
 test('--workspace values stop at the next flag', () => {
-  const r = node(INIT, [root, '--workspace', 'a', 'b', '--append-pointers']);
+  const lib = path.join(tmp, 'lib');
+  fs.cpSync(path.resolve('test/fixtures/workspace/lib-core'), lib, { recursive: true });
+  const r = node(INIT, [root, '--workspace', '../lib', '--append-pointers']);
   assert.equal(r.status, 0, r.stderr);
   const m = JSON.parse(fs.readFileSync(path.join(root, '.ai/manifest.json'), 'utf8'));
-  assert.deepEqual(m.workspace, ['a', 'b']);
+  assert.deepEqual(m.workspace, { role: 'hub', hub: '.' });
+  assert.deepEqual(Object.keys(JSON.parse(r.stdout).members), ['lib']);
 });
 
 test('ai-status: exit 2 without manifest, exit 0 with stale info, vendored copy works', () => {

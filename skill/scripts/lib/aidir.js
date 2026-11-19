@@ -46,6 +46,16 @@ export function resolveToolVersion(skillDir = DEFAULT_SKILL_DIR, aiDir = null) {
   return '0.0.0-unknown';
 }
 
+function workspaceLabel(workspace, repos) {
+  if (!workspace) return 'none';
+  if (workspace.role === 'member') return `member of ${workspace.hub}`;
+  return `hub (${(repos?.repos ?? []).filter((r) => r.path !== '.').length} repos)`;
+}
+
+function memberNote(hub) {
+  return `\n## Workspace member\n\nThis repo is a member of a workspace. The target architecture, ADRs, conventions and roadmap live in the hub repo at \`${hub}\` (see \`${hub}/.ai/README.md\`). This folder holds only generated knowledge for this repo.\n`;
+}
+
 /** Every file under dir (regular files only); throws on symlinks. Paths relative to dir, sorted. */
 function regularFiles(dir) {
   const out = [];
@@ -63,11 +73,13 @@ function regularFiles(dir) {
 
 /**
  * Write the .ai folder. See task 4 for the ownership table.
+ * `workspace` is null, { role: 'hub', hub: '.' } (with `repos`, the repos.json content, written only when missing)
+ * or { role: 'member', hub: <relative path> } (thin .ai: no workflows, no user-owned files).
  * Returns { written, kept, conflicts, pointers, excluded } with paths relative to root, sorted.
  */
 export function writeAiDir(
   root,
-  { now, local = false, appendPointers = false, workspace = null, toolVersion, skillDir = DEFAULT_SKILL_DIR, catalogDir } = {},
+  { now, local = false, appendPointers = false, workspace = null, repos = null, toolVersion, skillDir = DEFAULT_SKILL_DIR, catalogDir } = {},
 ) {
   const realRoot = fs.realpathSync(root);
   const aiDir = path.join(root, '.ai');
@@ -75,6 +87,7 @@ export function writeAiDir(
   catalogDir = catalogDir ?? path.join(skillDir, 'catalog');
   if (local && !gitDir(root)) throw new Error('--local needs a git repository');
 
+  const isMember = workspace?.role === 'member';
   const written = new Set();
   const kept = new Set();
   const conflicts = [];
@@ -145,9 +158,9 @@ export function writeAiDir(
   putAi(
     'README.md',
     renderReadme(
-      { toolVersion, catalogVersion: catalog.catalogVersion, date, commit, mode, workspace: workspace?.length ? workspace.join(', ') : 'none' },
+      { toolVersion, catalogVersion: catalog.catalogVersion, date, commit, mode, workspace: workspaceLabel(workspace, repos) },
       templatesDir,
-    ),
+    ) + (isMember ? memberNote(workspace.hub) : ''),
   );
   for (const [rel, text] of Object.entries(renderKnowledge(profile, modules, catalog, meta))) putAi(rel, text);
   putAi(
@@ -166,9 +179,9 @@ export function writeAiDir(
   for (const [rel, data] of vendorSources) putAi(rel, data);
   putAi('tools/package.json', '{"type":"module","private":true}\n');
 
-  // managed workflows
+  // managed workflows (hub and standalone only)
   const managed = {};
-  for (const name of WORKFLOWS) {
+  for (const name of isMember ? [] : WORKFLOWS) {
     const rel = `workflows/${name}`;
     const next = readTemplate(rel, templatesDir);
     const abs = path.join(aiDir, rel);
@@ -185,14 +198,19 @@ export function writeAiDir(
     }
   }
 
-  // user-owned: create only when missing
-  for (const rel of USER_TEMPLATES) {
+  // user-owned: create only when missing (never in a member repo)
+  for (const rel of isMember ? [] : USER_TEMPLATES) {
     if (fs.existsSync(path.join(aiDir, rel))) kept.add(`.ai/${rel}`);
     else putAi(rel, readTemplate(rel, templatesDir));
   }
-  for (const rel of USER_OPTIONAL) if (fs.existsSync(path.join(aiDir, rel))) kept.add(`.ai/${rel}`);
+  if (!isMember) {
+    if (workspace?.role === 'hub' && repos && !fs.existsSync(path.join(aiDir, 'repos.json'))) {
+      putAi('repos.json', JSON.stringify(repos, null, 2) + '\n');
+    }
+    for (const rel of USER_OPTIONAL) if (fs.existsSync(path.join(aiDir, rel))) kept.add(`.ai/${rel}`);
+  }
   const adrDir = path.join(aiDir, 'knowledge', 'adr');
-  if (fs.existsSync(adrDir)) for (const f of regularFiles(adrDir)) kept.add(`.ai/knowledge/adr/${f}`);
+  if (!isMember && fs.existsSync(adrDir)) for (const f of regularFiles(adrDir)) kept.add(`.ai/knowledge/adr/${f}`);
 
   writeManifest(aiDir, {
     schemaVersion: MANIFEST_SCHEMA_VERSION,
