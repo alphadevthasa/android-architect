@@ -21,7 +21,17 @@
         "imports": [
           "com.google.gson"
         ]
-      }
+      },
+      "vulnerableVersions": [
+        {
+          "coord": "com.google.code.gson:gson",
+          "range": "<2.8.9",
+          "id": "CVE-2022-25647",
+          "severity": "high",
+          "summary": "Deserialization of untrusted data can cause a denial of service",
+          "source": "https://nvd.nist.gov/vuln/detail/CVE-2022-25647"
+        }
+      ]
     },
     {
       "id": "jackson",

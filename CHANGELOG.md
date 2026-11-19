@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.0] - Unreleased
+
+### Tool
+
+### Catalog
+
+- Catalog 2026.11.2: new optional entry field `vulnerableVersions` (coord, range, id, severity, summary, source). First advisory: Gson `<2.8.9`, CVE-2022-25647 (high), deserialization of untrusted data can cause a denial of service.
+
 ## [0.2.0] - Unreleased
 
 ### Tool

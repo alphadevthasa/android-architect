@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { parseRange } from './vuln.js';
 
 export const SUPPORTED_SCHEMA_VERSION = 1;
 const STATUSES = ['current', 'legacy', 'deprecated'];
@@ -10,6 +11,7 @@ const DETECT_LISTS = ['gradle', 'plugins', 'imports', 'files', 'content', 'manif
 // evaluation), not by file/gradle matching. Accepted only where listed here.
 const COMPUTED_DIMENSIONS = ['modularization', 'compliance', 'build-performance'];
 const COMPUTED_ENTRIES = ['language.kotlin-k2', 'presentation.god-activity', 'navigation.multi-activity'];
+const SEVERITIES = ['critical', 'high', 'medium', 'low'];
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const DEFAULT_DIR = new URL('../../catalog/', import.meta.url);
 
@@ -61,6 +63,31 @@ function validateDetect(where, detect, errs, computedAllowed) {
     signals += 1;
   }
   if (signals === 0) errs.push(`${where}: no detect signals`);
+}
+
+function validateVulnerable(where, e, errs) {
+  if (!Array.isArray(e.vulnerableVersions)) {
+    errs.push(`${where}: vulnerableVersions must be an array`);
+    return;
+  }
+  const coords = (Array.isArray(e.detect?.gradle) ? e.detect.gradle : []).map((g) => g?.coord).filter(isStr);
+  for (const v of e.vulnerableVersions) {
+    if (!isObj(v)) {
+      errs.push(`${where}: vulnerableVersions item must be an object`);
+      continue;
+    }
+    for (const k of ['coord', 'range', 'id', 'severity', 'summary', 'source']) {
+      if (!isStr(v[k])) errs.push(`${where}: vulnerableVersions item needs ${k}`);
+    }
+    if (isStr(v.coord) && !coords.some((c) => v.coord === c || (c.endsWith(':') && v.coord.startsWith(c)))) {
+      errs.push(`${where}: vulnerableVersions coord "${v.coord}" is not one of detect.gradle coords`);
+    }
+    if (isStr(v.severity) && !SEVERITIES.includes(v.severity)) errs.push(`${where}: vulnerableVersions bad severity "${v.severity}"`);
+    if (isStr(v.source) && !v.source.startsWith('https://')) errs.push(`${where}: vulnerableVersions source must start with https://`);
+    if (isStr(v.range)) {
+      try { parseRange(v.range); } catch (err) { errs.push(`${where}: vulnerableVersions ${err.message}`); }
+    }
+  }
 }
 
 export function validateCatalog(raw) {
@@ -147,6 +174,7 @@ export function validateCatalog(raw) {
           }
         }
       }
+      if (e.vulnerableVersions !== undefined) validateVulnerable(where, e, errs);
       validateDetect(where, e.detect, errs,
         COMPUTED_DIMENSIONS.includes(d.id) || COMPUTED_ENTRIES.includes(where));
     }

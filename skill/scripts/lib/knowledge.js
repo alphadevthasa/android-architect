@@ -65,6 +65,11 @@ function renderArchitecture(profile, catalog) {
   out.push('', '## Security signals', '');
   out.push(`- high: ${count('high')}, medium: ${count('medium')}, low: ${count('low')}`);
   for (const f of findings.slice(0, 10)) out.push(`- [${f.severity}] ${f.id}: ${f.file}:${f.line} (${f.detail})`);
+  const vulnerable = profile.security?.vulnerable ?? [];
+  if (vulnerable.length) {
+    out.push('', '## Vulnerable dependencies', '');
+    for (const v of vulnerable.slice(0, 10)) out.push(`- [${v.severity}] ${v.id}: ${v.coord}:${v.version} at ${v.file}:${v.line}`);
+  }
   return out.join('\n') + '\n';
 }
 

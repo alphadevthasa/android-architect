@@ -35,5 +35,9 @@ export function renderProfileMarkdown(profile, catalog = loadCatalog()) {
   out.push('', '## Security', '');
   if (findings.length === 0) out.push('- no security signals found');
   for (const f of findings) out.push(`- [${f.severity}] ${f.id}: ${f.file}:${f.line} (${f.detail})`);
+  for (const v of profile.security?.vulnerable ?? []) {
+    out.push(`- [${v.severity}] ${v.id}: ${v.coord}:${v.version} at ${v.file}:${v.line} (${v.summary}; ${v.source})`);
+  }
+  for (const c of profile.security?.unresolvedChecks ?? []) out.push(`- not checked (version unresolved): ${c}`);
   return out.join('\n') + '\n';
 }

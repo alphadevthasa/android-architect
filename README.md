@@ -77,7 +77,7 @@ We recommend a CODEOWNERS entry for `.ai/workflows/` and `.ai/tools/` so changes
 
 ### update
 
-`update` reinstalls the skill into the harnesses that already have it (`~/.claude`, `~/.codex`), never creating a new one, and prints `claude: 0.1.0 (catalog 2026.11.0) -> 0.2.0 (catalog 2026.11.1)` per harness. Then run `refresh` in each project to re-assess it against the new catalog. With nothing installed it exits 1.
+`update` reinstalls the skill into the harnesses that already have it (`~/.claude`, `~/.codex`), never creating a new one, and prints `claude: 0.1.0 (catalog 2026.11.0) -> 0.2.0 (catalog 2026.11.2)` per harness. Then run `refresh` in each project to re-assess it against the new catalog. With nothing installed it exits 1.
 
 ### Workspace mode
 

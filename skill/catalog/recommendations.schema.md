@@ -58,3 +58,19 @@ reason: "Why it was rejected."
 - No inline comments; values are bare or double-quoted; single quotes are rejected.
 
 `reopenIf` conditions use `present:<entryId>` or `absent:<entryId>`, checked across all profile dimensions (an entry is present when `units > 0`, `share > 0`, or `share` is null). Any other text is a human note and never reopens the ADR.
+
+## Catalog field: `vulnerableVersions`
+
+An entry may list known-vulnerable dependency versions. Every field is required:
+
+```json
+"vulnerableVersions": [
+  { "coord": "com.google.code.gson:gson", "range": "<2.8.9", "id": "CVE-2022-25647",
+    "severity": "high", "summary": "One-line description.", "source": "https://nvd.nist.gov/vuln/detail/CVE-2022-25647" }
+]
+```
+
+- `coord` is `group:name` and must equal one of the entry's `detect.gradle` coords (or fall under a prefix coord ending in `:`).
+- `severity` is `critical`, `high`, `medium` or `low`; `source` must start with `https://`.
+- `range` is one or more comparators (`<X`, `<=X`, `>X`, `>=X`, `=X`, X numeric dotted) separated by spaces (AND); `||` separates OR groups. Segments compare numerically; qualifiers are ignored (`2.8.9-rc1` equals `2.8.9`). Anything else is rejected.
+- `scan.js` reports matches in `profile.security.vulnerable`; dependencies whose version cannot be resolved are listed in `profile.security.unresolvedChecks` instead of being treated as safe.
