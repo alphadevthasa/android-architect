@@ -22,3 +22,18 @@ test('ties sort by id ascending', () => {
   const t = buildBm25([{ id: 'z', tokens: ['x1'] }, { id: 'a', tokens: ['x1'] }]);
   assert.deepEqual(scoreBm25(t, ['x1']).map((r) => r.id), ['a', 'z']);
 });
+
+test('prototype-named terms are ordinary terms', () => {
+  const words = ['constructor', 'tostring', 'hasownproperty', 'valueof'];
+  const pm = buildBm25([
+    { id: 'a', tokens: ['constructor', 'injection'] },
+    { id: 'b', tokens: ['room'] },
+  ]);
+  assert.equal(pm.df.constructor, 1);
+  assert.deepEqual(scoreBm25(pm, ['constructor', 'injection']).map((r) => r.id), ['a']);
+  for (const w of words) assert.deepEqual(scoreBm25(pm, [w]).map((r) => r.id), w === 'constructor' ? ['a'] : []);
+  // survives a JSON round trip (as in a loaded index)
+  const loaded = JSON.parse(JSON.stringify(pm));
+  assert.deepEqual(scoreBm25(loaded, ['constructor']).map((r) => r.id), ['a']);
+  assert.deepEqual(scoreBm25(loaded, ['valueof', 'room']).map((r) => r.id), ['b']);
+});

@@ -70,14 +70,16 @@ function build(opts) {
   if (!isDir || !BUILD_FILES.some((f) => fs.existsSync(path.join(root, f)))) {
     fail(2, `not an Android/Gradle project: ${opts.positional}`);
   }
+  const commit = gitCommit(root);
   const index = buildIndex(root, {
     now: new Date(),
-    commit: gitCommit(root),
+    commit,
     catalogVersion: loadCatalog().catalogVersion,
   });
   const out = path.resolve(opts.out ?? path.join(root, '.ai', 'index', 'index.json'));
   fs.mkdirSync(path.dirname(out), { recursive: true });
   fs.writeFileSync(out, JSON.stringify(index) + '\n');
+  process.stdout.write(JSON.stringify({ out, docs: index.docs.length, commit }) + '\n');
 }
 
 function query(opts) {

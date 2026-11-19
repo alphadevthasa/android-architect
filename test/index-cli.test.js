@@ -19,6 +19,10 @@ test('build then query', () => {
     const out = path.join(tmp, 'nested', 'index.json');
     const b = run('build', fixture, '--out', out);
     assert.equal(b.status, 0, b.stderr);
+    const summary = JSON.parse(b.stdout);
+    assert.equal(summary.out, out);
+    assert.ok(summary.docs > 0);
+    assert.ok('commit' in summary);
     assert.equal(JSON.parse(fs.readFileSync(out, 'utf8')).schemaVersion, 1);
     const q = run('query', 'UserDao', '--index', out, '--limit', '3');
     assert.equal(q.status, 0, q.stderr);
