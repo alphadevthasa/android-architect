@@ -33,6 +33,8 @@ npx android-architect refresh   # regenerate .ai/ and report what changed
 npx android-architect update    # upgrade the installed skill
 ```
 
+The CLI `init` and `refresh` use the skill bundled in the npx package you run, not the one installed in your harness: run `update` first so the installed skill matches.
+
 ### init
 
 `init` writes an `.ai/` folder with architecture knowledge for coding agents: a generated stack profile and module map, a local search index, workflows, and starter files you own. Run it from the project root or pass `--root <dir>`.
@@ -41,6 +43,7 @@ npx android-architect update    # upgrade the installed skill
 - `--local`: nothing is committed. `.ai/` and `CLAUDE.local.md` are added to `.git/info/exclude`, and the agent pointer goes to `CLAUDE.local.md`. Needs a git repository.
 - Pointers: `init` creates `AGENTS.md` and `CLAUDE.md` with a short block pointing at `.ai/README.md`. An existing `AGENTS.md` or `CLAUDE.md` is never modified unless you pass `--append-pointers`. When one is left unchanged, `init` prints the rerun command `npx android-architect init --append-pointers`.
 - Without a git repository or commits the header says `no-git` and `init` still works.
+- Re-running `init` keeps the project's mode and workspace role. A flag that would change them (`--local` on a committed project, `--workspace` on a standalone repo or a member) is refused; to switch, remove `.ai/` and run `init` again.
 - Writes stay inside `<root>/.ai/`, the pointer files, and (with `--local`) `.git/info/exclude`. A symlinked `.ai/` is refused.
 
 Vendored scripts live in `.ai/tools/` and run with plain `node` (for example `node .ai/tools/scripts/index.js query "login"`). Their hashes are recorded in `.ai/manifest.json` and reported by `ai-status.js`; refusing to run tampered tools arrives in a later release.
@@ -70,7 +73,7 @@ We recommend a CODEOWNERS entry for `.ai/workflows/` and `.ai/tools/` so changes
 
 ### update
 
-`update` reinstalls the skill into the harnesses that already have it (`~/.claude`, `~/.codex`), never creating a new one, and prints `claude: 0.1.0 (catalog 2026.11.0) -> 0.2.0 (catalog 2026.11.0)` per harness. Then run `refresh` in each project to re-assess it against the new catalog. With nothing installed it exits 1.
+`update` reinstalls the skill into the harnesses that already have it (`~/.claude`, `~/.codex`), never creating a new one, and prints `claude: 0.1.0 (catalog 2026.11.0) -> 0.2.0 (catalog 2026.11.1)` per harness. Then run `refresh` in each project to re-assess it against the new catalog. With nothing installed it exits 1.
 
 ### Workspace mode
 
@@ -81,7 +84,7 @@ npx android-architect init --workspace ../lib-a ../lib-b
 npx android-architect init --workspace        # detects sibling Gradle repos and proposes them; writes only the hub
 ```
 
-With explicit paths, all repos are validated before anything is written and each member gets its `.ai/`. Without paths, only the hub is written: its `repos.json` lists the detected siblings with `confirmed: false`, nothing is written into the siblings, and `init` prints the repos it proposes plus the exact command to confirm them (`npx android-architect init --workspace <paths>`). The hub holds the target architecture, ADRs, conventions, roadmap and `repos.json` (which repos publish and consume which artifacts); members get a thin `.ai/` that points to the hub. Run `refresh` once per repo.
+With explicit paths, all repos are validated before anything is written and each member gets its `.ai/`. Without paths, only the hub is written: its `repos.json` lists the detected siblings with `confirmed: false`, nothing is written into the siblings, and `init` prints the repos it proposes plus the exact command to confirm them (`npx android-architect init --workspace <paths>`). Confirming replaces that proposed `repos.json`; once it holds confirmed repos, a different set is written next to it as `repos.json.new` and listed under conflicts. The hub holds the target architecture, ADRs, conventions, roadmap and `repos.json` (which repos publish and consume which artifacts); members get a thin `.ai/` that points to the hub. Run `refresh` once per repo.
 
 ## Usage
 
@@ -113,7 +116,7 @@ This package collects no telemetry, makes no network requests, and has no depend
 
 Not available yet:
 
-- M3: secret content redaction, refusing to run tampered `.ai/tools`, injection rules, vulnerable-version data.
+- M3: secret content redaction, gitignore-aware indexing, refusing to run tampered `.ai/tools`, injection rules, vulnerable-version data.
 - M4: feature prioritization, data-layer playbooks, reuse detection, fitness checks, library updates, compliance and build-performance advice.
 - M5: `run` loop, eval suite on real open-source apps, release pipeline with provenance.
 

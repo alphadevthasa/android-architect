@@ -195,3 +195,39 @@ test('Task 10: rubric and method doc fixes', () => {
   const method = fs.readFileSync(path.join(skillDir, 'references', 'recommendation-method.md'), 'utf8');
   assert.match(method, /`dont` row keeps `target` as the current entry or `null`/);
 });
+
+test('Final review: SKILL.md uses full .ai/knowledge paths, member pointers, re-init rules and ADR warnings', () => {
+  const text = fs.readFileSync(new URL('../skill/SKILL.md', import.meta.url), 'utf8');
+  for (const f of ['architecture-target.md', 'conventions.md', 'components.md']) {
+    for (const m of text.matchAll(new RegExp('`([^`\\s]*' + f.replace('.', '\\.') + ')`', 'g'))) {
+      if (m[1].includes('/')) assert.match(m[1], new RegExp('\\.ai/knowledge/' + f.replace('.', '\\.') + '$'), m[1]);
+    }
+  }
+  assert.ok(!/(^|[^/\w])\.ai\/architecture-target\.md/.test(text), 'no .ai/architecture-target.md');
+  assert.ok(text.includes('`<root>/.ai/knowledge/architecture-target.md`'));
+  const section = (h) => text.slice(text.indexOf(h), text.indexOf('\n## ', text.indexOf(h) + 1));
+  const rec = section('## Command: recommend');
+  const setup = section('## Command: setup');
+  const rejections = section('## Rejections');
+  for (const [name, s] of [['recommend', rec], ['setup', setup], ['rejections', rejections]]) {
+    for (const line of s.split('\n').filter((l) => l.includes('<root>/.ai/knowledge/adr'))) {
+      assert.match(line, /\(member: see Workspaces\)/, `${name}: ${line.slice(0, 60)}`);
+    }
+  }
+  const step1 = setup.split('\n').find((l) => l.startsWith('1. '));
+  assert.match(step1, /mode/);
+  assert.match(step1, /workspace role/);
+  assert.match(step1, /remove `\.ai\/`/);
+  assert.match(text, /\{ ok, violations, warnings \}/);
+  assert.match(rejections, /warnings/);
+});
+
+test('Final review: README roadmap, update example and the npx skill note', () => {
+  const readme = fs.readFileSync(new URL('../README.md', import.meta.url), 'utf8');
+  const catalog = JSON.parse(fs.readFileSync(new URL('../skill/catalog/catalog.json', import.meta.url), 'utf8'));
+  const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+  assert.match(readme, /- M3:[^\n]*gitignore-aware indexing/);
+  const update = readme.split('\n').find((l) => l.includes('`update` reinstalls'));
+  assert.ok(update.includes(`-> ${pkg.version} (catalog ${catalog.catalogVersion})`), update);
+  assert.match(readme, /`init` and `refresh` use the skill bundled in the npx package[^\n]*run `update` first/);
+});
