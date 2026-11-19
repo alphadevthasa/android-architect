@@ -1,6 +1,23 @@
 import { compareVersions } from './version.js';
 
 const CMP_RE = /^(<=|>=|<|>|=)(\d+(?:\.\d+)*)$/;
+const PRE_RE = /^[-._]?(?:alpha|beta|rc|cr|m\d+|milestone|snapshot|dev|preview|ea)(?![a-z])/i;
+const SPLIT_RE = /^(\d+(?:\.\d+)*)(.*)$/s;
+// A concrete version: numeric dotted core plus an optional plain qualifier.
+// Dynamic selectors (`2.+`, `latest.release`, `[2.8,3.0)`) never match.
+const CONCRETE_RE = /^\d+(?:\.\d+)*(?:[-._][A-Za-z0-9][A-Za-z0-9._-]*)?$/;
+
+/** Vulnerability-matching comparator: like compareVersions, but pre-releases sort below the release. */
+function compareForVuln(a, b) {
+  const [, ca = '0', qa = ''] = SPLIT_RE.exec(String(a)) ?? [];
+  const [, cb = '0', qb = ''] = SPLIT_RE.exec(String(b)) ?? [];
+  const c = compareVersions(ca, cb);
+  if (c !== 0) return c;
+  const pa = PRE_RE.test(qa);
+  const pb = PRE_RE.test(qb);
+  return pa === pb ? 0 : pa ? -1 : 1;
+}
+
 const TEST = {
   '<': (c) => c < 0,
   '<=': (c) => c <= 0,
@@ -13,7 +30,9 @@ const TEST = {
  * Parse a version range into a predicate. Grammar: space-separated comparators
  * (`<X`, `<=X`, `>X`, `>=X`, `=X`, X numeric dotted) ANDed together; `||` ORs
  * groups. Versions compare numerically per segment; qualifiers are ignored, so
- * `2.8.9-rc1` equals `2.8.9`. Anything else, including empty groups, throws.
+ * `-android`/`-jre`/`.Final` equal the release, while pre-release qualifiers
+ * (alpha, beta, rc, cr, mN, milestone, snapshot, dev, preview, ea) sort strictly
+ * below it, so `2.8.9-rc1` matches `<2.8.9`. Anything else, including empty groups, throws.
  */
 export function parseRange(range) {
   if (typeof range !== 'string' || range.trim() === '') throw new Error(`invalid range "${String(range).slice(0, 60)}"`);
@@ -25,15 +44,18 @@ export function parseRange(range) {
       return { test: TEST[m[1]], version: m[2] };
     });
   });
-  return (version) => groups.some((g) => g.every((c) => c.test(compareVersions(version, c.version))));
+  return (version) => groups.some((g) => g.every((c) => c.test(compareForVuln(version, c.version))));
 }
 
 /**
- * Match module dependencies against catalog `vulnerableVersions`.
- * Dependencies without a resolvable version are never reported as safe: their
- * coord goes to `unresolvedChecks` instead.
+ * Match build-unit dependencies against catalog `vulnerableVersions`.
+ * `units` are `{ file, build }` (modules plus the root build file). Rows are
+ * one per unit per dependency. A dependency whose version is missing,
+ * unresolved or dynamic is never reported safe: its coord goes to
+ * `unresolvedChecks`. Alias/bundle dependencies with unknown coordinates go to
+ * `unresolvedAliases` (only when the catalog has advisories).
  */
-export function vulnerableDependencies(modules, catalog) {
+export function vulnerableDependencies(units, catalog) {
   const advisories = new Map();
   for (const dim of catalog.dimensions) {
     for (const entry of dim.entries) {
@@ -45,25 +67,31 @@ export function vulnerableDependencies(modules, catalog) {
   }
   const vulnerable = [];
   const unresolved = new Set();
-  if (advisories.size === 0) return { vulnerable, unresolvedChecks: [] };
-  for (const m of modules) {
-    for (const dep of m.build?.dependencies ?? []) {
-      if (!dep.group || !dep.name) continue;
+  const aliases = new Map();
+  if (advisories.size === 0) return { vulnerable, unresolvedChecks: [], unresolvedAliases: [] };
+  for (const u of units) {
+    for (const dep of u.build?.dependencies ?? []) {
+      if (!dep.group || !dep.name) {
+        if (dep.alias && !dep.project) aliases.set(`${dep.alias}\0${u.file}\0${dep.line}`, { alias: dep.alias, file: u.file, line: dep.line });
+        continue;
+      }
       const coord = `${dep.group}:${dep.name}`;
       const list = advisories.get(coord);
       if (!list) continue;
-      if (dep.unresolved || dep.version === null || dep.version === undefined) {
+      if (dep.unresolved || typeof dep.version !== 'string' || !CONCRETE_RE.test(dep.version)) {
         unresolved.add(coord);
         continue;
       }
       for (const a of list) {
         if (!a.matches(dep.version)) continue;
         vulnerable.push({
-          coord, version: dep.version, file: m.buildFile, line: dep.line, entry: a.entry, dimension: a.dimension,
+          coord, version: dep.version, file: u.file, line: dep.line, entry: a.entry, dimension: a.dimension,
           id: a.adv.id, severity: a.adv.severity, summary: a.adv.summary, source: a.adv.source,
         });
       }
     }
   }
-  return { vulnerable, unresolvedChecks: [...unresolved].sort() };
+  const unresolvedAliases = [...aliases.values()].sort((x, y) =>
+    x.alias < y.alias ? -1 : x.alias > y.alias ? 1 : x.file < y.file ? -1 : x.file > y.file ? 1 : (x.line ?? 0) - (y.line ?? 0));
+  return { vulnerable, unresolvedChecks: [...unresolved].sort(), unresolvedAliases };
 }

@@ -72,5 +72,7 @@ An entry may list known-vulnerable dependency versions. Every field is required:
 
 - `coord` is `group:name` and must equal one of the entry's `detect.gradle` coords (or fall under a prefix coord ending in `:`).
 - `severity` is `critical`, `high`, `medium` or `low`; `source` must start with `https://`.
-- `range` is one or more comparators (`<X`, `<=X`, `>X`, `>=X`, `=X`, X numeric dotted) separated by spaces (AND); `||` separates OR groups. Segments compare numerically; qualifiers are ignored (`2.8.9-rc1` equals `2.8.9`). Anything else is rejected.
+- `range` is one or more comparators (`<X`, `<=X`, `>X`, `>=X`, `=X`, X numeric dotted) separated by spaces (AND); `||` separates OR groups. Segments compare numerically. Pre-release qualifiers (`alpha`, `beta`, `rc`, `cr`, `mN`, `milestone`, `snapshot`, `dev`, `preview`, `ea`; separator `-`, `.` or none, case-insensitive) sort strictly below the same release, so `2.8.9-rc1` matches `<2.8.9`; other qualifiers (`-android`, `-jre`, `.Final`) equal the release. Anything else is rejected.
 - `scan.js` reports matches in `profile.security.vulnerable`; dependencies whose version cannot be resolved are listed in `profile.security.unresolvedChecks` instead of being treated as safe.
+- One finding row per build file per dependency (modules and the root build file, including `buildscript` classpath).
+- Dynamic or unusable versions (`latest.release`, `2.+`, `[2.8,3.0)`, leftover `$`) go to `unresolvedChecks`; alias/bundle dependencies whose coordinates cannot be resolved go to `profile.security.unresolvedAliases` (`{ alias, file, line }`).

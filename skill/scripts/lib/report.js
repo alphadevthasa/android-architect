@@ -38,6 +38,7 @@ export function renderProfileMarkdown(profile, catalog = loadCatalog()) {
   for (const v of profile.security?.vulnerable ?? []) {
     out.push(`- [${v.severity}] ${v.id}: ${v.coord}:${v.version} at ${v.file}:${v.line} (${v.summary}; ${v.source})`);
   }
+  for (const a of profile.security?.unresolvedAliases ?? []) out.push(`- cannot check (alias coordinates unresolved): ${a.alias} at ${a.file}:${a.line}`);
   for (const c of profile.security?.unresolvedChecks ?? []) out.push(`- not checked (version unresolved): ${c}`);
   return out.join('\n') + '\n';
 }

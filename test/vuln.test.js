@@ -32,7 +32,10 @@ test('parseRange comparators, AND and OR', () => {
 
 test('parseRange compares numerically and ignores qualifiers', () => {
   assert.equal(parseRange('<2.10')('2.9'), true);
-  assert.equal(parseRange('<2.8.9')('2.8.9-rc1'), false);
+  assert.equal(parseRange('<2.8.9')('2.8.9-android'), false);
+  assert.equal(parseRange('<2.8.9')('2.8.9-jre'), false);
+  assert.equal(parseRange('<2.8.9')('2.8.9.Final'), false);
+  assert.equal(parseRange('<2.8.9')('2.8.8-android'), true);
   assert.equal(parseRange('<2.8.9')('2.10.1'), false);
   assert.equal(compareVersions('2.8.9-rc1', '2.8.9'), 0);
 });
@@ -117,4 +120,44 @@ test('architecture-current lists vulnerable dependencies', async () => {
   const p = scan("implementation 'com.google.code.gson:gson:2.8.6'");
   const arch = renderKnowledge(p, [], catalog, { date: '2026-11-20', commit: null, catalogVersion: catalog.catalogVersion })['knowledge/architecture-current.md'];
   assert.match(arch, /## Vulnerable dependencies\n\n- \[high\] CVE-2022-25647: com\.google\.code\.gson:gson:2\.8\.6 at app\/build\.gradle:3/);
+});
+
+test('pre-release qualifiers sort below the release (fail closed)', () => {
+  const r = parseRange('<2.8.9');
+  for (const v of ['2.8.9-rc1', '2.8.9.RC1', '2.8.9-SNAPSHOT', '3.0.0-M2'.replace('3.0.0', '2.8.9'), '2.8.9-alpha', '2.8.9-beta2',
+    '2.8.9-cr1', '2.8.9-milestone1', '2.8.9.dev', '2.8.9-preview', '2.8.9-ea', '2.8.9rc1']) {
+    assert.equal(r(v), true, v);
+  }
+  assert.equal(parseRange('<3.0.0')('3.0.0-M2'), true);
+  assert.equal(parseRange('<3.0.0')('3.0.0'), false);
+  assert.equal(parseRange('>=2.8.9')('2.8.9-rc1'), false);
+  assert.equal(parseRange('<2.8.9')('2.8.9-earlybird'), false);
+});
+
+test('dynamic versions are never reported, only listed as unchecked', () => {
+  for (const v of ['latest.release', '2.+', '+', '[2.8,3.0)', '2.8.$x']) {
+    const p = scan(`implementation 'com.google.code.gson:gson:${v}'`);
+    assert.deepEqual(p.security.vulnerable, [], v);
+    assert.deepEqual(p.security.unresolvedChecks, ['com.google.code.gson:gson'], v);
+  }
+});
+
+test('unknown version-catalog bundle is listed as unresolved alias', () => {
+  const p = scan('implementation libs.bundles.x');
+  assert.deepEqual(p.security.vulnerable, []);
+  assert.equal(p.security.unresolvedAliases.length, 1);
+  assert.equal(p.security.unresolvedAliases[0].alias, 'bundles.x');
+  assert.equal(p.security.unresolvedAliases[0].file, 'app/build.gradle');
+  assert.match(renderProfileMarkdown(p, catalog), /cannot check .*bundles\.x at app\/build\.gradle:3/);
+});
+
+test('root build file dependencies are scanned, including buildscript classpath', () => {
+  const dir = project("implementation 'androidx.core:core:1.0.0'");
+  try {
+    fs.writeFileSync(path.join(dir, 'build.gradle'),
+      "buildscript {\n  dependencies {\n    classpath 'com.google.code.gson:gson:2.8.6'\n  }\n}\ndependencies {\n  implementation 'com.google.code.gson:gson:2.8.0'\n}\n");
+    const p = detectStack(dir, catalog);
+    const rows = p.security.vulnerable.map((v) => `${v.file}:${v.line}`).sort();
+    assert.deepEqual(rows, ['build.gradle:3', 'build.gradle:7']);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

@@ -451,6 +451,6 @@ export function detectStack(root, catalog) {
     modules: modules.map((m) => ({ path: m.path, dir: m.dir, projectDeps: m.projectDeps })),
     dimensions,
     compliance: evaluateCompliance(sdk, catalog),
-    security: { findings: securityFindings(ctx), ...vulnerableDependencies(modules, catalog) },
+    security: { findings: securityFindings(ctx), ...vulnerableDependencies(ctx.buildUnits, catalog) },
   };
 }
