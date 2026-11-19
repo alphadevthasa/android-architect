@@ -19,7 +19,7 @@ The advisor writes a JSON file that `skill/scripts/recommend-check.js` validates
 ```
 
 Fields:
-- `dimensions[].label`: one of `must`, `should`, `later`, `dont`. `target` may be `null`.
+- `dimensions[].label`: one of `must`, `should`, `later`, `dont`. `target` may be `null`. For `dont`, `target` is the current entry or `null`, never a new entry.
 - `steps[].from`: the entry the step starts from, or `null` for a new capability.
 - `from: null` only when the dimension has no detected entry in the profile and no step in `dependsOn` already targets that dimension; `to` must then have status `current`, and a `justification` of at least 20 characters is required.
 - `steps[].tags` (optional): only `irreversible` or `decision`.

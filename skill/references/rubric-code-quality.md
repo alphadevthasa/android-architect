@@ -60,7 +60,7 @@ Detection hints:
 - `allowMainThreadQueries()` in Room builders.
 - `SharedPreferences.commit()` on UI paths, `runBlocking` in UI code, synchronous `execute()` on Retrofit or OkHttp calls outside a background context.
 - File reads, `SQLiteDatabase` queries or `BitmapFactory.decode*` in `onCreate`, `onResume`, `onBindViewHolder` or click listeners.
-- `StrictMode` disabled or permitted with `permitAll()`.
+- `StrictMode` configured with `permitAll()` or `permitDiskReads()` on the main thread.
 
 Severity: High on startup or scroll paths (ANRs, jank); Medium elsewhere.
 
@@ -92,7 +92,7 @@ Errors caught and dropped, hiding failures from users and from crash reporting.
 Detection hints:
 - Empty `catch` blocks, `catch (e: Exception) {}`, or catch blocks that only `printStackTrace()` or `Log.d`.
 - `runCatching { ... }` whose result is ignored.
-- Rx `subscribe()` without an error consumer; coroutines without a `CoroutineExceptionHandler` or try/catch where failures matter.
+- Rx `subscribe()` without `onError` is an unhandled Rx error (crash on error), not a swallowed one: report it as a crash risk, not here as swallowed. Coroutines without a `CoroutineExceptionHandler` or try/catch where failures matter.
 - Broad `catch (Throwable)` around large blocks.
 
 Severity: High when it hides failures in payments, sync, auth or data writes; Medium otherwise.

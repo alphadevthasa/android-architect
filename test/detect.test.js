@@ -336,3 +336,51 @@ test('I2: targetSdk from root ext and from libs.versions reaches the profile', (
     'app/build.gradle.kts': 'android {\n  defaultConfig {\n    targetSdk = libs.versions.targetSdk.get().toInt()\n  }\n}\n',
   }, (p) => assert.equal(p.sdk.targetSdk, 34));
 });
+
+test('M4: imports match on a segment boundary', () => {
+  const base = { 'settings.gradle': "include ':app'\n", 'app/build.gradle': '' };
+  const src = (imp) => ({ ...base, 'app/src/main/java/A.kt': `import ${imp}\nclass A\n` });
+  withProject(src('androidx.lifecycle.ViewModelProvider'), (p) => {
+    assert.ok(!ids(p, 'presentation').includes('mvvm-viewmodel'));
+  });
+  withProject(src('androidx.lifecycle.ViewModel'), (p) => {
+    assert.ok(ids(p, 'presentation').includes('mvvm-viewmodel'));
+  });
+  // A package prefix still matches its sub-packages and classes.
+  withProject(src('org.koin.core.context.startKoin'), (p) => {
+    assert.ok(ids(p, 'di').includes('koin'));
+  });
+  withProject(src('androidx.compose.material3.Text'), (p) => {
+    assert.ok(ids(p, 'ui').includes('compose'));
+  });
+  withProject(src('org.koinfoo.Bar'), (p) => {
+    assert.ok(!ids(p, 'di').includes('koin'));
+  });
+});
+
+test('M5: app-plus-libraries is detected for one application plus library modules', () => {
+  const entries = (p) => p.dimensions.modularization.entries;
+  const app = "plugins { id 'com.android.application' }\n";
+  const lib = "plugins { id 'com.android.library' }\n";
+  withProject({ 'settings.gradle': "include ':app', ':library'\n", 'app/build.gradle': app, 'library/build.gradle': lib }, (p) => {
+    assert.deepEqual(ids(p, 'modularization'), ['app-plus-libraries']);
+    assert.equal(entries(p)[0].share, null);
+  });
+  withProject({ 'settings.gradle': "include ':app', ':util'\n", 'app/build.gradle': app, 'util/build.gradle': "plugins { id 'java-library' }\n" }, (p) => {
+    has(p, 'modularization', 'app-plus-libraries');
+  });
+  withProject({ 'settings.gradle': "include ':app', ':util'\n", 'app/build.gradle': app, 'util/build.gradle': "plugins { id 'org.jetbrains.kotlin.jvm' }\n" }, (p) => {
+    has(p, 'modularization', 'app-plus-libraries');
+  });
+  // Feature-module naming means feature-modules, not app-plus-libraries.
+  withProject({ 'settings.gradle': "include ':app', ':feature-home'\n", 'app/build.gradle': app, 'feature-home/build.gradle': lib }, (p) => {
+    assert.deepEqual(ids(p, 'modularization'), ['feature-modules']);
+  });
+  // Two applications, or no library, is not this layout.
+  withProject({ 'settings.gradle': "include ':app', ':other'\n", 'app/build.gradle': app, 'other/build.gradle': app }, (p) => {
+    assert.ok(!ids(p, 'modularization').includes('app-plus-libraries'));
+  });
+  withProject({ 'settings.gradle': "include ':app'\n", 'app/build.gradle': app }, (p) => {
+    assert.deepEqual(ids(p, 'modularization'), ['single-module']);
+  });
+});

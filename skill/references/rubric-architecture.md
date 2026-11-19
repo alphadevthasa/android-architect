@@ -12,7 +12,7 @@ Scale severity with reach: the same smell in one rarely touched screen is lower 
 
 ## 1. Layering and the dependency rule
 
-Baseline (Google's guide to app architecture): a UI layer (Activities, Fragments, composables, ViewModels) and a data layer (repositories, data sources). The UI layer must not depend on data sources directly; it goes through repositories. The domain layer (use cases) is optional: its absence is not a finding. Data and domain know nothing about Android UI classes.
+Baseline (Google's guide to app architecture): a UI layer (Activities, Fragments, composables, ViewModels) and a data layer (repositories, data sources). The UI layer must not depend on data sources directly; it goes through repositories. The domain layer (use cases) is optional: its absence is not a finding. Clean Architecture is an option, not a requirement. Data and domain know nothing about Android UI classes.
 
 Signals in code:
 - Activities, Fragments, composables or ViewModels calling Retrofit services, DAOs, `SharedPreferences` or `SQLiteDatabase` directly instead of a repository.

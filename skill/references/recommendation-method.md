@@ -37,7 +37,7 @@ Label each dimension:
 | `must` | The project is exposed or blocked: security, store policy, a deprecated entry with real removal pressure, or a prerequisite for something already committed. |
 | `should` | Clear return within the next few months at a reasonable cost. |
 | `later` | Worth doing, but after its prerequisites or after more urgent work. No step needed yet. |
-| `dont` | The cost exceeds the benefit for this project. Say why in plain words. No step needed. |
+| `dont` | The cost exceeds the benefit for this project. Say why in plain words. No step needed. A `dont` row keeps `target` as the current entry or `null`, never a new entry. |
 
 Every rationale cites evidence and states cost, risk and why now.
 

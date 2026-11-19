@@ -2,6 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { loadCatalog, validateCatalog, CatalogError, SUPPORTED_SCHEMA_VERSION } from '../skill/scripts/lib/catalog.js';
 
+import fs from 'node:fs';
+
+const shippedVersion = JSON.parse(fs.readFileSync('skill/catalog/catalog.json', 'utf8')).catalogVersion;
 const meta = { schemaVersion: 1, catalogVersion: 'x', asOf: '2026-11-19', dimensions: ['d'] };
 const entry = (id, extra = {}) => ({
   id, name: id, era: 1, status: 'current', successors: [], detect: { files: ['a'] }, ...extra,
@@ -10,7 +13,7 @@ const raw = (entries, m = meta, more = []) => ({ meta: m, dimensions: [{ id: 'd'
 
 test('loads shipped catalog', () => {
   const c = loadCatalog();
-  assert.equal(c.catalogVersion, '2026.11.0');
+  assert.equal(c.catalogVersion, shippedVersion);
   const ids = c.dimensions.map((d) => d.id);
   for (const id of ['language', 'build', 'ui']) assert.ok(ids.includes(id));
   assert.equal(c.entry('language', 'kotlin').id, 'kotlin');
@@ -94,7 +97,7 @@ test('shipped successor and prerequisite rulings', () => {
 });
 
 test('loads shipped catalog via relative string path', () => {
-  assert.equal(loadCatalog('skill/catalog').catalogVersion, '2026.11.0');
+  assert.equal(loadCatalog('skill/catalog').catalogVersion, shippedVersion);
 });
 
 test('loads catalog from a dir whose name contains #', async () => {
@@ -103,7 +106,7 @@ test('loads catalog from a dir whose name contains #', async () => {
   const path = await import('node:path');
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cat#?%-'));
   fs.cpSync('skill/catalog', tmp, { recursive: true });
-  assert.equal(loadCatalog(tmp).catalogVersion, '2026.11.0');
+  assert.equal(loadCatalog(tmp).catalogVersion, shippedVersion);
 });
 
 test('databinding regex matches common forms', () => {
@@ -170,7 +173,7 @@ test('required entry ids exist per dimension', () => {
     keyvalue: 'sharedpreferences encrypted-sharedpreferences datastore mmkv',
     image: 'uil picasso glide fresco coil',
     background: 'service-alarmmanager intentservice jobscheduler firebase-jobdispatcher workmanager',
-    modularization: 'single-module layer-modules feature-modules api-impl-modules dynamic-features polyrepo-aar monorepo-convention',
+    modularization: 'single-module app-plus-libraries layer-modules feature-modules api-impl-modules dynamic-features polyrepo-aar monorepo-convention',
     testing: 'instrumentation-robotium junit4 mockito espresso mockk turbine robolectric compose-ui-test paparazzi roborazzi junit5 kotest',
     'static-analysis': 'android-lint checkstyle pmd findbugs-spotbugs ktlint detekt spotless',
     compliance: 'target-sdk-35 target-sdk-36 page-size-16kb edge-to-edge predictive-back fgs-types',

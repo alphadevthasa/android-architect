@@ -13,7 +13,7 @@
 
 ### Catalog
 
-- No catalog changes.
+- Catalog 2026.11.1: new computed `modularization` entry `app-plus-libraries` ("App + library modules": one application module plus `com.android.library`, `java-library` or Kotlin JVM library modules, no feature-module naming). `single-module` now lists it as a successor, and it leads to `layer-modules` and `feature-modules`. Import prefixes now match on a segment boundary, so `androidx.lifecycle.ViewModelProvider` no longer counts as `mvvm-viewmodel`.
 
 ## [0.1.0] - Unreleased
 

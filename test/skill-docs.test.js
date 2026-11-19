@@ -184,3 +184,14 @@ test('Task 9: output templates and method cover refresh and rejections', () => {
   const method = fs.readFileSync(path.join(skillDir, 'references', 'recommendation-method.md'), 'utf8');
   assert.match(method, /R7-rejected/);
 });
+
+test('Task 10: rubric and method doc fixes', () => {
+  const quality = fs.readFileSync(path.join(skillDir, 'references', 'rubric-code-quality.md'), 'utf8');
+  assert.doesNotMatch(quality, /StrictMode disabled/);
+  assert.match(quality, /unhandled Rx error \(crash on error\)/);
+  assert.doesNotMatch(quality, /Rx `subscribe\(\)` without an error consumer/);
+  const arch = fs.readFileSync(path.join(skillDir, 'references', 'rubric-architecture.md'), 'utf8');
+  assert.match(arch, /Clean Architecture is an option, not a requirement/);
+  const method = fs.readFileSync(path.join(skillDir, 'references', 'recommendation-method.md'), 'utf8');
+  assert.match(method, /`dont` row keeps `target` as the current entry or `null`/);
+});

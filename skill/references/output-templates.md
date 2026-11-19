@@ -62,7 +62,7 @@ Order findings by severity, then by reach. Prefer fewer, well-evidenced findings
 
 | Dimension | Current | Target | Label | Why (cost, risk, why now) |
 |---|---|---|---|---|
-| <dimension> | <current ids with share> | <target id, or "stay"> | <must / should / later / dont> | <one or two lines with evidence> |
+| <dimension> | <current ids with share> | <target id, or "stay"; for `dont`, the current entry or "stay"> | <must / should / later / dont> | <one or two lines with evidence> |
 
 ## Steps
 

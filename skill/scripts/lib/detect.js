@@ -17,6 +17,7 @@ const KAPT_PLUGINS = new Set(['kotlin-kapt', 'org.jetbrains.kotlin.kapt']);
 // Layer modules are top-level :data / :domain / :presentation only; a nested
 // :core:data is a shared library module, not layer-based modularization.
 const LAYER_NAMES = new Set(['data', 'domain', 'presentation']);
+const LIBRARY_PLUGINS = new Set(['com.android.library', 'java-library', 'org.jetbrains.kotlin.jvm']);
 const FEATURE_SEGMENT = /^features?([-_].+)?$/;
 // An entry whose file units are dropped where a more specific entry of the
 // same dimension matched the same file (a plain ViewModel that already uses
@@ -26,6 +27,13 @@ const TARGET_SDK_MIN = 'targetSdkMin';
 // Computed entries not handled by evaluateComputed() are not evaluated in M1
 // and never emitted. Compliance is reported separately in profile.compliance.
 const COMPLIANCE_DIM = 'compliance';
+
+// An import matches a prefix on a segment boundary: the prefix itself, a
+// prefix ending in `.` (a package), or the prefix followed by `.` (a class or
+// package). `androidx.lifecycle.ViewModelProvider` does not match `...ViewModel`.
+function importMatches(imp, prefix) {
+  return imp === prefix || (prefix.endsWith('.') ? imp.startsWith(prefix) : imp.startsWith(prefix + '.'));
+}
 
 const extOf = (rel) => path.posix.extname(rel).toLowerCase();
 
@@ -139,7 +147,7 @@ function evaluateEntry(entry, ctx) {
       if (!lines) continue;
       lines.forEach((text, i) => {
         const m = IMPORT_RE.exec(text);
-        if (m && m[1].startsWith(prefix)) addEvidence(acc, f, 'file', { file: f, line: i + 1, signal: `import ${prefix}` });
+        if (m && importMatches(m[1], prefix)) addEvidence(acc, f, 'file', { file: f, line: i + 1, signal: `import ${prefix}` });
       });
     }
   }
@@ -188,6 +196,15 @@ function evaluateComputed(dimId, entryId, ctx) {
     const mods = ctx.modules;
     if (entryId === 'single-module') {
       if (mods.length === 1) addEvidence(acc, mods[0].path, 'module', modEv(mods[0], 'computed single module'));
+    } else if (entryId === 'app-plus-libraries') {
+      const applied = (m) => ctx.buildUnits.find((u) => u.file === m.buildFile)?.appliedPlugins.map((p) => p.id) ?? [];
+      const apps = mods.filter((m) => applied(m).includes('com.android.application'));
+      const libs = mods.filter((m) => applied(m).some((id) => LIBRARY_PLUGINS.has(id)) && !applied(m).includes('com.android.application'));
+      const featured = mods.some((m) => moduleSegments(m).some((s) => FEATURE_SEGMENT.test(s)));
+      if (apps.length === 1 && libs.length > 0 && !featured) {
+        addEvidence(acc, apps[0].path, 'module', modEv(apps[0], `computed application module ${apps[0].path}`));
+        for (const m of libs) addEvidence(acc, m.path, 'module', modEv(m, `computed library module ${m.path}`));
+      }
     } else if (entryId === 'layer-modules') {
       for (const m of mods) {
         const segs = moduleSegments(m);

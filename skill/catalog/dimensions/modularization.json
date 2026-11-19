@@ -9,6 +9,21 @@
       "status": "current",
       "since": "2008",
       "successors": [
+        "app-plus-libraries",
+        "layer-modules",
+        "feature-modules"
+      ],
+      "detect": {
+        "computed": true
+      }
+    },
+    {
+      "id": "app-plus-libraries",
+      "name": "App + library modules",
+      "era": 2,
+      "status": "current",
+      "since": "2013",
+      "successors": [
         "layer-modules",
         "feature-modules"
       ],
