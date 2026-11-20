@@ -182,7 +182,12 @@ try {
       break;
     }
     case 'run': {
-      const { main } = await import('../skill/scripts/run.js');
+      let main;
+      try {
+        ({ main } = await import('../skill/scripts/run.js'));
+      } catch {
+        throw new Error('the run command could not be loaded (is the android-architect package complete?)');
+      }
       process.exitCode = await main(opts.rest);
       break;
     }

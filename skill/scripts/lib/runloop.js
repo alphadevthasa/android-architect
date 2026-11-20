@@ -588,12 +588,7 @@ export async function runLoop(root, options = {}) {
       config = loadRunConfig(root);
       const eff = effectiveAgent(config);
       agentArgv = eff.argv;
-      for (const w of agentWarnings(config)) {
-        warnings.push(w);
-        say(`warning: ${w}`);
-      }
-      const pass = config.agent.passEnv ?? [];
-      if (pass.length > 0) say(`Environment variables copied to the agent from your environment: ${pass.join(', ')}`);
+      for (const w of agentWarnings(config)) warnings.push(w); // shown in the confirmation text and kept for the report
       lock = await acquireLock(git, root);
       const ok = await git.confirmFirstUse(root, { confirm: typeof options.confirm === 'function' ? options.confirm : async () => false, say, config, agentArgv });
       if (ok !== true) throw new RunRefusal(REASONS.declined);

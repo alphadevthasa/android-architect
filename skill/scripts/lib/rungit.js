@@ -750,7 +750,52 @@ function writeConsent(common, text) {
   }
 }
 
-const joinArgv = (argv) => argv.map((a) => plainText(a, 120)).join(' ');
+const MAX_CONSENT_LINE = 380; // runLoop's say() cuts lines at 400; a line is refused, never cut
+/**
+ * One argv element as shown to the user, double-quoted: backslash and quote escaped, every control, format (zero-width,
+ * bidi), separator and non-ASCII space character as \u{..}, and every space that a one-line printer could collapse
+ * (leading, trailing, repeated) as \u{20}; redacted; never cut.
+ */
+export function showArg(a) {
+  const chars = [...String(a)];
+  let t = '';
+  chars.forEach((ch, i) => {
+    if (ch === '\\' || ch === '"') t += `\\${ch}`;
+    else if (ch === ' ') t += i === 0 || i === chars.length - 1 || chars[i - 1] === ' ' ? '\\u{20}' : ' ';
+    else t += /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Zs}]/u.test(ch) ? `\\u{${ch.codePointAt(0).toString(16)}}` : ch;
+  });
+  return `"${redact(t).text}"`;
+}
+/** `label:` then one numbered element per line, the whole argv, nothing cut. Throws RunRefusal when a line would be too long to show. */
+export function argvLines(label, argv) {
+  const out = [`${label}:`];
+  argv.forEach((a, i) => {
+    const line = `${i + 1}. ${showArg(a)}`;
+    if (line.length > MAX_CONSENT_LINE) throw new RunRefusal(`${label}: argument ${i + 1} is too long to show in full; shorten it in ${RUN_CONFIG_FILE} (nothing is truncated in the confirmation text)`);
+    out.push(line);
+  });
+  return out;
+}
+/**
+ * The complete first-use statement, in order, ending with the trust line. `statements` are extra caller lines (already
+ * plain text, each under the cap) shown before it. Used by confirmFirstUse and by `run --dry-run`, so both show the same text.
+ */
+export function consentLines(shown, agentArgv, statements = []) {
+  const L = [];
+  L.push('Before the first run (and again whenever .ai/run.config.json or the agent command changes):');
+  L.push("Note: verification runs your project's Gradle build code and may reach the network.");
+  L.push("The run config (.ai/run.config.json) and the project's Gradle code run as you, with your user permissions, and so does the agent.");
+  L.push('They inherit your HOME and PATH, so the build code can read files such as ~/.gradle, ~/.ssh and ~/.npmrc.');
+  L.push(...argvLines('Agent command (placeholders are filled in at run time)', agentArgv));
+  shown.verification.commands.forEach((c, i) => L.push(...argvLines(`Verification command ${i + 1} of ${shown.verification.commands.length}`, c)));
+  L.push(`Verification timeout: ${Number(shown.verification.timeoutSeconds)} seconds per command`);
+  for (const st of statements) {
+    if (st.length > MAX_CONSENT_LINE) throw new RunRefusal('a line of the confirmation text is too long to show in full; shorten the values in .ai/run.config.json');
+    L.push(st);
+  }
+  L.push('Confirm only if you trust this repository and its run.config.json.');
+  return L;
+}
 
 /**
  * First-use consent per clone. Valid only while <git dir>/android-architect/confirmed.json holds the hash of the
@@ -760,7 +805,7 @@ const joinArgv = (argv) => argv.map((a) => plainText(a, 120)).join(' ');
  * The displayed config comes from the same bytes that are hashed; a `config` that differs from them refuses.
  * Returns a Promise<boolean>.
  */
-export async function confirmFirstUse(root, { confirm, say, config, agentArgv }) {
+export async function confirmFirstUse(root, { confirm, say, config, agentArgv, statements }) {
   if (typeof confirm !== 'function' || typeof say !== 'function') throw new RunRefusal('confirmFirstUse needs confirm and say functions');
   if (!Array.isArray(agentArgv) || agentArgv.some((a) => typeof a !== 'string')) throw new RunRefusal('the agent command is not a list of strings');
   return plainErrors(async () => {
@@ -784,14 +829,7 @@ export async function confirmFirstUse(root, { confirm, say, config, agentArgv })
     }
     const hash = consentHash(bytes, agentArgv);
     if (storedConsentHash(info.common) === hash) return true;
-    const commands = shown.verification.commands.map(joinArgv);
-    say('Before the first run (and again whenever .ai/run.config.json or the agent command changes):');
-    say("Note: verification runs your project's Gradle build code and may reach the network.");
-    say("The run config (.ai/run.config.json) and the project's Gradle code run as you, with your user permissions, and so does the agent.");
-    say('They inherit your HOME and PATH, so the build code can read files such as ~/.gradle, ~/.ssh and ~/.npmrc.');
-    say(`Agent command: ${joinArgv(agentArgv)}`);
-    say(`Verification commands: ${commands.length > 0 ? commands.join(' ; ') : '(none)'}`);
-    say('Confirm only if you trust this repository and its run.config.json.');
+    for (const l of consentLines(shown, agentArgv, Array.isArray(statements) ? statements : [])) say(l);
     if ((await confirm()) !== true) return false;
     excludeRunLogs(info);
     writeConsent(info.common, `${JSON.stringify({ schemaVersion: 1, hash, confirmedAt: new Date().toISOString() })}\n`);

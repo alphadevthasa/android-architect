@@ -6,6 +6,16 @@ import { fileURLToPath } from 'node:url';
 import { hashTree, regularFiles } from './hash.js';
 import { readManifest } from './manifest.js';
 
+/**
+ * Scripts that are never vendored into .ai/tools: the autonomous run loop (entry script and the libraries only it uses).
+ * .ai/tools is PR-controlled and unguarded, and the loop's consent gate and guards must never run from it. A test derives
+ * this list from the import graph (everything reachable from run.js and from no vendored tool).
+ */
+export const NOT_VENDORED = Object.freeze([
+  'run.js', 'lib/runreport.js', 'lib/rungit.js', 'lib/runconfig.js', 'lib/agent.js', 'lib/runstatus.js',
+  'lib/runverify.js', 'lib/runloop.js', 'lib/runguard.js', 'lib/stepbrief.js',
+]);
+
 /** The package.json written next to the vendored scripts so plain `node` runs them as ES modules. */
 export const TOOLS_PACKAGE_JSON = '{"type":"module","private":true}\n';
 export const TRUST_FLAG = '--trust-modified-tools';
@@ -32,7 +42,9 @@ export function collectVendorSources(skillDir, catalogDir, { aiDir } = {}) {
         `refusing to vendor from inside .ai (${srcDir}): a vendored copy cannot regenerate .ai; run the installed skill or npx android-architect`,
       );
     }
-    return regularFiles(srcDir).map((rel) => [`${destRel}/${rel}`, fs.readFileSync(path.join(srcDir, rel))]);
+    return regularFiles(srcDir)
+      .filter((rel) => !(destRel === 'scripts' && NOT_VENDORED.includes(rel)))
+      .map((rel) => [`${destRel}/${rel}`, fs.readFileSync(path.join(srcDir, rel))]);
   });
   sources.push(['package.json', Buffer.from(TOOLS_PACKAGE_JSON)]);
   return sources.sort(([a], [b]) => byText(a, b));

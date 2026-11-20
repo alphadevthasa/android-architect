@@ -1,10 +1,10 @@
 # Changelog
 
-## [Unreleased]
+## [0.5.0] - Unreleased
 
 ### Run loop
 
-- `android-architect run` (`skill/scripts/run.js`, delegated from `bin/cli.js`): the opt-in autonomous run loop. Flags `--root`, `--json`, `--dry-run`, `--approve-build-changes <hash>` (repeatable, argv only) and `--help`; budgets, agent and verification come from `.ai/run.config.json` only. No `--yes`: the first-use confirmation needs an explicit `yes` at an interactive terminal (it lists the agent command, unverified-default warning, verification commands, passEnv names, budgets, branch prefix and the no-push statement), and a non-interactive stdin never confirms. Stable exit codes: 0 done, 2 refused or usage, 3 needs-human, 4 stopped or interrupted, 5 tampered, 6 budget or no-progress or repeated-error or verification-failed, 7 failed. Default agent command lines are unverified.
+- `android-architect run` (`skill/scripts/run.js`, delegated from `bin/cli.js`): the opt-in autonomous run loop. Flags `--root`, `--json`, `--dry-run`, `--approve-build-changes <hash>` (repeatable, argv only) and `--help`; budgets, agent and verification come from `.ai/run.config.json` only. No `--yes`: the first-use confirmation needs an explicit `yes` at an interactive terminal (it lists the agent command, unverified-default warning, verification commands, passEnv names, budgets, branch prefix and the no-push statement), and a non-interactive stdin never confirms. Stable exit codes: 0 done, 2 refused or usage, 3 needs-human, 4 stopped or interrupted, 5 tampered, 6 budget or no-progress or repeated-error or verification-failed, 7 failed. Default agent command lines are unverified. The confirmation text shows the full agent command and every verification command, one argument per line (nothing truncated; `agent.command` and verification commands are capped at 40 arguments of 300 characters, at most 10 verification commands, and a config that cannot be shown in full is refused). The run loop is no longer vendored into `.ai/tools` (a vendored `run.js` refuses to run): use `npx android-architect run` or the installed skill.
 
 ## [0.4.0] - Unreleased
 

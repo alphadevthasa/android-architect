@@ -14,7 +14,7 @@ import { runLoop as defaultRunLoop } from './lib/runloop.js';
 import { loadRunConfig } from './lib/runconfig.js';
 import { loadPlan, nextRunnable } from './lib/runplan.js';
 import { effectiveAgent, agentWarnings } from './lib/agent.js';
-import { confirmFirstUse, plainText } from './lib/rungit.js';
+import { confirmFirstUse, plainText, consentLines, argvLines, showArg, RunRefusal } from './lib/rungit.js';
 import { sanitizeReport } from './lib/runreport.js';
 
 export const BOOLEAN_FLAGS = Object.freeze(['json', 'dry-run', 'help']);
@@ -112,8 +112,6 @@ const GATED_TAGS = ['irreversible', 'decision'];
 const MAX_TABLE_ROWS = 100;
 const MAX_LISTED = 20;
 
-const argvText = (argv) => argv.map((a) => plainText(a, 120)).join(' ');
-
 function describeError(e, root) {
   const msg = String(e?.message ?? e).split(root).join('.');
   return msg.split('\n').slice(0, 10).map((l) => plainText(l, 300));
@@ -176,30 +174,30 @@ const joinIds = (ids) => {
   return ids.length > MAX_LISTED ? `${shown}, ... ${ids.length - MAX_LISTED} more` : shown;
 };
 
-/** Consent statements. `base` repeats what confirmFirstUse itself prints (used by --dry-run, which never calls it). */
-function consentLines(config, eff, { base }) {
+/**
+ * The statements shown with the first-use confirmation, after the argv and verification lists and before the trust line.
+ * `withWarnings`: --dry-run includes the agent warnings (a real run prints them separately when consent is already recorded).
+ */
+function statements(config, eff, { withWarnings }) {
   const L = [];
-  if (base) {
-    L.push("Verification runs your project's Gradle build code (and may reach the network); the run config and that code run as you, as does the agent.");
-    L.push('HOME and PATH are inherited, so the build code can read files such as ~/.gradle, ~/.ssh and ~/.npmrc.');
-    L.push(`Agent command: ${argvText(eff.argv)}`);
-    L.push(`Verification commands: ${config.verification.commands.map(argvText).join(' ; ')}`);
-  }
-  for (const w of agentWarnings(config)) L.push(`Warning: ${plainText(w, 300)}`);
-  if (eff.unverified) L.push(`Warning: the default ${plainText(eff.kind, 20)} command line was written without access to the CLI and is unverified: check every flag against the current ${plainText(eff.kind, 20)} CLI help before you confirm.`);
+  if (withWarnings) for (const w of agentWarnings(config)) L.push(`Warning: ${plainText(w, 340)}`);
   const pass = config.agent.passEnv ?? [];
   L.push(`Environment variables copied from your environment into the agent (names only, values are never shown): ${pass.length > 0 ? pass.map((n) => plainText(n, 60)).join(', ') : 'none'}`);
+  const envNames = Object.keys(config.agent.env ?? {});
+  L.push(`Environment variables set by .ai/run.config.json for the agent (names only): ${envNames.length > 0 ? envNames.map((n) => plainText(n, 60)).join(', ') : 'none'}`);
   const b = config.budgets;
   L.push(`Budgets: ${b.maxIterations} iterations, ${b.maxTotalTokens} tokens, ${b.maxTurnsPerStep} turns per step, ${b.maxWallClockMinutes} minutes (edit .ai/run.config.json to change them).`);
   L.push(`Run branch: a new branch named ${plainText(config.branchPrefix, 100)}-<timestamp> (the current run branch is resumed when you are on one); one commit per verified step.`);
+  const prot = config.protectedBranches ?? [];
+  L.push(`Protected branches (besides the default branches): ${prot.length > 0 ? prot.map((n) => plainText(n, 100)).join(', ') : 'none'}`);
   L.push('Nothing is pushed, merged or published. Build files the agent changes stop the run for your review before verification. Create .ai/STOP or press Ctrl-C to stop.');
   return L;
 }
 
 function planLines(config, eff, view) {
   const L = [];
-  L.push(`Agent command: ${argvText(eff.argv)}`);
-  L.push(`Verification commands: ${config.verification.commands.map(argvText).join(' ; ')}`);
+  L.push(...argvLines('Agent command', eff.argv));
+  config.verification.commands.forEach((c, i) => L.push(...argvLines(`Verification command ${i + 1} of ${config.verification.commands.length}`, c)));
   L.push(view.doing.length > 0 ? `Resume step: ${joinIds(view.doing)} (marked doing)` : view.next ? `Next step: ${view.next.id} (${view.next.title})` : 'Next step: none runnable');
   L.push(`Steps that will run, in order: ${view.willRun.length > 0 ? joinIds(view.willRun) : 'none'}`);
   if (view.gated.length > 0) L.push(`Gated (needs a human, skipped): ${view.gated.slice(0, MAX_LISTED).map((g) => `${plainText(g.id, 80)} [${g.tags.join(', ')}]`).join(', ')}${view.gated.length > MAX_LISTED ? ', ...' : ''}`);
@@ -214,36 +212,40 @@ const GATE_LINES = [
 function dryRun(root, io, json) {
   const { config, eff, plan } = prepare(root);
   const view = planView(plan);
-  const consent = consentLines(config, eff, { base: true });
-  const plan2 = planLines(config, eff, view);
+  const consent = consentLines(config, eff.argv, statements(config, eff, { withWarnings: true }));
   if (json) {
     io.stdout.write(`${JSON.stringify({
       schemaVersion: 1,
       dryRun: true,
-      agentArgv: eff.argv.map((a) => plainText(a, 120)),
+      agentArgv: eff.argv.map(showArg),
       agentDefaultUnverified: eff.unverified === true,
       warnings: agentWarnings(config).map((w) => plainText(w, 300)),
       passEnv: (config.agent.passEnv ?? []).map((n) => plainText(n, 60)),
+      envNames: Object.keys(config.agent.env ?? {}).map((n) => plainText(n, 60)),
       budgets: { ...config.budgets },
+      verificationTimeoutSeconds: config.verification.timeoutSeconds,
       branchPrefix: plainText(config.branchPrefix, 100),
-      verification: config.verification.commands.map((c) => c.map((a) => plainText(a, 120))),
+      protectedBranches: (config.protectedBranches ?? []).map((n) => plainText(n, 100)),
+      verification: config.verification.commands.map((c) => c.map(showArg)),
       next: view.next,
       resume: view.doing,
       willRun: view.willRun.slice(0, 200),
       gated: view.gated.slice(0, 200),
       blocked: view.blocked.slice(0, 200),
+      consentText: consent,
       nothingPushed: true,
     }, null, 2)}\n`);
     return EXIT.OK;
   }
-  const out = (l) => io.stdout.write(`${plainText(l, 700)}\n`);
-  out('Dry run: nothing was started, written or confirmed. The first real run shows this text and asks for confirmation.');
+  // consent lines and plan lines are written as they are (each already plain and under the cap): never cut or re-wrapped
+  const out = (l) => io.stdout.write(`${l}\n`);
+  out('Dry run: nothing was started, written or confirmed. The first real run shows the consent text below and asks for confirmation.');
   out('');
   out('Consent text:');
-  for (const l of consent) out(`  ${l}`);
+  for (const l of consent) out(l);
   out('');
   out('Plan:');
-  for (const l of plan2) out(`  ${l}`);
+  for (const l of planLines(config, eff, view)) out(l);
   out('');
   for (const l of GATE_LINES) out(l);
   return EXIT.OK;
@@ -293,9 +295,9 @@ function humanResult(res, code, root, out) {
 }
 
 /** Reads one line from an interactive terminal; null on EOF or Ctrl-C. */
-function askTerminal(prompt, stream) {
+export function askTerminal(prompt, stream, input = process.stdin) {
   return new Promise((resolve) => {
-    const rl = readline.createInterface({ input: process.stdin, output: stream, terminal: process.stdin.isTTY === true });
+    const rl = readline.createInterface({ input, output: stream, terminal: input.isTTY === true });
     let done = false;
     const finish = (v) => {
       if (done) return;
@@ -309,12 +311,33 @@ function askTerminal(prompt, stream) {
   });
 }
 
+/** True when `file` sits under a `.ai/tools` directory: the vendored, PR-controlled copy of the tools. */
+export function isVendoredPath(file) {
+  const parts = String(file).split(/[\\/]/);
+  for (let i = 0; i + 1 < parts.length; i++) if (parts[i] === '.ai' && parts[i + 1] === 'tools') return true;
+  return false;
+}
+const VENDORED_MESSAGE = 'this copy of run.js lives under .ai/tools, which is generated and can be changed by anyone who can change the repository, so it will not run: use `npx android-architect run` or the run.js of the installed skill';
+
 async function execute(argv, io) {
-  const opts = parseArgs(argv);
-  if (opts.error) {
-    io.stderr.write(`${plainText(opts.error, 300)}\n${USAGE}\n`);
+  const jsonWanted = argv.includes('--json');
+  // A refusal exits 2; with --json it is also printed as one JSON object on stdout (the plain text always goes to stderr).
+  const refuseWith = (lines, usage = false) => {
+    for (const l of lines) io.stderr.write(`${plainText(l, 400)}\n`);
+    if (usage) io.stderr.write(`${USAGE}\n`);
+    if (jsonWanted) io.stdout.write(`${JSON.stringify({ outcome: 'refused', reason: plainText(lines.join(' '), 600), exitCode: EXIT.REFUSED })}\n`);
     return EXIT.REFUSED;
+  };
+  const self = io.selfPath ?? fileURLToPath(import.meta.url);
+  let real = self;
+  try {
+    real = fs.realpathSync(self);
+  } catch {
+    // keep the plain path
   }
+  if (isVendoredPath(self) || isVendoredPath(real)) return refuseWith([VENDORED_MESSAGE]);
+  const opts = parseArgs(argv);
+  if (opts.error) return refuseWith([plainText(opts.error, 300)], true);
   if (opts.help) {
     io.stdout.write(`${HELP}\n`);
     return EXIT.OK;
@@ -324,50 +347,48 @@ async function execute(argv, io) {
   try {
     root = fs.realpathSync(requested);
   } catch {
-    io.stderr.write('not an Android/Gradle project: the project root does not exist (use --root <dir>)\n');
-    return EXIT.REFUSED;
+    return refuseWith(['not an Android/Gradle project: the project root does not exist (use --root <dir>)']);
   }
   const interactive = io.interactive ?? process.stdin.isTTY === true;
-  const refuse = (lines) => {
-    for (const l of lines) io.stderr.write(`${plainText(l, 400)}\n`);
-    return EXIT.REFUSED;
-  };
+  const refuse = (lines) => refuseWith(lines);
   try {
     if (opts.dryRun) return dryRun(root, io, opts.json);
     const { config, eff, plan } = prepare(root);
-    if (!interactive) {
-      // A non-interactive stdin never confirms. Consent already recorded for this exact config + agent command is enough.
-      let recorded = false;
-      try {
-        recorded = await confirmFirstUse(root, { confirm: async () => false, say: () => {}, config, agentArgv: eff.argv });
-      } catch (e) {
-        return refuse(describeError(e, root));
-      }
-      if (recorded !== true) {
-        return refuse([
-          'the first-use confirmation is needed and stdin is not an interactive terminal: run this command once from an interactive terminal and type "yes" at the prompt.',
-          'There is no --yes option: consent cannot be scripted. It is recorded per clone and bound to .ai/run.config.json and the agent command (any change asks again).',
-        ]);
-      }
+    // Consent already recorded for this exact config + agent command? (read-only; false changes nothing)
+    let recorded = false;
+    try {
+      recorded = (await confirmFirstUse(root, { confirm: async () => false, say: () => {}, config, agentArgv: eff.argv })) === true;
+    } catch (e) {
+      return refuse(describeError(e, root));
+    }
+    if (!interactive && !recorded) {
+      // A non-interactive stdin never confirms. Recorded consent applies to every non-interactive process in this clone.
+      return refuse([
+        'the first-use confirmation is needed and stdin is not an interactive terminal: run this command once from an interactive terminal and type "yes" at the prompt.',
+        'There is no --yes option: consent cannot be scripted. It is recorded per clone and bound to .ai/run.config.json and the agent command (any change asks again).',
+      ]);
     }
     const progress = opts.json ? io.stderr : io.stdout;
     const say = (l) => progress.write(`${plainText(l, 700)}\n`);
     if (!opts.json) {
-      const view = planView(plan);
       say('Effective plan (nothing has run yet):');
-      for (const l of planLines(config, eff, view)) say(`  ${l}`);
+      for (const l of planLines(config, eff, planView(plan))) say(l);
       say(`Budgets: ${config.budgets.maxIterations} iterations, ${config.budgets.maxTotalTokens} tokens, ${config.budgets.maxWallClockMinutes} minutes; branch prefix ${plainText(config.branchPrefix, 100)}`);
+      if (recorded) for (const w of agentWarnings(config)) say(`Warning: ${plainText(w, 340)}`);
     }
     const confirm = async () => {
-      for (const l of consentLines(config, eff, { base: false })) say(l);
       if (!interactive) return false;
       const a = await (io.ask ?? ((p) => askTerminal(p, progress)))('Type "yes" to confirm and start (anything else cancels): ');
       return typeof a === 'string' && a.trim().toLowerCase() === 'yes';
     };
+    // The statements ride inside confirmFirstUse so the trust line stays last; the same text is shown by --dry-run.
+    const stmts = statements(config, eff, { withWarnings: true });
+    const baseGit = io.runOptions?.git ?? {};
+    const gitOver = { ...baseGit, confirmFirstUse: (r, o) => (baseGit.confirmFirstUse ?? confirmFirstUse)(r, { ...o, statements: stmts }) };
     const loop = io.runLoop ?? defaultRunLoop;
     let res;
     try {
-      res = await loop(root, { ...(io.runOptions ?? {}), confirm, say, approvedBuildChanges: opts.approved });
+      res = await loop(root, { ...(io.runOptions ?? {}), git: gitOver, confirm, say, approvedBuildChanges: opts.approved });
     } catch (e) {
       io.stderr.write(`the run failed unexpectedly: ${describeError(e, root)[0] ?? ''}\n`);
       return EXIT.FAILED;
@@ -383,7 +404,7 @@ async function execute(argv, io) {
     else humanResult(res, code, root, (l) => io.stdout.write(`${plainText(l, 700)}\n`));
     return code;
   } catch (e) {
-    if (e instanceof Refusal) return refuse(e.lines);
+    if (e instanceof Refusal || e instanceof RunRefusal) return refuse(e instanceof Refusal ? e.lines : describeError(e, root));
     io.stderr.write(`the run failed unexpectedly: ${describeError(e, root)[0] ?? ''}\n`);
     return EXIT.FAILED;
   }
@@ -395,6 +416,8 @@ async function execute(argv, io) {
  */
 export async function main(argv, io = {}) {
   const full = { stdout: io.stdout ?? process.stdout, stderr: io.stderr ?? process.stderr, ...io };
+  // A closed pipe (`run | head`) must not crash with a stack trace: write errors are ignored, the exit code is kept.
+  for (const st of [full.stdout, full.stderr]) st.on?.('error', () => {});
   try {
     return await execute(argv, full);
   } catch {

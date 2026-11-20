@@ -10,8 +10,9 @@ export const RUN_CONFIG_FILE = '.ai/run.config.json';
 const PREFIX = `${RUN_CONFIG_FILE}: `;
 const MAX_FILE_BYTES = 64 * 1024;
 const MAX_ARG = 500;
-const MAX_ARGV = 50;
-const MAX_COMMANDS = 20;
+const MAX_ARGV = 40; // agent.command and every verification command: all of it is shown in the confirmation text
+const MAX_CMD_ARG = 300;
+const MAX_COMMANDS = 10;
 const MAX_ENV = 50;
 const MAX_LIST = 20;
 const MAX_BRANCH_PREFIX = 100;
@@ -97,7 +98,7 @@ function argvProblems(argv, where, root, kind) {
     const a = argv[i];
     const at = `${where}[${i}]`;
     if (typeof a !== 'string' || a.length === 0) out.push(`${at}: must be a non-empty string`);
-    else if (a.length > MAX_ARG) out.push(`${at}: is longer than ${MAX_ARG} characters`);
+    else if (a.length > MAX_CMD_ARG) out.push(`${at}: is longer than ${MAX_CMD_ARG} characters`);
     else if (hasControl(a)) out.push(`${at}: must not contain control characters or newlines`);
   }
   if (out.length > 0) return out;

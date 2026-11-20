@@ -3,13 +3,18 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync, spawn } from 'node:child_process';
+import { PassThrough } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { renderRoadmap } from '../skill/scripts/lib/migplan.js';
 import { OUTCOMES } from '../skill/scripts/lib/runloop.js';
 import { NO_RESTRICTIONS_WARNING } from '../skill/scripts/lib/agent.js';
 import { killLiveGroups } from '../skill/scripts/lib/runverify.js';
-import { main, parseArgs, EXIT, OUTCOME_EXIT, BOOLEAN_FLAGS, VALUE_FLAGS, USAGE } from '../skill/scripts/run.js';
+import { loadRunConfig } from '../skill/scripts/lib/runconfig.js';
+import { effectiveAgent } from '../skill/scripts/lib/agent.js';
+import { confirmFirstUse } from '../skill/scripts/lib/rungit.js';
+import { NOT_VENDORED } from '../skill/scripts/lib/integrity.js';
+import { main, askTerminal, isVendoredPath, parseArgs, EXIT, OUTCOME_EXIT, BOOLEAN_FLAGS, VALUE_FLAGS, USAGE } from '../skill/scripts/run.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const RUN_JS = path.join(ROOT, 'skill/scripts/run.js');
@@ -46,7 +51,7 @@ function project(plan = CHAIN, { config = null, gradle = true, branch = 'feature
 const CONFIG = { agent: { kind: 'claude', command: ['claude'], passEnv: ['ANTHROPIC_API_KEY'] }, branchPrefix: 'aa/run' };
 
 /** Runs main in-process with captured output. */
-async function run(argv, { root, interactive = false, answers = [], runLoop, runOptions, env = {} } = {}) {
+async function run(argv, { root, interactive = false, answers = [], runLoop, runOptions, env = {}, selfPath } = {}) {
   const out = [];
   const err = [];
   const asked = [];
@@ -61,6 +66,7 @@ async function run(argv, { root, interactive = false, answers = [], runLoop, run
     },
     runLoop,
     runOptions,
+    selfPath,
   };
   const saved = {};
   for (const [k, v] of Object.entries(env)) {
@@ -224,11 +230,17 @@ test('consent text lists argv, warnings, verification, passEnv names (never valu
   assert.deepEqual(calls, []);
   assert.equal(r.asked.length, 1);
   const t = r.out;
-  assert.match(t, /Agent command: claude -p \{prompt\} --output-format json --max-turns \{maxTurns\}/);
+  assert.match(t, /Agent command \(placeholders are filled in at run time\):\n1\. "claude"\n2\. "-p"\n3\. "\{prompt\}"\n4\. "--output-format"\n5\. "json"\n6\. "--max-turns"\n7\. "\{maxTurns\}"\n/);
   assert.match(t, /unverified/);
   assert.match(t, /current .*CLI help/i);
   assert.ok(t.includes(NO_RESTRICTIONS_WARNING));
-  assert.match(t, /Verification commands: \.\/gradlew assembleDebug testDebugUnitTest lint/);
+  assert.match(t, /Verification command 1 of 1:\n1\. "\.\/gradlew"\n2\. "assembleDebug"\n3\. "testDebugUnitTest"\n4\. "lint"\n/);
+  assert.match(t, /Verification timeout: 1800 seconds/);
+  assert.match(t, /Protected branches[^\n]*none/);
+  assert.equal((t.match(/unverified/g) ?? []).length, 1, 'warnings are printed once');
+  assert.equal((t.match(new RegExp(NO_RESTRICTIONS_WARNING, 'g')) ?? []).length, 1);
+  const trust = t.indexOf('Confirm only if you trust this repository');
+  assert.ok(trust > t.indexOf('Nothing is pushed') && trust > t.indexOf('Protected branches') && trust > t.indexOf('Budgets'), 'the trust line comes last in the consent text');
   assert.match(t, /build code/i);
   assert.match(t, /ANTHROPIC_API_KEY/);
   assert.match(t, /names only|never shown/i);
@@ -386,7 +398,7 @@ test('--dry-run prints the plan and touches nothing', async () => {
   assert.equal(called, 0);
   assert.deepEqual(r.asked, []);
   assert.match(r.out, /Dry run/);
-  assert.match(r.out, /Agent command: claude -p/);
+  assert.match(r.out, /Agent command \(placeholders are filled in at run time\):\n1\. "claude"\n2\. "-p"/);
   assert.match(r.out, /ANTHROPIC_API_KEY/);
   assert.match(r.out, /Next step: a /);
   assert.match(r.out, /needs a human[^\n]*\bc\b|\bc\b[^\n]*decision/i);
@@ -403,7 +415,7 @@ test('--dry-run prints the plan and touches nothing', async () => {
   assert.equal(d.dryRun, true);
   assert.equal(d.next.id, 'a');
   assert.deepEqual(d.passEnv, ['ANTHROPIC_API_KEY']);
-  assert.equal(d.agentArgv[0], 'claude');
+  assert.equal(d.agentArgv[0], '"claude"');
   assert.ok(Array.isArray(d.gated) && d.gated[0].id === 'c');
   assert.ok(!fs.existsSync(path.join(root, '.ai/runs')));
 });
@@ -451,4 +463,179 @@ test('bin/cli.js run delegates to run.js; usage lists run and its flags', () => 
   assert.match(usage.stderr, /--approve-build-changes <hash>/);
   const ver = spawnSync(process.execPath, [CLI, 'version'], { encoding: 'utf8' });
   assert.equal(ver.status, 0);
+});
+
+// ---------- round 1: full consent text, caps, vendored copy, readline, EPIPE, signals ----------
+const LAST = '--LAST-MARKER-flag-must-be-visible';
+const longConfig = (n = 30) => ({ agent: { kind: 'claude', command: ['claude', '-p', '{prompt}', ...Array.from({ length: n - 4 }, (_, i) => `--option-number-${i}-with-a-long-padding-name-0123456789`), LAST], passEnv: [] } });
+
+test('a long agent command is shown in full, one argument per line, identically in the prompt, --dry-run and --json', async () => {
+  const root = project(CHAIN, { config: longConfig() });
+  const cfg = loadRunConfig(root);
+  assert.ok(cfg.agent.command.join(' ').length > 1200);
+  const prompt = await run(['--root', root], { root: os.tmpdir(), interactive: true, answers: ['no'] });
+  const dry = await run(['--root', root, '--dry-run'], { root: os.tmpdir() });
+  const json = JSON.parse((await run(['--root', root, '--dry-run', '--json'], { root: os.tmpdir() })).out);
+  assert.equal(json.agentArgv.length, cfg.agent.command.length);
+  for (const [name, text] of [['prompt', prompt.out], ['dry-run', dry.out], ['json consent', json.consentText.join('\n')]]) {
+    cfg.agent.command.forEach((a, i) => assert.ok(text.includes(`\n${i + 1}. "${a}"\n`), `${name}: argument ${i + 1}`));
+  }
+  assert.equal(json.agentArgv[json.agentArgv.length - 1], `"${LAST}"`);
+  // the consent text of the prompt equals the dry-run consent text from the same lines
+  assert.ok(prompt.out.includes('1. "claude"\n2. "-p"'));
+  assert.equal(prompt.code, 2);
+});
+
+test('configs that cannot be shown in full are refused, never truncated', async () => {
+  const bad = [
+    ['element over 300 chars', { agent: { kind: 'claude', command: ['claude', 'x'.repeat(301)] } }, /longer than 300/],
+    ['41 elements', { agent: { kind: 'claude', command: ['claude', ...Array.from({ length: 40 }, (_, i) => `a${i}`)] } }, /more than 40 elements/],
+    ['11 verification commands', { verification: { commands: Array.from({ length: 11 }, () => ['./gradlew', 'test']) } }, /more than 10 commands/],
+    ['long verification element', { verification: { commands: [['./gradlew', 'y'.repeat(301)]] } }, /longer than 300/],
+  ];
+  for (const [name, config, re] of bad) {
+    const root = project(CHAIN, { config });
+    for (const argv of [['--root', root], ['--root', root, '--dry-run']]) {
+      const r = await run(argv, { root: os.tmpdir(), interactive: true, answers: ['yes'] });
+      assert.equal(r.code, 2, name);
+      assert.match(r.err, re, name);
+      assert.deepEqual(r.asked, [], name);
+    }
+    assert.ok(!fs.existsSync(path.join(root, '.git/android-architect/confirmed.json')));
+  }
+  // 300 characters is the largest accepted element and is still shown whole
+  const ok = project(CHAIN, { config: { agent: { kind: 'claude', command: ['claude', 'z'.repeat(300)] } } });
+  const r = await run(['--root', ok, '--dry-run'], { root: os.tmpdir() });
+  assert.equal(r.code, 0);
+  assert.ok(r.out.includes(`2. "${'z'.repeat(300)}"`));
+});
+
+test('hostile characters in the agent command are shown escaped, spaces cannot hide', async () => {
+  const root = project(CHAIN, { config: { agent: { kind: 'claude', command: ['claude', 'a\u200bb\u202ec', 'two  spaces', ' lead', 'q"uote\\'] } } });
+  const r = await run(['--root', root, '--dry-run'], { root: os.tmpdir() });
+  assert.equal(r.code, 0, r.all);
+  assert.ok(r.out.includes('2. "a\\u{200b}b\\u{202e}c"'));
+  assert.ok(r.out.includes('3. "two \\u{20}spaces"'));
+  assert.ok(r.out.includes('4. "\\u{20}lead"'));
+  assert.ok(r.out.includes('5. "q\\"uote\\\\"'));
+  assert.doesNotMatch(r.out, /[\u200b\u202e]/);
+});
+
+test('real readline path: yes, no, EOF', async () => {
+  const ask = async (feed) => {
+    const input = new PassThrough();
+    const out = new PassThrough();
+    const p = askTerminal('Q? ', out, input);
+    feed(input);
+    return p;
+  };
+  assert.equal(await ask((i) => i.end('yes\n')), 'yes');
+  assert.equal(await ask((i) => i.end('no\n')), 'no');
+  assert.equal(await ask((i) => i.end()), null);
+});
+
+test('a piped answer in a child process never confirms (no, EOF, closed stdin); recorded consent lets a non-tty child proceed', async () => {
+  const gated = mkPlan([S('g', 'Needs a human', { tags: ['decision'] })]);
+  const root = project(gated, { config: CONFIG });
+  for (const input of ['no\n', '', 'yes\n']) {
+    const r = spawnSync(process.execPath, [CLI, 'run', '--root', root], { encoding: 'utf8', input });
+    assert.equal(r.status, 2, input);
+    assert.match(r.stderr, /interactive terminal/);
+  }
+  const closed = spawnSync(process.execPath, [CLI, 'run', '--root', root], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  assert.equal(closed.status, 2);
+  const config = loadRunConfig(root);
+  assert.equal(await confirmFirstUse(root, { confirm: async () => true, say: () => {}, config, agentArgv: effectiveAgent(config).argv }), true);
+  const go = spawnSync(process.execPath, [CLI, 'run', '--root', root, '--json'], { encoding: 'utf8', input: '' });
+  assert.equal(go.status, 3, go.stdout + go.stderr);
+  assert.equal(JSON.parse(go.stdout).outcome, 'needs-human');
+  noLeaks(go.stdout + go.stderr, root);
+});
+
+test('--json refusal prints {outcome, reason, exitCode} on stdout and the plain text on stderr', async () => {
+  const root = project(CHAIN, { config: CONFIG });
+  const r = await run(['--root', root, '--json'], { root: os.tmpdir(), interactive: false });
+  assert.equal(r.code, 2);
+  const j = JSON.parse(r.out);
+  assert.deepEqual(Object.keys(j).sort(), ['exitCode', 'outcome', 'reason']);
+  assert.equal(j.outcome, 'refused');
+  assert.equal(j.exitCode, 2);
+  assert.match(r.err, /interactive terminal/);
+  const usage = await run(['--json', '--bogus'], { root: os.tmpdir() });
+  assert.equal(JSON.parse(usage.out).outcome, 'refused');
+  assert.equal(usage.code, 2);
+});
+
+test('a vendored copy under .ai/tools refuses to run (in-process and as a real copy)', async () => {
+  assert.equal(isVendoredPath('/p/.ai/tools/scripts/run.js'), true);
+  assert.equal(isVendoredPath('C:\\p\\.ai\\tools\\scripts\\run.js'), true);
+  assert.equal(isVendoredPath('/p/.ai/toolsx/run.js'), false);
+  const root = project(CHAIN, { config: CONFIG });
+  const r = await run(['--root', root, '--dry-run'], { root: os.tmpdir(), selfPath: '/p/.ai/tools/scripts/run.js' });
+  assert.equal(r.code, 2);
+  assert.match(r.err, /npx android-architect run/);
+  noLeaks(r.all, root);
+  const copy = path.join(root, '.ai/tools/scripts');
+  fs.cpSync(path.join(ROOT, 'skill/scripts'), copy, { recursive: true });
+  fs.writeFileSync(path.join(root, '.ai/tools/package.json'), '{"type":"module","private":true}\n');
+  const c = spawnSync(process.execPath, [path.join(copy, 'run.js'), '--root', root, '--dry-run'], { encoding: 'utf8' });
+  assert.equal(c.status, 2);
+  assert.match(c.stderr, /installed skill/);
+});
+
+test('the run loop is not vendored into .ai/tools', async () => {
+  const { collectVendorSources } = await import('../skill/scripts/lib/integrity.js');
+  const rels = collectVendorSources(path.join(ROOT, 'skill'), path.join(ROOT, 'skill/catalog')).map(([r]) => r);
+  for (const f of NOT_VENDORED) assert.ok(!rels.includes(`scripts/${f}`), f);
+  assert.ok(rels.includes('scripts/index.js') && rels.includes('scripts/lib/runplan.js'));
+  // NOT_VENDORED = exactly what only run.js needs: derived from the import graph
+  const base = path.join(ROOT, 'skill/scripts');
+  const deps = (f) => [...fs.readFileSync(f, 'utf8').matchAll(/from '(\.[^']+)'/g)].map((m) => path.resolve(path.dirname(f), m[1]));
+  const reach = (roots) => {
+    const seen = new Set();
+    const st = [...roots];
+    while (st.length) {
+      const f = st.pop();
+      if (!seen.has(f)) {
+        seen.add(f);
+        st.push(...deps(f));
+      }
+    }
+    return seen;
+  };
+  const tools = fs.readdirSync(base).filter((f) => f.endsWith('.js') && f !== 'run.js').map((f) => path.join(base, f));
+  const T = reach(tools);
+  const only = [...reach([path.join(base, 'run.js')])].filter((f) => !T.has(f)).map((f) => path.relative(base, f)).sort();
+  assert.deepEqual(only, [...NOT_VENDORED].sort());
+});
+
+test('EPIPE (`run | head -c 50`) exits with the computed code and no stack trace', () => {
+  const root = project(CHAIN, { config: CONFIG });
+  const r = spawnSync('bash', ['-c', `"$0" "$1" run --root "$2" --dry-run | head -c 50 >/dev/null; echo "\${PIPESTATUS[0]}" >&2`, process.execPath, CLI, root], { encoding: 'utf8' });
+  assert.equal(r.stderr.trim(), '0', r.stderr);
+});
+
+test('SIGINT through bin/cli.js run stops the loop, exits 4 and leaves a report', async () => {
+  const root = project(mkPlan([S('a', 'First')]), { config: { agent: { kind: 'custom', command: ['node', 'agent-stub.mjs', 'hang'] } }, });
+  fs.copyFileSync(path.join(ROOT, 'test/helpers/stub-agent.mjs'), path.join(root, 'agent-stub.mjs'));
+  g(root, 'add', '-A');
+  g(root, 'commit', '-q', '-m', 'stub');
+  const config = loadRunConfig(root);
+  await confirmFirstUse(root, { confirm: async () => true, say: () => {}, config, agentArgv: effectiveAgent(config).argv });
+  const child = spawn(process.execPath, [CLI, 'run', '--root', root, '--json'], { stdio: ['ignore', 'pipe', 'pipe'] });
+  let out = '';
+  let err = '';
+  child.stdout.on('data', (d) => { out += d; });
+  child.stderr.on('data', (d) => { err += d; });
+  const exited = new Promise((res) => child.on('close', (code, sig) => res({ code, sig })));
+  const started = Date.now();
+  const briefSeen = () => fs.existsSync(path.join(root, '.ai/runs')) && fs.readdirSync(path.join(root, '.ai/runs')).some((d) => fs.existsSync(path.join(root, '.ai/runs', d, 'brief-1.md')));
+  while (!briefSeen() && Date.now() - started < 30000) await new Promise((r) => setTimeout(r, 100));
+  assert.ok(briefSeen(), `agent never started: ${err}`);
+  await new Promise((r) => setTimeout(r, 500));
+  child.kill('SIGINT');
+  const { code } = await exited;
+  assert.equal(code, 4, err + out);
+  assert.equal(JSON.parse(out).outcome, 'interrupted');
+  noLeaks(out + err, root);
 });
