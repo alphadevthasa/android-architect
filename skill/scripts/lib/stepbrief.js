@@ -15,10 +15,9 @@ import { COMPONENTS_BEGIN, COMPONENTS_END } from './knowledge.js';
 import { isStepId } from './runplan.js';
 import { redact } from './redact.js';
 import { mdText, stripUnsafe } from './mdtext.js';
-import { STATUS_START, STATUS_END } from './runstatus.js';
+import { STATUS_START, STATUS_END, cleanText } from './runstatus.js';
 
 export const BRIEF_MAX_BYTES = 24 * 1024;
-const MAX_DIR_ENTRIES = 2000;
 const MAX_ADR_FILES = 200;
 const MAX_ADR_BYTES = 64 * 1024;
 const MAX_ADRS_SHOWN = 5;
@@ -85,17 +84,8 @@ function readText(root, p, max) {
 
 // ---------- text hygiene ----------
 
-/** Control characters (newline kept as a line break, tab as a space) and bidi controls removed. */
-function plain(s) {
-  let out = '';
-  for (const ch of stripUnsafe(s)) {
-    const c = ch.charCodeAt(0);
-    if (c === 10) out += '\n';
-    else if (c === 9) out += ' ';
-    else if (c >= 0x20 && c !== 0x7f && !(c >= 0x80 && c <= 0x9f)) out += ch;
-  }
-  return out;
-}
+/** Control characters (newline kept as a line break; tab becomes a space) and bidi controls removed (shared cleanText). */
+const plain = (s) => cleanText(s).replace(/\t/g, ' ');
 
 /** The status markers cannot survive inside quoted data. */
 const neutral = (s) => s.split(STATUS_START).join('[status-start-marker]').split(STATUS_END).join('[status-end-marker]');
@@ -155,23 +145,15 @@ function relevantAdrs(root, step, adrDir) {
   const res = { items: [], skipped: 0, note: null };
   if (rel === null || !noSymlinks(root, rel)) return { ...res, note: 'ADR folder skipped (outside the project or a symlink)' };
   let names = [];
-  let dir;
   try {
-    dir = fs.opendirSync(path.join(root, rel));
-    let e;
-    for (let seen = 0; seen < MAX_DIR_ENTRIES && (e = dir.readSync()) !== null; seen++) {
-      if (e.isFile() && e.name.length <= 200 && /^\d{4}-.*\.md$/.test(e.name) && e.name !== '0000-template.md') names.push(e.name);
-    }
+    names = fs.readdirSync(path.join(root, rel), { withFileTypes: true })
+      .filter((e) => e.isFile() && e.name.length <= 200 && /^\d{4}-.*\.md$/.test(e.name) && e.name !== '0000-template.md')
+      .map((e) => e.name);
   } catch {
     return res;
-  } finally {
-    try {
-      dir?.closeSync();
-    } catch {
-      // ignore
-    }
   }
-  names = names.sort().slice(0, MAX_ADR_FILES);
+  names.sort(); // sorted BEFORE any cap, so the choice is deterministic
+  names = names.slice(0, MAX_ADR_FILES);
   for (const name of names) {
     const r = readText(root, path.join(rel, name), MAX_ADR_BYTES);
     if (r.text === undefined) {
@@ -262,10 +244,11 @@ const RULES = [
  * Builds the brief (Markdown, at most 24 KB). `step` is the plan step; `plan` and `config` supply the verification
  * commands (config.verification.commands); `adrDir` and `indexPath` default to the standard .ai locations;
  * `previousFailure` is the (untrusted) text of the last failed verification, quoted and shown from its end.
- * Throws a plain Error when the step id is not a valid step id.
+ * `nonce` (16 hex characters, newNonce() of agent.js) goes into the status example. Throws a plain Error when the step id is not a valid step id or the nonce is missing.
  */
-export function buildStepBrief(root, { step, plan, config, adrDir, indexPath, previousFailure } = {}) {
+export function buildStepBrief(root, { step, plan, config, adrDir, indexPath, previousFailure, nonce } = {}) {
   if (step === null || typeof step !== 'object' || !isStepId(step.id)) throw new Error('brief: the step id is not valid');
+  if (typeof nonce !== 'string' || !/^[0-9a-f]{16}$/.test(nonce)) throw new Error('brief: a nonce (16 hex characters) is required');
   const notes = [];
   const out = [];
   const used = () => bytes(out.join('\n')) + 1;
@@ -344,9 +327,9 @@ export function buildStepBrief(root, { step, plan, config, adrDir, indexPath, pr
 
   push(
     '## Final answer', '',
-    'End your final message with exactly one status block, the markers alone on their own lines, strict JSON between them, no other keys:', '',
+    'End your final message with exactly one status block, the markers alone on their own lines, strict JSON between them, no other keys. The `nonce` value is this brief\'s own secret: copy it exactly and never print it anywhere else:', '',
     '```', STATUS_START,
-    `{"step":"${step.id}","status":"done","summary":"one or two sentences","filesChanged":["relative/path"],"verification":"what you ran and the result"}`,
+    `{"step":"${step.id}","nonce":"${nonce}","status":"done","summary":"one or two sentences","filesChanged":["relative/path"],"verification":"what you ran and the result"}`,
     STATUS_END, '```', '',
     'Use `done`, `blocked`, `needs-human` or `failed` as the status. The runner reads only the last block, and only when `step` matches.',
   );

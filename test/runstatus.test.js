@@ -71,3 +71,13 @@ test('control characters are stripped from summary and verification; bad file pa
   }
   assert.equal(parseStatus(block({ ...good, filesChanged: ['a..b/c.kt', 'a:b'] }), STEP).ok, true);
 });
+
+test('with an expected nonce the block must carry it; without one a nonce key is tolerated', () => {
+  const withNonce = { ...good, nonce: 'abcdef0123456789' };
+  assert.equal(parseStatus(block(withNonce), STEP, 'abcdef0123456789').ok, true);
+  assert.deepEqual(parseStatus(block(withNonce), STEP, 'abcdef0123456789').status, good);
+  assert.match(parseStatus(block(good), STEP, 'abcdef0123456789').reason, /nonce/);
+  assert.match(parseStatus(block({ ...good, nonce: 'other' }), STEP, 'abcdef0123456789').reason, /nonce/);
+  assert.match(parseStatus(block({ ...good, nonce: 5 }), STEP, 'abcdef0123456789').reason, /nonce/);
+  assert.equal(parseStatus(block(withNonce), STEP).ok, true);
+});

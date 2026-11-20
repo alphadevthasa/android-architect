@@ -33,7 +33,7 @@ export const DEFAULT_RUN_CONFIG = Object.freeze({
 });
 
 const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
-const hasControl = (s) => {
+export const hasControl = (s) => {
   for (let i = 0; i < s.length; i++) {
     const c = s.charCodeAt(i);
     if (c < 0x20 || (c >= 0x7f && c <= 0x9f) || c === 0x2028 || c === 0x2029) return true;
@@ -131,7 +131,7 @@ const DENIED_ENV_EXACT = [
   'PATH', 'HOME', 'NODE_OPTIONS', 'NODE_PATH', 'NODE_EXTRA_CA_CERTS', 'JAVA_TOOL_OPTIONS', '_JAVA_OPTIONS', 'JDK_JAVA_OPTIONS', 'JAVA_HOME',
   'GRADLE_OPTS', 'GRADLE_USER_HOME', 'BASH_ENV', 'ENV', 'SHELL', 'SHELLOPTS', 'BASHOPTS', 'PROMPT_COMMAND', 'PS4', 'IFS', 'TMPDIR',
   'PYTHONPATH', 'PYTHONHOME', 'PYTHONSTARTUP', 'RUBYOPT', 'RUBYLIB', 'PERL5OPT', 'PERL5LIB', 'SSL_CERT_FILE', 'SSL_CERT_DIR',
-  'REQUESTS_CA_BUNDLE', 'CURL_CA_BUNDLE', 'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'USER', 'LOGNAME',
+  'REQUESTS_CA_BUNDLE', 'CURL_CA_BUNDLE', 'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'USER', 'LOGNAME', 'LANG',
 ];
 const DENIED_ENV_PREFIX = ['LD_', 'DYLD_', 'GIT_', 'SSH_', 'CLAUDE_', 'CODEX_', 'NODE_', 'NPM_', 'GRADLE_', 'JAVA_', 'ANDROID_'];
 const DENIED_ENV_SUFFIX = ['_PROXY', '_BASE_URL', '_API_URL', '_ENDPOINT', '_URL', '_HOST'];
@@ -156,10 +156,22 @@ function requireArgProblem(v) {
   for (const ch of v) if (!REQUIRE_ARG_CHARS.includes(ch)) return 'may only contain letters, digits and ". _ : = / -"';
   return isAbsolute(v) || hasDotDot(v) ? 'must not be an absolute path or contain ".."' : null;
 }
-// agent.passEnv: NAMES of variables copied from the user's own environment into the agent process (values never live here).
+// agent.passEnv: NAMES of variables copied from the user's own environment into the agent process (values never live
+// here). Only the agent CLIs' own credential/config families may flow (a PR picks names, the user supplies values),
+// minus anything that loads or executes code. Note: *_BASE_URL names of these families ARE allowed; a base-URL variable
+// in the user's own environment redirects the key they pass (documented in the README).
+const PASS_FAMILIES = ['ANTHROPIC_', 'CLAUDE_', 'OPENAI_', 'CODEX_', 'GEMINI_', 'GOOGLE_GENAI_', 'AZURE_OPENAI_'];
+const PASS_DENIED_PREFIX = ['LD_', 'DYLD_', 'NODE_', 'GIT_', 'SSH_'];
+const PASS_DENIED_EXACT = ['JAVA_TOOL_OPTIONS', 'BASH_ENV', 'ENV', 'PATH', 'HOME'];
+/** True for a variable name that agent.passEnv may carry (shape, family allowlist, loader/exec denylist). */
+export function passEnvAllowed(v) {
+  if (typeof v !== 'string' || v.length === 0 || v.length > 64 || !/^[A-Z][A-Z0-9_]*$/.test(v)) return false;
+  if (PASS_DENIED_EXACT.includes(v) || PASS_DENIED_PREFIX.some((p) => v.startsWith(p))) return false;
+  return v === 'GOOGLE_API_KEY' || PASS_FAMILIES.some((p) => v.startsWith(p) && v.length > p.length);
+}
 function passEnvProblem(v) {
   if (typeof v !== 'string' || v.length === 0 || v.length > 64 || !/^[A-Z][A-Z0-9_]*$/.test(v)) return 'must be a name such as ANTHROPIC_API_KEY (A-Z, 0-9 and "_", starting with a letter)';
-  return deniedEnvName(v) ? 'is a reserved name (loader, option, proxy, base-URL and agent-config variables are not passed on)' : null;
+  return passEnvAllowed(v) ? null : 'is not allowed (only ANTHROPIC_*, CLAUDE_*, OPENAI_*, CODEX_*, GEMINI_*, GOOGLE_API_KEY, GOOGLE_GENAI_* and AZURE_OPENAI_* names, and never loader or exec variables)';
 }
 function listOf(value, where, problemOf, bad) {
   if (!Array.isArray(value)) {

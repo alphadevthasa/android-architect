@@ -196,11 +196,13 @@ function installCleanup() {
  * `root`, with exactly `env`, no stdin, in its own process group. stdout and stderr go into one bounded Tail of
  * `tailBytes`; `onStdout(chunk)` sees stdout chunks as they arrive (the caller must keep that bounded). The whole group
  * is terminated (SIGTERM, then SIGKILL) after every exit and when `timeoutMs` passes. Never rejects. Resolves
- * { started, exitCode, signal, timedOut, text } where `text` is the cleaned, redacted tail (cleanTail).
+ * { started, exitCode, signal, timedOut, text, stdoutText } where `text` is the cleaned, redacted merged tail (cleanTail)
+ * and `stdoutText` the same for stdout alone.
  */
 export function spawnCaptured(root, argv, { env, timeoutMs, tailBytes = TAIL_BYTES, onStdout } = {}) {
   return new Promise((resolve) => {
     const tail = new Tail(tailBytes);
+    const outTail = new Tail(tailBytes); // stdout alone (status and usage are read from it, never from stderr)
     let timedOut = false;
     let settled = false;
     let child;
@@ -210,7 +212,7 @@ export function spawnCaptured(root, argv, { env, timeoutMs, tailBytes = TAIL_BYT
       settled = true;
       clearTimeout(termTimer);
       if (child?.pid) live.delete(child.pid);
-      resolve({ started, exitCode, signal: signal ?? null, timedOut, text: cleanTail(tail.text()) });
+      resolve({ started, exitCode, signal: signal ?? null, timedOut, text: cleanTail(tail.text()), stdoutText: cleanTail(outTail.text()) });
     };
     installCleanup();
     try {
@@ -224,6 +226,7 @@ export function spawnCaptured(root, argv, { env, timeoutMs, tailBytes = TAIL_BYT
     live.add(child.pid);
     child.stdout.on('data', (c) => {
       tail.push(c);
+      outTail.push(c);
       if (onStdout) onStdout(c);
     });
     child.stderr.on('data', (c) => tail.push(c));

@@ -6,10 +6,12 @@
 // returned unredacted.
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { spawnCaptured, cleanTail } from './runverify.js';
 import { parseStatus } from './runstatus.js';
+import { isStepId } from './runplan.js';
 import { writeGenerated } from './aidir.js';
-import { deniedEnvName, validEnvName } from './runconfig.js';
+import { deniedEnvName, validEnvName, passEnvAllowed, hasControl } from './runconfig.js';
 import { redact } from './redact.js';
 import { mdText } from './mdtext.js';
 
@@ -19,6 +21,7 @@ const MAX_LINE_BYTES = 1024 * 1024; // a JSON result line above this is ignored 
 const MAX_BRIEF_BYTES = 256 * 1024;
 const MAX_ARG_BYTES = 4096;
 const MAX_ENV_VALUE = 8192;
+const MAX_BASE_ENV_VALUE = 32 * 1024; // PATH can be long; it is copied from the user's own environment
 const MAX_TURNS = 200;
 const MAX_TIMEOUT_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000;
@@ -60,13 +63,9 @@ class AgentRefusal extends Error {
 }
 const refuse = (m) => new AgentRefusal(m);
 
-const hasControl = (s) => {
-  for (let i = 0; i < s.length; i++) {
-    const c = s.charCodeAt(i);
-    if (c < 0x20 || (c >= 0x7f && c <= 0x9f) || c === 0x2028 || c === 0x2029) return true;
-  }
-  return false;
-};
+/** A fresh per-iteration secret: the brief asks for it in the status block, project files predate it. */
+export const newNonce = () => crypto.randomBytes(8).toString('hex');
+const isNonce = (n) => typeof n === 'string' && /^[0-9a-f]{16}$/.test(n);
 
 /**
  * The agent argv template that will run: the configured command, or the kind's default template when the command is just
@@ -121,15 +120,15 @@ function checkRequireArgs(config, argv) {
 /** The agent process environment: PATH, HOME, LANG + passEnv names from the user's own environment + config env. */
 export function buildAgentEnv(config, source = process.env) {
   const env = {};
-  const set = (k, v, what) => {
-    if (typeof v !== 'string' || v.length > MAX_ENV_VALUE || hasControl(v)) throw refuse(`${what} ${k} has a value that is too long or contains control characters or newlines`);
+  const set = (k, v, what, max = MAX_ENV_VALUE) => {
+    if (typeof v !== 'string' || v.length > max || hasControl(v)) throw refuse(`${what} ${k} has a value that is too long or contains control characters or newlines`);
     env[k] = v;
   };
-  for (const k of BASE_ENV) if (typeof source[k] === 'string' && source[k] !== '') set(k, source[k], 'environment variable');
+  for (const k of BASE_ENV) if (typeof source[k] === 'string' && source[k] !== '') set(k, source[k], 'environment variable', MAX_BASE_ENV_VALUE);
   const pass = config.agent.passEnv ?? [];
   if (!Array.isArray(pass)) throw refuse('agent.passEnv must be an array');
   for (const k of pass) {
-    if (typeof k !== 'string' || !validEnvName(k) || !/^[A-Z]/.test(k) || deniedEnvName(k)) throw refuse('agent.passEnv holds a name that is not allowed');
+    if (!passEnvAllowed(k)) throw refuse('agent.passEnv holds a name that is not allowed');
     if (typeof source[k] === 'string' && source[k] !== '') set(k, source[k], 'passEnv variable');
   }
   const own = config.agent.env ?? {};
@@ -218,14 +217,31 @@ function lastJson(line) {
 
 const isCount = (n) => Number.isSafeInteger(n) && n >= 0;
 
-/** { inputTokens, outputTokens, totalTokens } from `usage.input_tokens` / `usage.output_tokens` of a JSON object, else null. */
+/**
+ * { inputTokens, outputTokens, totalTokens } from `usage.input_tokens` / `usage.output_tokens` of a JSON object, else
+ * null. Only the documented result envelope counts: the object must have `type: "result"` (plain text output that merely
+ * contains a JSON line, say a model echoing one, is never trusted).
+ */
 export function extractUsage(obj) {
+  if (obj === null || typeof obj !== 'object' || obj.type !== 'result') return null;
   const u = obj !== null && typeof obj === 'object' && Object.hasOwn(obj, 'usage') ? obj.usage : null;
   if (u === null || typeof u !== 'object' || Array.isArray(u)) return null;
   if (!Object.hasOwn(u, 'input_tokens') || !Object.hasOwn(u, 'output_tokens')) return null;
   const { input_tokens: i, output_tokens: o } = u;
   if (!isCount(i) || !isCount(o) || !Number.isSafeInteger(i + o)) return null;
   return { inputTokens: i, outputTokens: o, totalTokens: i + o };
+}
+
+/**
+ * Per-iteration token floor: maxTotalTokens / (maxIterations * 10), at least 1. A reported total below it (a lying or
+ * broken agent) is raised to it by runAgent, so usage can never be used to stall the token budget. The result also
+ * carries `usageFloor` for the caller's per-iteration estimate when `usage` is null.
+ */
+export function usageFloor(config) {
+  const b = config?.budgets ?? {};
+  const t = Number.isSafeInteger(b.maxTotalTokens) ? b.maxTotalTokens : 400000;
+  const it = Number.isSafeInteger(b.maxIterations) && b.maxIterations > 0 ? b.maxIterations : 10;
+  return Math.max(1, Math.floor(t / (it * 10)));
 }
 
 /** Last `max` bytes of a string (a split UTF-8 sequence at the cut is dropped). */
@@ -270,18 +286,23 @@ function plainWriteError(err) {
  *   turns:     numeric turn limit for {maxTurns} (default config.budgets.maxTurnsPerStep, at most 200)
  *   timeoutMs: hard wall-clock limit (default 30 minutes, at most 24 hours)
  *   now:       Date or ms, used for the run folder name when `runId` is not given
+ *   nonce:     this iteration's secret (newNonce(); the brief must contain it, buildStepBrief puts it in the status example);
+ *              a status block counts only when it carries it. Status is read from STDOUT only (never stderr).
  *   runId:     folder name under .ai/runs (letters, digits, "_" and "-"); n: first brief/log number (default 1)
  * Returns { status, usage, exitCode, signal, timedOut, outputTail, logPath, logError, briefPath }:
  *   status    ParsedStatus ({ ok, status } or { ok:false, reason }); a timeout, a signal, a non-zero exit or a failed start
  *             is never ok, whatever the agent printed (only runner-observed facts decide that)
- *   usage     { inputTokens, outputTokens, totalTokens } or null (never trusted to be small: the caller keeps the budgets)
+ *   usage     { inputTokens, outputTokens, totalTokens } or null; trusted only from a `type: "result"` stdout line and its
+ *             total is raised to usageFloor(config). null means: use `usageFloor` as the per-iteration estimate.
  *   outputTail last 200 KB of stdout+stderr, cleaned and redacted
  * Throws a plain AgentRefusal (no stack, no absolute path) when the request or the configuration is not acceptable.
  */
-export async function runAgent(root, config, { brief, step, turns, timeoutMs, now, runId, n } = {}) {
+export async function runAgent(root, config, { brief, step, turns, timeoutMs, now, runId, n, nonce } = {}) {
   const stepId = typeof step === 'string' ? step : step?.id;
-  if (typeof stepId !== 'string' || stepId.length === 0 || stepId.length > 200 || hasControl(stepId) || stepId.startsWith('-')) throw refuse('the step id is not acceptable');
+  if (typeof stepId !== 'string' || stepId.length === 0 || !isStepId(stepId) || stepId.startsWith('-')) throw refuse('the step id is not acceptable');
+  if (!isNonce(nonce)) throw refuse('a nonce (newNonce()) is required');
   if (typeof brief !== 'string' || brief.length === 0 || Buffer.byteLength(brief) > MAX_BRIEF_BYTES) throw refuse('the brief must be non-empty text of at most 256 KB');
+  if (!brief.includes(nonce)) throw refuse('the brief does not contain the nonce');
   const maxTurns = turns ?? config?.budgets?.maxTurnsPerStep ?? 20;
   if (!Number.isSafeInteger(maxTurns) || maxTurns < 1 || maxTurns > MAX_TURNS) throw refuse(`turns must be an integer from 1 to ${MAX_TURNS}`);
   const limit = timeoutMs ?? DEFAULT_TIMEOUT_MS;
@@ -318,7 +339,9 @@ export async function runAgent(root, config, { brief, step, turns, timeoutMs, no
   const r = await spawnCaptured(root, argv, { env, timeoutMs: limit, tailBytes: OUTPUT_TAIL_BYTES, onStdout: (c) => lastLine.feed(c) });
   const outputTail = lastBytes(r.text, OUTPUT_TAIL_BYTES);
   const json = lastJson(lastLine.finish());
-  const usage = extractUsage(json);
+  const floor = usageFloor(config);
+  let usage = extractUsage(json);
+  if (usage !== null && usage.totalTokens < floor) usage = { ...usage, totalTokens: floor };
 
   // Status: what the runner observed first; then the final text (raw output, then the JSON envelope's result string).
   let status;
@@ -328,10 +351,10 @@ export async function runAgent(root, config, { brief, step, turns, timeoutMs, no
   else if (r.signal) status = { ok: false, reason: `the agent was ended by signal ${r.signal}` };
   else if (r.exitCode !== 0) status = { ok: false, reason: `the agent exited with code ${r.exitCode}` };
   else {
-    status = parseStatus(outputTail, stepId);
+    status = parseStatus(r.stdoutText, stepId, nonce);
     if (!status.ok && typeof json?.result === 'string') {
       envelopeText = cleanTail(json.result.slice(-OUTPUT_TAIL_BYTES));
-      const viaEnvelope = parseStatus(envelopeText, stepId);
+      const viaEnvelope = parseStatus(envelopeText, stepId, nonce);
       if (viaEnvelope.ok) status = viaEnvelope;
     }
   }
@@ -353,5 +376,5 @@ export async function runAgent(root, config, { brief, step, turns, timeoutMs, no
   } catch (err) {
     logError = plainWriteError(err).message;
   }
-  return { status, usage, exitCode: r.exitCode, signal: r.signal, timedOut: r.timedOut, outputTail, logPath, logError, briefPath: briefRel };
+  return { status, usage, usageFloor: floor, exitCode: r.exitCode, signal: r.signal, timedOut: r.timedOut, outputTail, logPath, logError, briefPath: briefRel };
 }

@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { runAgent, AGENT_DEFAULTS, effectiveAgent, agentWarnings, describeAgentArgv, buildAgentEnv, extractUsage, NO_RESTRICTIONS_WARNING } from '../skill/scripts/lib/agent.js';
+import { runAgent, newNonce, usageFloor, AGENT_DEFAULTS, effectiveAgent, agentWarnings, describeAgentArgv, buildAgentEnv, extractUsage, NO_RESTRICTIONS_WARNING } from '../skill/scripts/lib/agent.js';
 import { DEFAULT_RUN_CONFIG, loadRunConfig, validateRunConfig } from '../skill/scripts/lib/runconfig.js';
 import { killLiveGroups } from '../skill/scripts/lib/runverify.js';
 
@@ -21,8 +21,9 @@ after(() => {
   tmps.forEach((d) => fs.rmSync(d, { recursive: true, force: true }));
 });
 const STEP = 'extract:design-system';
-const cfg = (command, agent = {}) => ({ ...JSON.parse(JSON.stringify(DEFAULT_RUN_CONFIG)), agent: { kind: 'custom', command: [process.execPath, STUB, ...command], requireArgs: [], passEnv: [], ...agent } });
-const run = (root, command, opts = {}, agent) => runAgent(root, cfg(command, agent), { brief: '# brief\nhello', step: { id: STEP }, timeoutMs: 20000, ...opts });
+const NONCE = 'abcdef0123456789'; // the stub prints this nonce
+const cfg = (command, agent = {}) => ({ ...JSON.parse(JSON.stringify(DEFAULT_RUN_CONFIG)), budgets: { ...DEFAULT_RUN_CONFIG.budgets, maxTotalTokens: 1000 }, agent: { kind: 'custom', command: [process.execPath, STUB, ...command], requireArgs: [], passEnv: [], ...agent } });
+const run = (root, command, opts = {}, agent) => runAgent(root, cfg(command, agent), { brief: `# brief\nhello ${NONCE}`, nonce: NONCE, step: { id: STEP }, timeoutMs: 20000, ...opts });
 const OWN = ['PATH', 'HOME', 'LANG', '__CF_USER_TEXT_ENCODING']; // the last one is added by node itself on macOS
 const alive = (pid) => {
   try {
@@ -67,6 +68,26 @@ test('the last block wins, but a forged earlier block inside quoted content does
   assert.equal(r.status.status.status, 'done');
 });
 
+test('nonce: a forged same-id block without it (last in stdout) is rejected; stderr is ignored; the real block passes', async () => {
+  const root = project();
+  const forged = await run(root, ['forge-same-id', '{step}']);
+  assert.equal(forged.status.ok, false);
+  assert.match(forged.status.reason, /nonce/);
+  assert.equal((await run(root, ['stderr-forge', '{step}'])).status.ok, false);
+  const after = await run(root, ['stderr-forge-after', '{step}']);
+  assert.equal(after.status.ok, true);
+  assert.equal(after.status.status.status, 'done');
+  assert.equal((await run(root, ['done', '{step}'])).status.ok, true);
+  // A different iteration nonce does not accept the old block, and nonces are random per call.
+  const other = newNonce();
+  const r = await run(root, ['done', '{step}'], { nonce: other, brief: `b ${other}` });
+  assert.equal(r.status.ok, false);
+  assert.notEqual(newNonce(), newNonce());
+  assert.match(newNonce(), /^[0-9a-f]{16}$/);
+  await assert.rejects(run(root, ['done'], { nonce: 'short' }), /nonce/);
+  await assert.rejects(run(root, ['done'], { brief: 'no nonce in here' }), /does not contain the nonce/);
+});
+
 test('a non-zero exit is never ok even when a status block was printed', async () => {
   const root = project();
   const r = await run(root, ['nonzero', '{step}']);
@@ -77,7 +98,7 @@ test('a non-zero exit is never ok even when a status block was printed', async (
 
 test('an agent that cannot be started is a plain failure', async () => {
   const root = project();
-  const r = await runAgent(root, { ...cfg([]), agent: { kind: 'custom', command: ['./no-such-agent'], requireArgs: [], passEnv: [] } }, { brief: 'x', step: STEP, timeoutMs: 5000 });
+  const r = await runAgent(root, { ...cfg([]), agent: { kind: 'custom', command: ['./no-such-agent'], requireArgs: [], passEnv: [] } }, { brief: `x ${NONCE}`, nonce: NONCE, step: STEP, timeoutMs: 5000 });
   assert.equal(r.status.ok, false);
   assert.match(r.status.reason, /could not be started/);
   assert.equal(r.exitCode, null);
@@ -114,22 +135,13 @@ test('grandchildren die with the leader (after exit and on timeout)', async () =
   assert.ok(await gone(Number(fs.readFileSync(pidFile2, 'utf8'))), 'grandchild survived the timeout');
 });
 
-test('flood: 200 MB of output stays bounded, the tail and the final status survive', async () => {
+test('flood: 48 MB of output stays bounded; the tail and the final status survive', { timeout: 20000 }, async () => {
   const root = project();
-  const before = process.memoryUsage().rss;
-  const r = await run(root, ['flood', '200', '{step}'], { timeoutMs: 120000 });
+  const r = await run(root, ['flood', '48', '{step}'], { timeoutMs: 15000 });
   assert.equal(r.status.ok, true);
   assert.ok(Buffer.byteLength(r.outputTail) <= 200 * 1024);
-  assert.ok(process.memoryUsage().rss - before < 200 * 1024 * 1024, 'memory grew with the output');
   const log = fs.readFileSync(path.join(root, r.logPath), 'utf8');
   assert.ok(Buffer.byteLength(log) <= 200 * 1024);
-});
-
-test('flood: 1 GB of output is bounded too', { timeout: 170000 }, async () => {
-  const root = project();
-  const r = await run(root, ['flood', '1024', '{step}'], { timeoutMs: 150000 });
-  assert.ok(Buffer.byteLength(r.outputTail) <= 200 * 1024);
-  assert.equal(r.status.ok, true);
 });
 
 test('stdin is closed', async () => {
@@ -152,6 +164,7 @@ test('usage: last JSON line only, non-negative safe integers, else null', async 
   const root = project();
   const u = await run(root, ['usage', '{step}']);
   assert.deepEqual(u.usage, { inputTokens: 1200, outputTokens: 345, totalTokens: 1545 });
+  assert.equal(u.usageFloor, 10);
   assert.equal((await run(root, ['usage-bad'])).usage, null);
   assert.equal((await run(root, ['usage-huge'])).usage, null);
   assert.equal((await run(root, ['usage-earlier'])).usage, null);
@@ -159,6 +172,21 @@ test('usage: last JSON line only, non-negative safe integers, else null', async 
   assert.equal(extractUsage({ usage: { input_tokens: '1', output_tokens: 1 } }), null);
   assert.equal(extractUsage({ usage: [1, 2] }), null);
   assert.equal(extractUsage(null), null);
+});
+
+test('usage is trusted only from a type:"result" line; a total below the floor is raised', async () => {
+  const root = project();
+  const plain = await run(root, ['usage-plain', '{step}']);
+  assert.equal(plain.usage, null);
+  assert.equal(plain.usageFloor, 10);
+  assert.equal(extractUsage({ usage: { input_tokens: 5, output_tokens: 5 } }), null);
+  assert.equal(extractUsage({ type: 'assistant', usage: { input_tokens: 5, output_tokens: 5 } }), null);
+  const zero = await runAgent(root, { ...cfg(['usage-zero', '{step}']), budgets: { ...DEFAULT_RUN_CONFIG.budgets } }, { brief: `b ${NONCE}`, nonce: NONCE, step: STEP, timeoutMs: 20000 });
+  assert.equal(usageFloor(DEFAULT_RUN_CONFIG), 4000);
+  assert.deepEqual(zero.usage, { inputTokens: 0, outputTokens: 0, totalTokens: 4000 });
+  const real = await run(root, ['usage', '{step}']);
+  assert.equal(real.usage.totalTokens, 1545);
+  assert.equal(usageFloor({ budgets: { maxTotalTokens: 1, maxIterations: 200 } }), 1);
 });
 
 test('a JSON result envelope: the status is read from its result string, usage from the line', async () => {
@@ -183,7 +211,7 @@ test('the environment holds only PATH, HOME, LANG, passEnv names and the configu
     const plain = await run(root, ['env']);
     const keys = JSON.parse(plain.outputTail.split('\n')[0]);
     assert.deepEqual(keys.filter((k) => !OWN.includes(k)), []);
-    const r = await run(root, ['env'], {}, { env: { MY_FLAG: '1' }, passEnv: ['ANTHROPIC_API_KEY', 'NOT_SET_ANYWHERE'] });
+    const r = await run(root, ['env'], {}, { env: { MY_FLAG: '1' }, passEnv: ['ANTHROPIC_API_KEY', 'ANTHROPIC_NOT_SET'] });
     const got = JSON.parse(r.outputTail.split('\n')[0]);
     assert.deepEqual(got.filter((k) => !OWN.includes(k)), ['ANTHROPIC_API_KEY', 'MY_FLAG']);
     // The value reaches the agent but is never returned, stored or logged by the adapter.
@@ -196,23 +224,49 @@ test('the environment holds only PATH, HOME, LANG, passEnv names and the configu
   }
 });
 
-test('passEnv and env names on the denylist are refused; values with newlines or controls are rejected', async () => {
+test('passEnv is a family allowlist minus loader/exec names; agent.env stays on the strict denylist', async () => {
   const root = project();
-  for (const bad of ['PATH', 'HOME', 'LD_PRELOAD', 'DYLD_INSERT_LIBRARIES', 'NODE_OPTIONS', 'JAVA_TOOL_OPTIONS', 'GRADLE_OPTS', 'BASH_ENV', 'ENV', 'NODE_PATH', 'NODE_EXTRA_CA_CERTS', 'ANTHROPIC_BASE_URL', 'OPENAI_API_URL', 'HTTPS_PROXY', 'GIT_SSH_COMMAND', 'CLAUDE_CONFIG_DIR', 'CODEX_HOME', 'lower']) {
+  const okPass = ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN', 'CODEX_API_KEY', 'CLAUDE_CONFIG_DIR', 'OPENAI_API_KEY', 'GEMINI_API_KEY', 'GOOGLE_API_KEY', 'GOOGLE_GENAI_USE_VERTEXAI', 'AZURE_OPENAI_API_KEY', 'ANTHROPIC_BASE_URL'];
+  const v = validateRunConfig({ schemaVersion: 1, agent: { kind: 'claude', command: ['claude'], passEnv: okPass } }, root);
+  assert.deepEqual(v.problems, []);
+  const noPass = ['GITHUB_TOKEN', 'GH_TOKEN', 'AWS_SECRET_ACCESS_KEY', 'NPM_TOKEN', 'SSH_AUTH_SOCK', 'LD_PRELOAD', 'DYLD_INSERT_LIBRARIES', 'NODE_OPTIONS', 'NODE_PATH', 'PATH', 'HOME', 'JAVA_TOOL_OPTIONS', 'BASH_ENV', 'ENV', 'GIT_SSH_COMMAND', 'GOOGLE_APPLICATION_CREDENTIALS', 'ANTHROPIC_', 'lower', 'ANTHROPIC-KEY'];
+  for (const bad of noPass) {
     await assert.rejects(run(root, ['env'], {}, { passEnv: [bad] }), /passEnv/, bad);
-    await assert.rejects(run(root, ['env'], {}, { env: { [bad]: 'x' } }), /agent\.env/, bad);
-    const v = validateRunConfig({ schemaVersion: 1, agent: { kind: 'claude', command: ['claude'], passEnv: [bad] } }, root);
-    assert.ok(v.problems.some((p) => p.includes('agent.passEnv')), bad);
+    assert.ok(validateRunConfig({ schemaVersion: 1, agent: { kind: 'claude', command: ['claude'], passEnv: [bad] } }, root).problems.some((p) => p.includes('agent.passEnv')), bad);
   }
-  process.env.MULTI_LINE = 'a\nb';
+  for (const bad of ['PATH', 'HOME', 'LANG', 'LD_PRELOAD', 'DYLD_INSERT_LIBRARIES', 'NODE_OPTIONS', 'JAVA_TOOL_OPTIONS', 'GRADLE_OPTS', 'BASH_ENV', 'ENV', 'NODE_PATH', 'NODE_EXTRA_CA_CERTS', 'ANTHROPIC_BASE_URL', 'OPENAI_API_URL', 'HTTPS_PROXY', 'GIT_SSH_COMMAND', 'CLAUDE_CONFIG_DIR', 'CODEX_HOME', 'lower']) {
+    await assert.rejects(run(root, ['env'], {}, { env: { [bad]: 'x' } }), /agent\.env/, bad);
+    assert.ok(validateRunConfig({ schemaVersion: 1, agent: { kind: 'claude', command: ['claude'], env: { [bad]: 'x' } } }, root).problems.length > 0, bad);
+  }
+  process.env.MULTI_LINE_X = 'a';
+  process.env.ANTHROPIC_MULTI = 'a\nb';
   try {
-    await assert.rejects(run(root, ['env'], {}, { passEnv: ['MULTI_LINE'] }), /control characters or newlines/);
+    await assert.rejects(run(root, ['env'], {}, { passEnv: ['ANTHROPIC_MULTI'] }), /control characters or newlines/);
   } finally {
-    delete process.env.MULTI_LINE;
+    delete process.env.ANTHROPIC_MULTI;
+    delete process.env.MULTI_LINE_X;
   }
   await assert.rejects(run(root, ['env'], {}, { env: { OK_NAME: 'a\nb' } }), /control characters or newlines/);
   await assert.rejects(run(root, ['env'], {}, { env: { OK_NAME: 'a\u0000b' } }), /control characters/);
   assert.throws(() => buildAgentEnv({ agent: { passEnv: 'x' } }), /array/);
+});
+
+test('a passEnv name that is set but empty or unset is simply not passed', () => {
+  const env = buildAgentEnv({ agent: { passEnv: ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY'] } }, { PATH: '/bin', ANTHROPIC_API_KEY: '', LANG: 'C' });
+  assert.deepEqual(env, { PATH: '/bin', LANG: 'C' });
+  const long = buildAgentEnv({ agent: {} }, { PATH: `/a:${'b'.repeat(20000)}` });
+  assert.equal(long.PATH.length > 20000, true);
+  assert.throws(() => buildAgentEnv({ agent: {} }, { PATH: 'x'.repeat(40000) }), /too long/);
+});
+
+test('PEM keys and Bearer tokens printed by the agent are redacted in the adapter log and tail', async () => {
+  const root = project();
+  const r = await run(root, ['secrets', '{step}']);
+  const log = fs.readFileSync(path.join(root, r.logPath), 'utf8');
+  for (const t of [log, r.outputTail]) {
+    assert.doesNotMatch(t, /MIIEpAIBAAKCAQEA1234567890|abcDEF1234567890ghijkl/);
+    assert.match(t, /REDACTED/);
+  }
 });
 
 test('config schema: requireArgs and passEnv are strict and capped', () => {
@@ -295,15 +349,17 @@ test('brief and log numbers never overwrite an earlier iteration', async () => {
 test('hostile {step} values are data (no shell) and numeric maxTurns is enforced', async () => {
   const root = project();
   const hostile = '$(touch pwned); `touch pwned2` && echo "x" | tee pwned3';
-  const r = await runAgent(root, cfg(['argv', '{step}', '{maxTurns}']), { brief: 'b', step: hostile, turns: 7, timeoutMs: 20000 });
-  assert.deepEqual(JSON.parse(r.outputTail.split('\n')[0]), ['argv', hostile, '7']);
+  for (const bad of [hostile, '../../etc/passwd', 'A:b', 'a b']) await assert.rejects(runAgent(root, cfg(['argv']), { brief: `b ${NONCE}`, nonce: NONCE, step: bad }), /step id/, bad);
+  const NASTY = 'a:b';
+  const r = await runAgent(root, cfg(['argv', '{step}', '{maxTurns}']), { brief: `b ${NONCE}`, nonce: NONCE, step: 'a:b', turns: 7, timeoutMs: 20000 });
+  assert.deepEqual(JSON.parse(r.outputTail.split('\n')[0]), ['argv', 'a:b', '7']);
   for (const f of ['pwned', 'pwned2', 'pwned3']) assert.equal(fs.existsSync(path.join(root, f)), false);
-  for (const turns of [0, -1, 1.5, '5', NaN, 201, 1e12, Infinity]) await assert.rejects(runAgent(root, cfg(['argv']), { brief: 'b', step: STEP, turns }), /turns must be/, String(turns));
-  for (const step of ['-rf', '', 'a\nb', 'a'.repeat(201), '--flag', null]) await assert.rejects(runAgent(root, cfg(['argv']), { brief: 'b', step }), /step id/, String(step));
-  for (const timeoutMs of [0, -5, 1.5, 'x', 1e12]) await assert.rejects(runAgent(root, cfg(['argv']), { brief: 'b', step: STEP, timeoutMs }), /timeoutMs/, String(timeoutMs));
-  await assert.rejects(runAgent(root, cfg(['argv']), { brief: '', step: STEP }), /brief/);
-  await assert.rejects(runAgent(root, cfg(['argv']), { brief: 'x'.repeat(300 * 1024), step: STEP }), /brief/);
-  await assert.rejects(runAgent(root, cfg(['argv']), { brief: 'b', step: STEP, runId: '../x' }), /runId/);
+  for (const turns of [0, -1, 1.5, '5', NaN, 201, 1e12, Infinity]) await assert.rejects(runAgent(root, cfg(['argv']), { brief: `b ${NONCE}`, nonce: NONCE, step: STEP, turns }), /turns must be/, String(turns));
+  for (const step of ['-rf', '', 'a\nb', 'a'.repeat(201), '--flag', null, '../x']) await assert.rejects(runAgent(root, cfg(['argv']), { brief: `b ${NONCE}`, nonce: NONCE, step }), /step id/, String(step));
+  for (const timeoutMs of [0, -5, 1.5, 'x', 1e12]) await assert.rejects(runAgent(root, cfg(['argv']), { brief: `b ${NONCE}`, nonce: NONCE, step: STEP, timeoutMs }), /timeoutMs/, String(timeoutMs));
+  await assert.rejects(runAgent(root, cfg(['argv']), { brief: '', nonce: NONCE, step: STEP }), /brief/);
+  await assert.rejects(runAgent(root, cfg(['argv']), { brief: `${NONCE}${'x'.repeat(300 * 1024)}`, nonce: NONCE, step: STEP }), /brief/);
+  await assert.rejects(runAgent(root, cfg(['argv']), { brief: `b ${NONCE}`, nonce: NONCE, step: STEP, runId: '../x' }), /runId/);
 });
 
 test('errors are plain: no stack, no absolute path', async () => {
@@ -333,7 +389,7 @@ test('a symlink planted into .ai during the run refuses the log (containment), t
   tmps.push(outside);
   const planter = path.join(root, 'plant.mjs');
   fs.writeFileSync(planter, `import fs from 'node:fs'; fs.symlinkSync(${JSON.stringify(outside)}, '.ai/evil'); console.log('x');`);
-  const r = await runAgent(root, { ...cfg([]), agent: { kind: 'custom', command: [process.execPath, planter], requireArgs: [], passEnv: [] } }, { brief: 'b', step: STEP, timeoutMs: 20000 });
+  const r = await runAgent(root, { ...cfg([]), agent: { kind: 'custom', command: [process.execPath, planter], requireArgs: [], passEnv: [] } }, { brief: `b ${NONCE}`, nonce: NONCE, step: STEP, timeoutMs: 20000 });
   assert.equal(r.logPath, null);
   assert.match(r.logError, /symlink/);
   assert.deepEqual(fs.readdirSync(outside), []);

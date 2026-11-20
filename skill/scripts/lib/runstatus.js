@@ -4,6 +4,7 @@ export const STATUS_START = '<<<STATUS';
 export const STATUS_END = 'STATUS>>>';
 const STATUSES = ['done', 'blocked', 'needs-human', 'failed'];
 const KEYS = ['step', 'status', 'summary', 'filesChanged', 'verification'];
+const NONCE_KEY = 'nonce';
 const MAX_TEXT = 2000;
 const MAX_FILES = 200;
 const MAX_PATH = 300;
@@ -12,7 +13,7 @@ const MAX_BLOCK = 256 * 1024;
 import { stripUnsafe } from './mdtext.js';
 
 /** Text without control characters (newline and tab stay) and without bidi controls. */
-const cleanText = (s) => {
+export const cleanText = (s) => {
   let out = '';
   for (const ch of stripUnsafe(s)) {
     const c = ch.charCodeAt(0);
@@ -49,9 +50,12 @@ function lastMarker(raw, marker, from) {
 
 /**
  * Parses the agent's output for its status block. Returns { ok: true, status } or { ok: false, reason }. `status` is
- * { step, status, summary, filesChanged, verification }; `step` must equal expectedStepId.
+ * { step, status, summary, filesChanged, verification }; `step` must equal expectedStepId. When `expectedNonce` is given
+ * (the runner's per-iteration secret, printed only in the brief), the block must carry `"nonce"` equal to it: project
+ * files and earlier output cannot contain it, so a forged block with the right step id is rejected. Without an
+ * expectedNonce a `nonce` key is tolerated and ignored.
  */
-export function parseStatus(raw, expectedStepId) {
+export function parseStatus(raw, expectedStepId, expectedNonce) {
   if (typeof raw !== 'string') return fail('output is not text');
   const end = lastMarker(raw, STATUS_END, raw.length);
   if (end === -1) return fail('no status block');
@@ -66,7 +70,8 @@ export function parseStatus(raw, expectedStepId) {
     return fail('status block is not valid JSON');
   }
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return fail('status must be a JSON object');
-  for (const k of Object.keys(value)) if (!KEYS.includes(k)) return fail('status has an unexpected key');
+  for (const k of Object.keys(value)) if (!KEYS.includes(k) && k !== NONCE_KEY) return fail('status has an unexpected key');
+  if (expectedNonce !== undefined && (typeof value.nonce !== 'string' || value.nonce !== expectedNonce)) return fail('status has a missing or wrong nonce');
   for (const k of KEYS) if (!Object.hasOwn(value, k)) return fail(`status is missing "${k}"`);
   if (typeof value.step !== 'string' || value.step !== expectedStepId) return fail('status is for a different step');
   if (!STATUSES.includes(value.status)) return fail('status value is not one of done, blocked, needs-human, failed');

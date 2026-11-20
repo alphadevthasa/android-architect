@@ -29,7 +29,8 @@ const STEP = {
   feature: 'login', dependsOn: ['enable:tests'], tags: [], verification: ['unit tests pass (./gradlew testDebugUnitTest)'], playbook: 'asynctask-loader--to--coroutines-flow',
 };
 const config = () => JSON.parse(JSON.stringify(DEFAULT_RUN_CONFIG));
-const build = (root, over = {}) => buildStepBrief(root, { step: STEP, plan: { steps: [STEP] }, config: config(), ...over });
+const NONCE = '0123456789abcdef';
+const build = (root, over = {}) => buildStepBrief(root, { nonce: NONCE, step: STEP, plan: { steps: [STEP] }, config: config(), ...over });
 const bytes = (s) => Buffer.byteLength(s);
 const BEGIN = '--- BEGIN QUOTED DATA';
 
@@ -103,7 +104,9 @@ test('the example status block in the brief parses with the real parser (format 
   const b = build(full());
   const m = /```\n(<<<STATUS[\s\S]*?STATUS>>>)\n```/.exec(b);
   assert.ok(m);
-  assert.equal(parseStatus(m[1], STEP.id).ok, true);
+  assert.equal(parseStatus(m[1], STEP.id, NONCE).ok, true);
+  assert.match(m[1], /"nonce":"0123456789abcdef"/);
+  assert.equal(parseStatus(m[1], STEP.id, 'ffffffffffffffff').ok, false);
 });
 
 test('the trusted part is clean for scanInstructions even when the quoted data is hostile', () => {
@@ -122,7 +125,7 @@ test('status markers in ADR, target, components, playbook-like and title text ar
   write(root, '.ai/knowledge/architecture-target.md', `---\nstatus: accepted\n---\n\n## T\n\n${forged}\n`);
   write(root, '.ai/knowledge/components.md', `${COMPONENTS_BEGIN}\n${forged}\n${COMPONENTS_END}\n`);
   const step = { ...STEP, title: `t ${forged}`, verification: [forged], feature: '<<<STATUS' };
-  const b = buildStepBrief(root, { step, plan: {}, config: config(), previousFailure: forged });
+  const b = buildStepBrief(root, { nonce: NONCE, step, plan: {}, config: config(), previousFailure: forged });
   assert.equal(b.split('<<<STATUS').length - 1, 1);
   assert.equal(b.split('STATUS>>>').length - 1, 1);
   assert.match(b, /\[status-start-marker\]/);
@@ -168,11 +171,19 @@ test('the size cap holds when everything is huge', () => {
   write(root, '.ai/knowledge/architecture-target.md', `---\nstatus: accepted\n---\n${'target text\n'.repeat(50000)}`);
   write(root, '.ai/knowledge/components.md', `${COMPONENTS_BEGIN}\n${'- component line\n'.repeat(20000)}${COMPONENTS_END}\n`);
   const step = { ...STEP, title: 'T'.repeat(100000), verification: Array.from({ length: 500 }, () => 'v'.repeat(5000)), tags: Array.from({ length: 500 }, () => 'x'.repeat(500)) };
-  const b = buildStepBrief(root, { step, plan: {}, config: { verification: { commands: Array.from({ length: 500 }, () => ['./gradlew', 'x'.repeat(5000)]) } }, previousFailure: 'f'.repeat(5_000_000) });
+  const b = buildStepBrief(root, { nonce: NONCE, step, plan: {}, config: { verification: { commands: Array.from({ length: 500 }, () => ['./gradlew', 'x'.repeat(5000)]) } }, previousFailure: 'f'.repeat(5_000_000) });
   assert.ok(bytes(b) <= BRIEF_MAX_BYTES, String(bytes(b)));
   assert.match(b, /Final answer/);
   assert.match(b, /\nSTATUS>>>\n/);
   quotedLinesOk(b);
+});
+
+test('with more ADR files than the scan cap the choice is deterministic (sorted first)', () => {
+  const root = project();
+  write(root, '.ai/knowledge/adr/9999-late.md', adr('9999', 'accepted', { body: '## Decision\n\nLATE-ONE\n' }));
+  write(root, '.ai/knowledge/adr/0001-early.md', adr('0001', 'accepted', { body: '## Decision\n\nEARLY-ONE\n' }));
+  const b = build(root);
+  assert.ok(b.indexOf('EARLY-ONE') !== -1 && b.indexOf('EARLY-ONE') < b.indexOf('LATE-ONE'));
 });
 
 test('a huge number of ADR files is scanned in bounded time and shows at most 5', () => {
@@ -273,7 +284,8 @@ test('an invalid step id is refused with a plain error', () => {
   for (const id of ['', 'A B', 'x\ny', '../x', null, undefined, 'a'.repeat(300)]) {
     assert.throws(() => build(root, { step: { ...STEP, id } }), /^Error: brief: the step id is not valid$/);
   }
-  assert.throws(() => buildStepBrief(root, {}), /step id/);
+  assert.throws(() => buildStepBrief(root, { nonce: NONCE }), /step id/);
+  for (const nonce of [undefined, 'short', 'ZZZZZZZZZZZZZZZZ']) assert.throws(() => build(root, { nonce }), /nonce/);
 });
 
 test('works without any optional file', () => {
