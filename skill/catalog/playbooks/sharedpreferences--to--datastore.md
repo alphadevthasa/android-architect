@@ -29,18 +29,22 @@ The preferences are read synchronously during startup in many places and there i
 
 ## Steps
 
+One safe ordering applies: (1) the migration is one-way per file, with a single writer, so there is no dual-write while a migration is active; (2) the old file is deleted only after verification and a full release cycle; (3) rollback is decided before the first release (see Rollback).
+
 1. Inventory the preferences files and keys, with types and defaults.
 2. Define the seam: a settings interface per area, exposing Flows or suspend functions, with no SharedPreferences or DataStore types in signatures.
-3. Create one DataStore per preferences file, with `preferencesDataStore(name = ..., produceMigrations = { listOf(SharedPreferencesMigration(context, "<old file name>")) })`. Migrate one preferences file per step, not all at once.
-4. Implement the seam on DataStore and keep the SharedPreferences implementation side by side behind a flag. During the side-by-side phase writes go to the old store only, or to both, and reads come from one; decide per unit and keep it consistent.
-5. Do the per-unit cutover: switch one preferences file (one settings area) at a time. The first read from DataStore runs the `SharedPreferencesMigration`, which copies the keys and then removes them from the old file.
-6. Verify on real upgrade installs that the values survived, then ramp the flag.
-7. Delete the old implementation: the SharedPreferences accessors, the flag, and confirm the old XML file under `shared_prefs` is gone for migrated users (see Security checklist).
+3. Choose the migration mode per file before writing code. Mode A (default): the built-in `SharedPreferencesMigration` copies the keys on the first DataStore read and then cleans up by removing the migrated keys from the old file, so the old file is empty afterwards. Mode B (when a rollback window is required): a custom `DataMigration` that copies the keys, records a "migrated" marker key inside DataStore, returns `false` from `shouldMigrate` once the marker exists (so it never overwrites newer values), and leaves the old file untouched in `cleanUp`; the old file is removed in the deletion release.
+4. Create one DataStore per preferences file, with `preferencesDataStore(name = ..., produceMigrations = { ... })` using the chosen mode. Migrate one preferences file per step, not all at once.
+5. Implement the seam on DataStore and keep the SharedPreferences implementation side by side in the code, behind a flag that selects the one store for each file. Never write the same value to both stores while a migration is active: the built-in migration re-checks the old file on initialization and cleans it up, so a dual-written value is overwritten or removed. The flag picks one reader and writer per file.
+6. Do the per-unit cutover: switch one preferences file (one settings area) at a time, with every reader and writer of that file moving in the same release. Verify on real upgrade installs that the values survived, then ramp the flag.
+7. Delete the old implementation after verification and a full release cycle: the SharedPreferences accessors, the flag, and the old XML file for migrated users (see Security checklist). In Mode B, delete the old file only now.
 
 ## Pitfalls
 
 - Single-writer rule: there must be exactly one DataStore instance per file in a process. Creating a second one for the same file throws an `IllegalStateException`; declare it with the property delegate at top level, not inside a class that is constructed repeatedly.
-- Mixing: reading the old file directly after the migration returns nothing, because the migration clears migrated keys; remove all direct readers first.
+- Dual-write does not work with the built-in migration: it clears migrated keys from the old file, so the old file can no longer serve as a fallback. Choose Mode B if a rollback window is needed.
+- Reading the old file directly after a Mode A migration returns nothing, because the migration clears migrated keys; remove all direct readers first.
+- A custom migration without a marker re-runs and overwrites newer DataStore values on every start.
 - `SharedPreferencesMigration` migrates types it knows; `Set<String>` and `Float` map to `stringSetPreferencesKey` and `floatPreferencesKey`, and keys must be declared with the matching type or the value is not found.
 - Blocking reads with `runBlocking` on the main thread negate the benefit and can cause ANRs; load startup values once, asynchronously, and cache.
 - Backup and restore: restoring an old `shared_prefs` file after migration can bring back stale values; check backup rules.
@@ -57,12 +61,11 @@ The preferences are read synchronously during startup in many places and there i
 
 ## Security checklist
 
-- The old SharedPreferences XML file is deleted after migration: verify the file under the app's `shared_prefs` folder is gone (or empty and then deleted with `deleteSharedPreferences`), so migrated values do not linger there.
-- Sensitive values (tokens, identifiers, flags that gate security) are not placed in DataStore as plain text: Preferences DataStore stores plaintext on disk, so such values stay in the encrypted store or are encrypted before writing.
-- Backup rules: `android:allowBackup`, `dataExtractionRules` and `fullBackupContent` are reviewed so the new `datastore` folder is excluded if the old file was excluded.
+- The old SharedPreferences XML file is deleted after migration: the built-in migration only empties it, so call `Context.deleteSharedPreferences(name)` once the migration is verified (in Mode B, in the deletion release), and check the file under the app's `shared_prefs` folder is gone.
+- Sensitive values (tokens, identifiers, flags that gate security) are not placed in DataStore as plain text: Preferences DataStore stores plaintext on disk, so such values stay in an encrypted store or are encrypted before writing (see the EncryptedSharedPreferences playbook).
+- Backup rules: `android:allowBackup`, `dataExtractionRules` and `fullBackupContent` are reviewed so the new `datastore` folder is excluded if the old file was excluded, and so a restored old file cannot re-trigger a Mode B migration with stale values.
 - Values are not logged by migration or debug code.
-- Exported or debuggable builds do not expose the DataStore file through `run-as` shortcuts that the old file did not have.
 
 ## Rollback
 
-Before deletion of the old implementation, flip the flag back: the migration moves values out of the old file, so keep a one-release dual-write window, or rollback loses recent changes. After the old code is deleted and values were migrated, rollback means shipping a build that reads DataStore again; a reverse migration is not provided, so treat this as one-way.
+Decide before the first release. In Mode A the migration moves values out of the old file, so a rolled-back build that reads SharedPreferences sees only defaults: rollback is then not possible without losing the settings, and the file should be treated as one-way once shipped. In Mode B the old file keeps the values as of the migration, so the flag or an older build can read them (changes made since the migration are lost); keep the old file and the legacy code until the deletion release. Never make the rolled-back code read defaults silently: if a rollback is possible, ship the reader that checks the old file first. After deletion of the old implementation and file there is no reverse migration, so treat the move as one-way.

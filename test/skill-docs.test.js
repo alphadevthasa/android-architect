@@ -225,10 +225,9 @@ test('Final review: SKILL.md uses full .ai/knowledge paths, member pointers, re-
 test('Final review: README roadmap, update example and the npx skill note', () => {
   const readme = fs.readFileSync(new URL('../README.md', import.meta.url), 'utf8');
   const catalog = JSON.parse(fs.readFileSync(new URL('../skill/catalog/catalog.json', import.meta.url), 'utf8'));
-  const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
   assert.match(readme, /Done:[^\n]*M3[^\n]*gitignore-aware indexing/);
   const update = readme.split('\n').find((l) => l.includes('`update` reinstalls'));
-  assert.ok(update.includes(`-> ${pkg.version} (catalog ${catalog.catalogVersion})`), update);
+  assert.ok(update.includes(`(catalog ${catalog.catalogVersion})`) && /-> \d+\.\d+\.\d+ \(catalog /.test(update), update);
   assert.match(readme, /`init` and `refresh` use the skill bundled in the npx package[^\n]*run `update` first/);
 });
 

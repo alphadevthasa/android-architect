@@ -40,7 +40,7 @@ The models are Java classes, or the code relies on Gson reflection over classes 
 
 ## Pitfalls
 
-- Null and default handling: a missing non-null property without a default throws `MissingFieldException`; Gson left it null. A JSON null for a non-null property throws unless `coerceInputValues` is on, which silently replaces it with the default; choose per project and test.
+- Null and default handling: a missing non-null property without a default throws `MissingFieldException`; Gson keeps Kotlin defaults only when it can use a no-arg constructor, and otherwise can leave a non-null field null. A JSON null for a non-null property throws unless `coerceInputValues` is on, which silently replaces it with the default; choose per project and test.
 - Defaults are not encoded unless `encodeDefaults = true`; a server that expects the field in requests then breaks.
 - Unknown enum values throw unless `coerceInputValues` plus a default is set.
 - Numbers: reading `Any` is not supported; use `JsonElement` for dynamic structures.

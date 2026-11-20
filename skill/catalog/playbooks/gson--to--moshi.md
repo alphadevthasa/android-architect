@@ -38,7 +38,7 @@ The project is moving to Kotlin Multiplatform: Moshi is JVM-only, so go to kotli
 
 ## Pitfalls
 
-- Null and default handling: Gson sets a missing non-null Kotlin field to null, bypassing the constructor default; Moshi uses the constructor default when the property has one and throws `JsonDataException` when a required field is missing or null. Expect new exceptions where Gson tolerated bad data, and decide per field: add a default, make it nullable, or keep the failure.
+- Null and default handling: Gson builds objects through a no-arg constructor when one exists (Kotlin classes whose parameters all have defaults get one), which keeps the Kotlin defaults; otherwise it uses `Unsafe` allocation, skips the constructor and can leave a non-null Kotlin field null. Moshi uses the constructor default when the property has one and throws `JsonDataException` when a required field is missing or null. Expect new exceptions where Gson tolerated bad data, and decide per field: add a default, make it nullable, or keep the failure.
 - Unknown keys are ignored by Moshi by default, as with Gson; but `failOnUnknown()` changes that.
 - Numbers: Gson reads numbers into `Double` for `Any` or `Object` typed fields, Moshi does the same, but integers beyond double precision lose digits; use `Long` fields.
 - Date formats: Gson `setDateFormat` has no Moshi counterpart; write an adapter and test the time zone.
@@ -57,11 +57,11 @@ The project is moving to Kotlin Multiplatform: Moshi is JVM-only, so go to kotli
 
 ## Security checklist
 
-- Unsafe deserialization settings are not carried over: do not port `enableComplexMapKeySerialization`, `registerTypeAdapter` for `Object`, or type-info fields that let the payload choose the class; Moshi polymorphism uses a fixed allow list of subtypes with an explicit label key.
+- Unsafe deserialization settings are not carried over: a Gson `RuntimeTypeAdapterFactory`, a custom `JsonDeserializer` that calls `Class.forName`, or type-info fields that name the class to instantiate must not be ported. Moshi polymorphism uses a fixed allow list of subtypes with an explicit label key, and unknown labels fail closed.
 - Reflection-based allow lists: any Gson setup that resolves a class by name from the payload is replaced by an explicit allow list of known subtypes, and unknown labels fail closed.
 - Untrusted JSON size limit: responses and request bodies get a size limit at the HTTP layer or by reading through a bounded source before parsing, and deeply nested input is rejected.
 - Parsing errors are logged without payload content, and error responses are not echoed to users.
-- Moshi versions are chosen from the current release notes, and the Gson advisories (deserialization of untrusted data in older releases) are closed by removing the dependency.
+- Adapters that use `Any` or `Object` typed fields are replaced by explicit models or a constrained sealed type, so untrusted JSON cannot choose arbitrary shapes, and `failOnUnknown()` is considered for security-sensitive request or config models.
 
 ## Rollback
 

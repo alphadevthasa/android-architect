@@ -138,6 +138,14 @@
       "status": "current",
       "since": "2017",
       "successors": [],
+      "prerequisites": [
+        {
+          "dimension": "language",
+          "anyOf": [
+            "kmp"
+          ]
+        }
+      ],
       "detect": {
         "gradle": [
           {

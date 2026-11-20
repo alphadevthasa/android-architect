@@ -25,7 +25,7 @@ The app is Android-only and has no plan to share code: Retrofit with OkHttp is c
 ## Preconditions
 
 - Network calls are reachable through a Repository or DataSource interface (the seam). If features call Retrofit service interfaces directly, introduce the seam first, as its own change.
-- The JSON layer is chosen: the Ktor ContentNegotiation plugin pairs with kotlinx.serialization, Moshi is not a first-class Ktor option. If the project uses Gson or Moshi converters today, plan the serialization move too (see the Gson playbooks).
+- The JSON layer is chosen: the Ktor ContentNegotiation plugin pairs with kotlinx.serialization, and Ktor also has an official Gson converter, so moving Gson to another library is optional and can be a separate change. Moshi is not a first-class Ktor option.
 - A written list of every interceptor, authenticator, certificate pinner, timeout and base URL in use, taken from the current OkHttpClient setup.
 - Contract tests or recorded responses exist for the main endpoints (see Tests).
 
@@ -33,7 +33,7 @@ The app is Android-only and has no plan to share code: Retrofit with OkHttp is c
 
 1. Inventory the endpoints and the OkHttp configuration: interceptors, authenticator, pinning, timeouts, cache, proxy, cookie handling, base URLs per environment. This is the checklist the new client must match.
 2. Define the seam if absent: a Repository or RemoteDataSource interface per feature, expressed in domain types, with no Retrofit, OkHttp or Ktor types in its signatures. Map DTOs to domain models behind it.
-3. Pick the Ktor engine for Android (OkHttp engine keeps the OkHttp connection stack and pinning; the CIO engine is pure Kotlin). Using the OkHttp engine first reduces behavior drift. Install the plugins you need: ContentNegotiation with the JSON serializer, HttpTimeout, Logging, DefaultRequest, and Auth if you use bearer refresh.
+3. Pick the Ktor engine for Android. The OkHttp engine keeps the OkHttp connection stack and certificate pinning; the CIO engine is pure Kotlin and loses OkHttp pinning, so with CIO pinning needs a different mechanism. Using the OkHttp engine first reduces behavior drift. Install the plugins you need: ContentNegotiation with the JSON serializer, HttpTimeout, Logging, DefaultRequest, and Auth if you use bearer refresh.
 4. Implement the seam on Ktor in a new class next to the Retrofit one. Keep both implementations side by side, selected by a switch (remote config flag, build flag, or DI binding).
 5. Do the per-endpoint cutover: move one endpoint or one feature at a time to the Ktor implementation, starting with a read-only, low-traffic endpoint. Compare responses against the Retrofit path in staging or with shadow calls behind the flag.
 6. Re-create the cross-cutting behavior one item at a time: auth header and token refresh, request signing, user-agent and locale headers, retry policy, error mapping (HTTP status to domain errors, timeouts, no-connectivity), certificate pinning and logging redaction (see Security checklist).

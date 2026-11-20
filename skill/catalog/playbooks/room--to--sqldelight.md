@@ -31,21 +31,24 @@ The app is Android-only, or Room already runs in the shared module. Room is curr
 
 ## Steps
 
+One safe ordering applies: (1) a verified backup exists before any release that opens the file with SQLDelight, and again before the release that makes SQLDelight the schema owner; (2) exactly one connection writes to the file; (3) Room's bookkeeping (`room_master_table`, `user_version`) is left alone until the Room code is deleted; (4) the old code is deleted only after verification and a full release cycle.
+
 1. Export and commit the Room schema JSON per version (`exportSchema = true`) if not done, and collect real old-version database files.
 2. Define the seam: a Repository interface in domain types, with no Room types in its signatures.
-3. Write the SQLDelight `.sq` files so that table names, columns, types, nullability, defaults, indices and foreign keys match the Room schema exactly, since SQLDelight will open the same file. Write the identical queries as named SQL statements.
-4. Set up the platform drivers: the Android driver on Android and the native driver on iOS. Open the existing database file name with the Android driver.
-5. Handle the schema bookkeeping: Room stores its identity hash in `room_master_table` and uses `PRAGMA user_version`. SQLDelight uses `user_version` for its migrations. Align the version number and write the first `.sqm` migration file from the current Room version; the Room master table can be dropped in that migration.
-6. Implement the seam on SQLDelight and keep the Room implementation side by side behind a flag. Never have two writers on the production file at once; use separate files in tests, and a switch in production.
+3. Write the SQLDelight `.sq` files so that table names, columns, types, nullability, defaults, indices and foreign keys match the Room schema exactly. Write the identical queries as named SQL statements.
+4. Backup before the first release that opens the file with SQLDelight: checkpoint the write-ahead log (`PRAGMA wal_checkpoint(TRUNCATE)`), close the database, copy the main file and any `-wal`, `-shm` and `-journal` files to app-private storage, and open the copy to check it. Copying only the main file loses committed data still in the log.
+5. Keep a single writer and leave Room as the schema owner for now: create the SQLDelight Android driver on Room's `SupportSQLiteOpenHelper` (`roomDb.openHelper`) instead of opening the file by name, so both libraries share one connection, and Room keeps its `room_master_table` and `user_version`. Check the SQLDelight documentation for the exact driver constructor. Two separate drivers or helpers on the production file are not allowed.
+6. Implement the seam on SQLDelight and keep the Room implementation side by side behind a flag, both on that shared connection. Writes made through SQLDelight do not trigger Room's InvalidationTracker, so keep Room `Flow` readers on their own flag-controlled path or call `invalidationTracker.refreshVersionsAsync()` after SQLDelight writes.
 7. Do the per-unit cutover: move one table or feature at a time, reads first, then writes. Ship each step.
-8. Take a backup before the first release that opens the file with SQLDelight, and keep it for the rollback window.
-9. After a full release at 100 percent, delete the old implementation: the Room entities, DAOs, database class, KSP processor and dependencies, the schema export setup, and the flag.
+8. When every unit runs on SQLDelight and the flag has been at 100 percent for a full release, delete the Room implementation (entities, DAOs, database class, KSP processor, schema export setup, flag), keeping the backup.
+9. Only now make SQLDelight the schema owner in a later release, after a fresh backup: let the SQLDelight driver open the file by name, align its schema version with the file's `user_version` (add a `.sqm` migration for any version gap) and drop `room_master_table` in that migration. From this point Room cannot open the file again, so rollback is by restoring the backup.
 
 ## Pitfalls
 
-- Version arithmetic: Room's `version` and SQLDelight's schema version must line up, or the driver runs migrations twice or not at all.
+- Version arithmetic: Room's `version` and SQLDelight's schema version must line up before SQLDelight becomes the owner, or the driver runs migrations twice or not at all. Do not change `user_version` while Room code can still ship.
+- Dropping `room_master_table` or changing `user_version` early makes a Room rollback fail its identity check, and with a destructive fallback it would wipe the data. Never enable `fallbackToDestructiveMigration` variants during this move.
 - Type mapping: Room `TypeConverter`s become SQLDelight column adapters; mismatched encodings corrupt reads.
-- Flow: Room DAOs returning Flow invalidate on table changes; SQLDelight uses `asFlow()` with the coroutines extension, and the dispatcher must be passed explicitly.
+- Flow: Room DAOs returning Flow invalidate on table changes; SQLDelight uses `asFlow()` with the coroutines extension, and the dispatcher must be passed explicitly. Cross-library writes do not notify each other.
 - Transactions and threading differ; check places that relied on Room's `@Transaction`.
 - Room generates SQL checks at compile time from annotations; SQLDelight verifies against the `.sq` schema, so a query that compiled under Room may need adjustment.
 - Views, triggers and `FTS` tables need explicit statements in the `.sq` files.
@@ -61,12 +64,12 @@ The app is Android-only, or Room already runs in the shared module. Room is curr
 
 ## Security checklist
 
-- Encryption driver parity: a SQLCipher-encrypted Room database stays encrypted, so the SQLDelight Android driver is created with the SQLCipher support factory and the same key, page size and KDF settings, and a test fails to open the file without the key; on iOS use a driver with equivalent encryption, or document that the target is not encrypted and why.
+- Encryption driver parity: a SQLCipher-encrypted Room database stays encrypted, so the shared connection (or, after the ownership switch, the SQLDelight Android driver) is created with the SQLCipher open helper factory (`SupportOpenHelperFactory` for `sqlcipher-android`, `SupportFactory` for the older library) with the same key, page size and KDF settings, and a test fails to open the file without the key. A SQLCipher 3 file opened by SQLCipher 4 needs the compatibility settings or `cipher_migrate` from the SQLCipher upgrade notes. On iOS use a driver with equivalent encryption, or document that the target is not encrypted and why.
 - Key handling: the key stays in the Android Keystore or in a Keystore-wrapped form, is not logged and does not move to preferences or shared code constants.
-- The backup taken in step 8 is encrypted or deleted after the rollback window, and no plaintext export of the database is created.
+- The backups from Steps 4 and 9 are the encrypted files themselves, kept in app-private storage excluded from cloud backup, and removed with `Context.deleteDatabase()` or file deletion when the rollback window ends; never keep a decrypted copy.
 - Backup and extraction rules are unchanged: the database stays excluded from backup if it was before.
 - Exported schema files, `.sq` fixtures and logs contain no real row data.
 
 ## Rollback
 
-While the flag exists and the Room code remains, flip back per unit; the migration only changes version bookkeeping, and the Room implementation must accept the changed version. After deletion, rollback means restoring the backup from step 8, which loses newer writes, so keep the Room implementation for a full release and treat the move as one-way afterwards.
+Until Step 9, rollback is flipping the flag back to Room: Room still owns the schema bookkeeping and the file was never opened by two writers, so no data is lost. Never use `fallbackToDestructiveMigration` or its variants as a rollback or recovery path. After Step 9 (SQLDelight owns the schema, `room_master_table` dropped), Room cannot open the file, and rollback means restoring the backup taken before that release (main file plus `-wal`, `-shm`, `-journal`), which loses newer writes. Keep the Room implementation and the flag for a full release before Step 9, and treat Step 9 as one-way.

@@ -4,7 +4,7 @@
 
 ### Catalog
 
-- Catalog 2026.11.3: `room` gains the successor `sqldelight` (the Room to SQLDelight playbook needs the edge; written from memory, unverified).
+- Catalog 2026.11.3: `room` gains the successor `sqldelight` (the Room to SQLDelight playbook needs the edge) and `sqldelight` gains the prerequisite `language` anyOf `kmp`, so non-KMP projects see it as blocked rather than as a next step. Written from memory, unverified.
 
 ## [0.3.0] - Unreleased
 

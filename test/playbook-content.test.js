@@ -5,6 +5,7 @@ import path from 'node:path';
 import { loadCatalog } from '../skill/scripts/lib/catalog.js';
 import { loadPlaybooks, validatePlaybooks } from '../skill/scripts/lib/playbooks.js';
 import { scanInstructions } from '../skill/scripts/lib/injection.js';
+import { redact } from '../skill/scripts/lib/redact.js';
 
 const DIR = path.resolve('skill/catalog/playbooks');
 const catalog = loadCatalog();
@@ -80,4 +81,36 @@ test('playbooks pass the injection scanner with zero findings', () => {
   for (const f of fs.readdirSync(DIR).filter((n) => n.endsWith('.md'))) {
     assert.deepEqual(scanInstructions(fs.readFileSync(path.join(DIR, f), 'utf8')), [], f);
   }
+});
+
+// Generic fragments of private or employer names that must never appear in public playbooks.
+const PRIVATE_FRAGMENTS = ['private-name-one', 'private-host-one', 'private-host-two'];
+
+test('no private names and no secret shapes in any playbook', () => {
+  for (const f of fs.readdirSync(DIR).filter((n) => n.endsWith('.md'))) {
+    const text = fs.readFileSync(path.join(DIR, f), 'utf8');
+    assert.equal(redact(text).text, text, `${f}: redact() changed the text`);
+    assert.deepEqual(redact(text).hits, [], `${f}: secret shape found`);
+    const lower = text.toLowerCase();
+    for (const frag of PRIVATE_FRAGMENTS) assert.ok(!lower.includes(frag), `${f}: contains "${frag}"`);
+  }
+});
+
+test('irreversible playbooks state the safe ordering: backup, single writer, no destructive fallback', () => {
+  for (const p of playbooks.filter((x) => x.irreversible)) {
+    const steps = p.sections.Steps.toLowerCase();
+    assert.ok(steps.includes('safe ordering'), `${p.id}: Steps lacks the safe ordering`);
+    assert.ok(/single writer|one writer|no dual-write|one-way per file/.test(steps), `${p.id}: no single-writer rule`);
+  }
+  for (const id of ['sqliteopenhelper--to--room', 'room--to--sqldelight']) {
+    const p = byId.get(id);
+    assert.match(p.sections.Steps, /wal_checkpoint/);
+    assert.match(p.sections.Rollback, /fallbackToDestructiveMigration/);
+  }
+  assert.match(byId.get('sqliteopenhelper--to--room').sections.Steps, /onDowngrade/);
+});
+
+test('sqldelight is a KMP-gated catalog target', () => {
+  const e = catalog.entry('persistence', 'sqldelight');
+  assert.deepEqual(e.prerequisites, [{ dimension: 'language', anyOf: ['kmp'] }]);
 });
