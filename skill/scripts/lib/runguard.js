@@ -4,7 +4,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { RunRefusal } from './rungit.js';
+import { RunRefusal, isSecretName } from './rungit.js';
+import { parseRoadmap } from './runplan.js';
 
 const posix = (p) => p.split(path.sep).join('/');
 
@@ -282,4 +283,41 @@ export function buildGate(git, root, config, approved = []) {
   const hash = crypto.createHash('sha256').update(files.map((f) => `${f}\0${fileDigest(path.join(top, f))}`).join('\n')).digest('hex');
   if (Array.isArray(approved) && approved.includes(hash)) return null;
   return { files, count: files.length, hash };
+}
+
+// ---------- verify-only resume checks (ruling 19) ----------
+const PROTECTED_DIRTY = ['.ai/run.config.json', '.ai/migration/plan.json', '.ai/stop'];
+const AI_OK = new Set(['.ai/migration/roadmap.md']);
+
+/**
+ * Checks of a dirty tree that is about to be verified without an agent run. Returns null, or { outcome, reason }:
+ * refused when protected files (run config, plan, STOP, .gitignore/.gitattributes/.gitmodules) or the roadmap rows of
+ * other steps differ from HEAD; needs-human when secret-looking names or other .ai files are among the changes.
+ */
+export function resumeChecks(git, root, stepId) {
+  const top = readGit(git, root, ['rev-parse', '--show-toplevel']) || root;
+  const prefix = posix(path.relative(top, root));
+  const rel = (p) => (prefix && posix(p).startsWith(`${prefix}/`) ? posix(p).slice(prefix.length + 1) : posix(p));
+  const paths = [...new Set(changedPaths(git, root))];
+  const prot = paths.filter((p) => {
+    const r = rel(p).toLowerCase();
+    const base = r.split('/').pop();
+    return PROTECTED_DIRTY.includes(r) || base === '.gitignore' || base === '.gitattributes' || base === '.gitmodules';
+  });
+  if (prot.length > 0) return { outcome: 'refused', reason: `${prot.length} protected file(s) are modified in the working tree; commit or revert them before resuming` };
+  const sensitive = paths.filter((p) => {
+    const r = rel(p).toLowerCase();
+    return isSecretName(p) || (r.startsWith('.ai/') && !r.startsWith('.ai/runs/') && !AI_OK.has(r));
+  });
+  if (sensitive.length > 0) return { outcome: 'needs-human', reason: `${sensitive.length} file(s) that look like secrets or runner state are in the working tree; remove them before resuming` };
+  // roadmap: only this step's row may differ from HEAD
+  try {
+    const now = parseRoadmap(fs.readFileSync(path.join(root, '.ai/migration/roadmap.md'), 'utf8')).steps;
+    const head = parseRoadmap(git.runGit(root, ['cat-file', 'blob', 'HEAD:./.ai/migration/roadmap.md'])).steps;
+    const was = new Map(head.map((s) => [s.id, s.status]));
+    if (now.some((s) => s.id !== stepId && was.get(s.id) !== s.status) || now.length !== head.length) return { outcome: 'refused', reason: 'the roadmap status of other steps differs from the last commit; commit or revert it before resuming' };
+  } catch {
+    return { outcome: 'refused', reason: 'the roadmap cannot be compared with the last commit' };
+  }
+  return null;
 }

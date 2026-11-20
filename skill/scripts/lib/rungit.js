@@ -387,7 +387,7 @@ const stamp = (d) => {
  * `resumeDirtyOk` lists project-relative paths (the roadmap) that may be dirty on resume: a stopped run leaves its
  * `doing` row uncommitted on purpose.
  */
-export const startRunBranch = plainErrors((root, { branchPrefix, now, protectedBranches = [], resumeDirtyOk = [] } = {}) => {
+export const startRunBranch = plainErrors((root, { branchPrefix, now, protectedBranches = [], resumeDirtyOk = [], allowDirty = false } = {}) => {
   const info = repoInfo(root);
   const { prefix } = info;
   root = info.root;
@@ -405,7 +405,8 @@ export const startRunBranch = plainErrors((root, { branchPrefix, now, protectedB
   if (defaults.has(current)) throw new RunRefusal(`the current branch "${plainText(current, 80)}" is a default branch: check out a feature branch first`);
   refuseTrackedRuns(root);
   const resumed = current.startsWith(`${branchPrefix}-`);
-  if (dirtyEntries(root, prefix, resumed ? resumeDirtyOk : []).length > 0) {
+  // allowDirty (the caller verified an approval hash) counts only on an existing run branch; every other refusal stays.
+  if (!(allowDirty && resumed) && dirtyEntries(root, prefix, resumed ? resumeDirtyOk : []).length > 0) {
     throw new RunRefusal('the working tree is not clean (uncommitted or untracked files): commit or stash them first');
   }
   if (resumed) {

@@ -16,7 +16,7 @@ import { redact } from './redact.js';
 import { stripUnsafe } from './mdtext.js';
 import fs from 'node:fs';
 import path from 'node:path';
-import { stopPresent, acquireLock, takeSnapshot, diffSnapshots, buildGate } from './runguard.js';
+import { stopPresent, acquireLock, takeSnapshot, diffSnapshots, buildGate, resumeChecks } from './runguard.js';
 import { writeRunReport } from './runreport.js';
 
 export const OUTCOMES = Object.freeze(['done', 'budget', 'no-progress', 'repeated-error', 'verification-failed', 'needs-human', 'stopped', 'failed', 'refused', 'tampered', 'interrupted']);
@@ -118,6 +118,7 @@ export async function runLoop(root, options = {}) {
   const previous = new Map(); // step id -> failure text for the next brief
   let lastFail = null; // { sig, id }
   let started = false;
+  let pendingVerify = false;
   let snapshot = null;
   let logText = '';
   let lock = null;
@@ -212,6 +213,15 @@ export async function runLoop(root, options = {}) {
     return null;
   }
 
+  /** Guards after the agent or verification: interruption, tampering (before anything else), STOP, config drift, lock. */
+  const guard = async () => {
+    if (interrupted) return intStop();
+    if (stopSeen && !stopPresent(root)) return stop('tampered', REASONS.stopRemoved);
+    const changed = diffSnapshots(snapshot, takeSnapshot(git, root));
+    if (changed.length > 0) return stop('tampered', REASONS.tampered(changed.join(', ')));
+    return topGuards();
+  };
+
   // ---------- run folder and per-iteration records ----------
   const runIdFor = () => {
     const base = `r${stampOf(startedMs)}`;
@@ -284,6 +294,7 @@ export async function runLoop(root, options = {}) {
     // Hard bound on passes (iterations plus resume-only passes): a roadmap full of `doing` rows cannot keep it spinning.
     const maxPasses = config.budgets.maxIterations * 2 + 10;
     for (let pass = 0; ; pass++) {
+      let verifyOnly = false;
       if (pass >= maxPasses) return stop('budget', REASONS.budget('maxIterations', config.budgets.maxIterations));
       const pre = await topGuards();
       if (pre) return pre;
@@ -323,6 +334,10 @@ export async function runLoop(root, options = {}) {
           continue;
         }
         step = doing;
+        verifyOnly = pendingVerify;
+        pendingVerify = false;
+      } else if (pendingVerify) {
+        return stop('refused', 'build changes were approved but no step is marked doing; nothing to verify');
       } else if (nr.step) step = nr.step;
       else {
         const list = nr.gated ?? plan.steps.filter((s) => s.status !== 'done' && s.tags.some((t) => t === 'irreversible' || t === 'decision'));
@@ -344,7 +359,7 @@ export async function runLoop(root, options = {}) {
       const rec = { iteration: n, step: step.id, status: 'none', exitCode: null, durationMs: 0, usage: null, verification: null, commit: null, diffFiles: [] };
       logText = '';
       try {
-        const out = await iterate(step, entry, rec, n, plan);
+        const out = await iterate(step, entry, rec, n, plan, verifyOnly);
         if (out) return out;
       } finally {
         rec.durationMs = Math.max(0, Math.round(now() - t0));
@@ -353,12 +368,22 @@ export async function runLoop(root, options = {}) {
     }
   }
 
-  async function iterate(step, entry, rec, n, plan) {
+  async function iterate(step, entry, rec, n, plan, verifyOnly = false) {
     const log = (t) => {
       logText += t;
     };
     say(`iteration ${n}: step ${step.id}: ${plainText(step.title ?? '', 100)}`);
     if (step.status === 'todo') setStatus(root, step.id, 'doing', 'todo'); // uncommitted on purpose (ruling 3)
+    if (verifyOnly) {
+      // Verify-only resume (ruling 19): the changes in the tree were reviewed and approved by hash; no agent runs.
+      const bad = resumeChecks(git, root, step.id);
+      if (bad) return stop(bad.outcome, bad.reason);
+      snapshot = takeSnapshot(git, root);
+      say(`step ${step.id}: approved build changes; verifying the existing changes without running the agent`);
+      entry.result = 'verify-only resume';
+      rec.status = 'verify-only';
+      return verifyAndCommit(step, entry, rec, config.budgets.maxWallClockMinutes * 60_000 - (now() - startedMs), log);
+    }
     snapshot = takeSnapshot(git, root);
     const nonce = newNonce();
     const brief = buildStepBrief(root, { step, plan, config, nonce, previousFailure: previous.get(step.id) });
@@ -394,13 +419,6 @@ export async function runLoop(root, options = {}) {
     log(`agent exit: ${exitCode === null ? 'none' : exitCode}${signal ? ` signal ${signal}` : ''}${timedOut ? ' (timed out)' : ''}\n--- agent output tail (redacted, capped) ---\n${lastChars(plainTail(r?.outputTail), MAX_LOG_TAIL / 2)}\n`);
 
     // Guards after the agent: interruption, tampering (before anything else), STOP, config drift, lock.
-    const guard = async () => {
-      if (interrupted) return intStop();
-      if (stopSeen && !stopPresent(root)) return stop('tampered', REASONS.stopRemoved);
-      const changed = diffSnapshots(snapshot, takeSnapshot(git, root));
-      if (changed.length > 0) return stop('tampered', REASONS.tampered(changed.join(', ')));
-      return topGuards();
-    };
     const g1 = await guard();
     if (g1) {
       rec.status = g1.outcome;
@@ -423,6 +441,11 @@ export async function runLoop(root, options = {}) {
       return agentFailure(step, entry, kind, st?.ok === false ? st.reason : `agent ${kind}`);
     }
 
+    return verifyAndCommit(step, entry, rec, wallLeft, log);
+  }
+
+  /** The runner's own checks after a done claim (or on a verify-only resume): changes, build gate, verification, commit. */
+  async function verifyAndCommit(step, entry, rec, wallLeft, log) {
     // The agent says done: the runner checks (never the claim).
     if (!git.hasChanges(root, { ignore: [ROADMAP_FILE], ignoreDirs: ['.ai/migration'] })) {
       entry.result = 'no change';
@@ -554,7 +577,27 @@ export async function runLoop(root, options = {}) {
       lock = await acquireLock(git, root);
       const ok = await git.confirmFirstUse(root, { confirm: typeof options.confirm === 'function' ? options.confirm : async () => false, say, config, agentArgv });
       if (ok !== true) throw new RunRefusal(REASONS.declined);
-      const br = git.startRunBranch(root, { branchPrefix: config.branchPrefix, now: startedMs, protectedBranches: config.protectedBranches, resumeDirtyOk: [ROADMAP_FILE] });
+      // Ruling 19: a dirty tree is accepted on an existing run branch only when its build files hash to an approved hash.
+      const approved = Array.isArray(options.approvedBuildChanges) ? options.approvedBuildChanges : [];
+      let approvalMatches = false;
+      if (approved.length > 0) {
+        try {
+          const gate = buildGate(git, root, config, []);
+          approvalMatches = gate !== null && approved.includes(gate.hash);
+        } catch {
+          approvalMatches = false;
+        }
+      }
+      let br;
+      try {
+        br = git.startRunBranch(root, { branchPrefix: config.branchPrefix, now: startedMs, protectedBranches: config.protectedBranches, resumeDirtyOk: [ROADMAP_FILE], allowDirty: approvalMatches });
+      } catch (e) {
+        if (approved.length > 0 && !approvalMatches && e instanceof RunRefusal && e.message.includes('not clean')) {
+          throw new RunRefusal('the approved build-change hash does not match the current build files (they changed, or none are changed); review them again and use the new hash');
+        }
+        throw e;
+      }
+      pendingVerify = approvalMatches && br.resumed === true;
       result.branch = br.branch;
       result.resumed = br.resumed === true;
       result.runId = runIdFor();

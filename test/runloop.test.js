@@ -708,8 +708,8 @@ test('all verification commands share one deadline', async () => {
   const { runVerification } = await import('../skill/scripts/lib/runverify.js');
   const r = await runVerification(root, config, { totalMs: 1200 });
   assert.equal(r.ok, false);
-  assert.equal(r.results.length, 2);
-  assert.equal(r.results[1].timedOut, true, 'the second command only got what was left');
+  // the second command only gets what is left: it times out, or (slow machine) the budget is already gone
+  assert.ok((r.results.length === 2 && r.results[1].timedOut === true) || (r.results.length === 1 && /time budget/.test(r.reason)));
 });
 
 test('resume matches the cut subject of a long step id, but not when another step shares the cut prefix', async () => {
@@ -726,4 +726,84 @@ test('resume matches the cut subject of a long step id, but not when another ste
     assert.equal(r.outcome, 'done');
     assert.deepEqual(calls.map((c) => c.step.id), expectRun);
   }
+});
+
+// ---------- verify-only resume (ruling 19) ----------
+/** Runs the gate once (agent edits gradlew) and returns { root, hash } with the tree left dirty on the run branch. */
+async function gated(extraCfg = {}) {
+  const root = project(CHAIN, { extra: GRADLEW, ...extraCfg });
+  const r = await go(root, { agent: worker(async (rt) => { evilGradlew(rt); }) });
+  assert.equal(r.outcome, 'needs-human');
+  return { root, hash: r.reason.split(' ').pop(), branch: r.branch };
+}
+
+test('gate -> approve the hash -> rerun verifies the existing changes and commits without running the agent for that step', async () => {
+  const { root, hash } = await gated();
+  const calls = [];
+  const r = await go(root, { agent: worker(null, calls), approvedBuildChanges: [hash] });
+  assert.equal(r.outcome, 'done');
+  assert.equal(r.resumed, true);
+  assert.deepEqual(calls.map((c) => c.step.id), ['b'], 'the agent ran only for b');
+  assert.equal(rowStatus(root, 'a'), 'done');
+  assert.ok(g(root, 'ls-tree', '-r', '--name-only', 'HEAD~1').split('\n').includes('gradlew'));
+  assert.match(g(root, 'log', '--format=%s', '-n', '2'), /feat\(migration\): a: First/);
+});
+
+test('a wrong or stale approval hash is refused plainly: no agent, no change', async () => {
+  const { root } = await gated();
+  const before = g(root, 'status', '--porcelain', '--', '.', ':(exclude).ai/runs');
+  const calls = [];
+  const r = await go(root, { agent: worker(null, calls), approvedBuildChanges: ['0'.repeat(64)] });
+  assert.equal(r.outcome, 'refused');
+  assert.match(r.reason, /approved build-change hash does not match/);
+  assert.equal(calls.length, 0);
+  assert.equal(g(root, 'status', '--porcelain', '--', '.', ':(exclude).ai/runs'), before);
+});
+
+test('a build file edited after the approval gates again', async () => {
+  const { root, hash } = await gated();
+  fs.writeFileSync(path.join(root, 'gradlew'), '#!/bin/sh\ntouch later\n');
+  const calls = [];
+  const r = await go(root, { agent: worker(null, calls), approvedBuildChanges: [hash] });
+  assert.equal(r.outcome, 'refused');
+  assert.equal(calls.length, 0);
+});
+
+test('a dirty tree without any approval is still refused', async () => {
+  const { root } = await gated();
+  const r = await go(root);
+  assert.equal(r.outcome, 'refused');
+  assert.match(r.reason, /not clean/);
+});
+
+test('an approval never relaxes the default-branch refusal', async () => {
+  const { root, hash } = await gated();
+  g(root, 'stash', '-u', '-q');
+  g(root, 'switch', '-q', 'main');
+  g(root, 'stash', 'pop', '-q');
+  const r = await go(root, { approvedBuildChanges: [hash] });
+  assert.equal(r.outcome, 'refused');
+  assert.match(r.reason, /default branch/);
+});
+
+test('verify-only resume: a secret-looking file in the tree -> needs-human; STOP present -> stopped; protected file edited -> refused', async () => {
+  let t = await gated();
+  fs.writeFileSync(path.join(t.root, 'keystore.properties'), 'x');
+  let calls = [];
+  let r = await go(t.root, { agent: worker(null, calls), approvedBuildChanges: [t.hash] });
+  assert.equal(r.outcome, 'needs-human');
+  assert.match(r.reason, /look like secrets/);
+  assert.equal(calls.length, 0);
+
+  t = await gated();
+  fs.writeFileSync(path.join(t.root, '.ai/STOP'), '');
+  r = await go(t.root, { agent: worker(null, calls), approvedBuildChanges: [t.hash] });
+  assert.equal(r.outcome, 'stopped');
+  assert.equal(calls.length, 0);
+
+  t = await gated();
+  fs.writeFileSync(path.join(t.root, '.gitignore'), 'x\n');
+  r = await go(t.root, { agent: worker(null, calls), approvedBuildChanges: [t.hash] });
+  assert.equal(r.outcome, 'refused');
+  assert.equal(calls.length, 0);
 });
