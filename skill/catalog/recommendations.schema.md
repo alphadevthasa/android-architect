@@ -59,6 +59,8 @@ reason: "Why it was rejected."
 
 `reopenIf` conditions use `present:<entryId>` or `absent:<entryId>`, checked across all profile dimensions (an entry is present when `units > 0`, `share > 0`, or `share` is null). Any other text is a human note and never reopens the ADR.
 
+The optional `fitness` key is a list of architecture fitness rules (`module-no-dep: <fromGlob> -> <toGlob>` or `package-no-import: <packageGlob> -> <importPrefix>`, at most 20 per ADR, each at most 200 characters, values limited to `A-Za-z0-9_.:-/*`). Only `accepted` ADRs contribute rules; `scripts/fitness.js` checks them and generates the files in `.ai/fitness/`. An empty `fitness:` key is an empty list. See `references/fitness.md` for the grammar.
+
 ## Catalog field: `vulnerableVersions`
 
 An entry may list known-vulnerable dependency versions. Every field is required:

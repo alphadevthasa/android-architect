@@ -46,6 +46,39 @@ function globProblem(glob) {
   return null;
 }
 
+/**
+ * Linear matcher for the tiny glob grammar (no RegExp): segments split on `sep` (default "/"), at most one "*" per
+ * segment ("*" matches any run of characters inside one segment), an optional leading "**" segment (zero or more
+ * segments before the rest) or an optional trailing "**" segment (one or more segments after the rest). A pattern
+ * outside the grammar throws instead of being guessed at. For the override grammar it agrees with globToRegExp.
+ */
+export function matchGlob(pattern, text, { sep = '/' } = {}) {
+  const ps = String(pattern).split(sep);
+  const ts = String(text).split(sep);
+  const lead = ps.length > 1 && ps[0] === '**';
+  const trail = !lead && ps.length > 1 && ps[ps.length - 1] === '**';
+  const core = ps.slice(lead ? 1 : 0, trail ? ps.length - 1 : ps.length);
+  for (const seg of core) {
+    if (seg.includes('**') || seg.indexOf('*') !== seg.lastIndexOf('*')) throw new Error('glob outside the supported grammar');
+  }
+  let offset = 0;
+  if (lead) {
+    if (ts.length < core.length) return false;
+    offset = ts.length - core.length;
+  } else if (trail) {
+    if (ts.length <= core.length) return false;
+  } else if (ts.length !== core.length) return false;
+  return core.every((p, i) => segmentMatches(p, ts[offset + i]));
+}
+
+function segmentMatches(p, s) {
+  const star = p.indexOf('*');
+  if (star === -1) return p === s;
+  const pre = p.slice(0, star);
+  const suf = p.slice(star + 1);
+  return s.length >= pre.length + suf.length && s.startsWith(pre) && s.endsWith(suf);
+}
+
 // Override text is printed into generated Markdown, so control characters (line breaks above all) are refused.
 const CONTROL = /[\u0000-\u001f\u007f]/;
 const MAX_DETECT_ITEMS = 20;

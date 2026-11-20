@@ -124,6 +124,20 @@ function mdFiles(aiDir, sub, recursive) {
   return out;
 }
 
+// .ai/fitness holds generated files a user copies into the build: Markdown, JSON and Kotlin, scanned as text.
+// A symlinked folder is listed itself, so it is reported as a symlink finding and not followed.
+function fitnessFiles(aiDir) {
+  try {
+    if (fs.lstatSync(path.join(aiDir, 'fitness')).isSymbolicLink()) return ['fitness'];
+    return fs.readdirSync(path.join(aiDir, 'fitness'))
+      .filter((n) => ['.md', '.json', '.kt', '.kts'].some((ext) => n.endsWith(ext)))
+      .sort()
+      .map((n) => `fitness/${n}`);
+  } catch {
+    return [];
+  }
+}
+
 function jsonFiles(aiDir, sub) {
   try {
     return fs.readdirSync(path.join(aiDir, sub)).filter((n) => n.endsWith('.json')).sort().map((n) => `${sub}/${n}`);
@@ -135,6 +149,7 @@ function jsonFiles(aiDir, sub) {
 /**
  * Scan the files of .ai that a person or agent may have edited, or that a pull request may change: README.md,
  * refresh-report.md, knowledge (generated files included), migration and workflow Markdown, catalog-overrides/*.json,
+ * the generated fitness files,
  * recommendations.json and repos.json. A symlink among them is a finding (rule "symlink", line 1) and is not followed.
  * Returns sorted [{ file, line, rule }] with file relative to root (".ai/...").
  */
@@ -147,6 +162,7 @@ export function scanAiDir(root) {
     ...mdFiles(aiDir, 'migration', true),
     ...mdFiles(aiDir, 'workflows', false),
     ...jsonFiles(aiDir, 'catalog-overrides'),
+    ...fitnessFiles(aiDir),
     'recommendations.json',
     'repos.json',
   ];

@@ -143,6 +143,45 @@ export function preflight(root, { local = false, catalogDir = path.join(DEFAULT_
   return { ...loaded, listed: listFiles(root, { gitignore: true }) };
 }
 
+const SAFE_GENERATED_REL = /^[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*$/;
+
+/**
+ * Write generated files into an existing .ai folder with the same guard as writeAiDir: .ai and every component on the
+ * way to each file must not be a symlink (nothing in .ai may be one), paths stay inside the project, and every text
+ * passes through redact(). `files` is { relativePathUnderAi: text }. All paths are checked before the first write.
+ * Throws when .ai does not exist (run init first). Returns the written paths relative to root (".ai/..."), sorted.
+ */
+export function writeGenerated(root, files) {
+  const realRoot = fs.realpathSync(root);
+  const guard = makeGuard(root, realRoot);
+  const aiDir = path.join(root, '.ai');
+  guard('.ai');
+  let st = null;
+  try {
+    st = fs.lstatSync(aiDir);
+  } catch {
+    st = null;
+  }
+  if (st === null || !st.isDirectory()) throw new Error('no .ai folder; run init first');
+  regularFiles(aiDir);
+  const entries = Object.entries(files);
+  for (const [rel] of entries) {
+    if (!SAFE_GENERATED_REL.test(rel) || rel.split('/').some((seg) => seg === '.' || seg === '..')) {
+      throw new Error('refusing to write a generated file with an unsafe path');
+    }
+    guard(`.ai/${rel}`);
+  }
+  const written = [];
+  for (const [rel, text] of entries) {
+    const abs = guard(`.ai/${rel}`);
+    fs.mkdirSync(path.dirname(abs), { recursive: true });
+    guard(`.ai/${rel}`);
+    fs.writeFileSync(abs, redact(String(text)).text);
+    written.push(`.ai/${rel}`);
+  }
+  return written.sort(byText);
+}
+
 /**
  * Write the .ai folder. See task 4 for the ownership table.
  * `workspace` is null, { role: 'hub', hub: '.' } (with `repos`, the repos.json content: written when missing or when the

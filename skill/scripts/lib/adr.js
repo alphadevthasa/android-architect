@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { presentEntries } from './candidates.js';
 
-const KEYS = ['id', 'title', 'status', 'date', 'dimension', 'target', 'reopenIf', 'reason'];
+const KEYS = ['id', 'title', 'status', 'date', 'dimension', 'target', 'reopenIf', 'reason', 'fitness'];
 const STATUSES = ['proposed', 'accepted', 'superseded', 'rejected'];
 const REQUIRED = ['id', 'title', 'status'];
 
@@ -29,7 +29,8 @@ function scalar(raw, file, lineNo) {
  * Splits `---` front matter from the body and parses it with the strict scalar grammar above.
  * `keys` is the allowed key set, `listKeys` the keys that hold "- item" lists, `required` keys that must be non-empty.
  * Returns { data, quoted, bodyStart, body }: `data` has every key (lists default to [], scalars to ''), `quoted` is the
- * set of scalar keys written with double quotes, `bodyStart` the 1-based line number of the first body line.
+ * set of scalar keys written with double quotes, `seen` the set of keys present, `bodyStart` the 1-based line number of
+ * the first body line.
  */
 export function parseFrontMatter(text, file, { keys, listKeys = [], required = [] }) {
   const lines = String(text).replace(/\r\n?/g, '\n').split('\n');
@@ -74,11 +75,13 @@ export function parseFrontMatter(text, file, { keys, listKeys = [], required = [
   for (const k of required) {
     if (out[k] === '' || (Array.isArray(out[k]) && out[k].length === 0)) throw new Error(`${file}: missing required key "${k}"`);
   }
-  return { data: out, quoted, bodyStart: end + 2, body: lines.slice(end + 1).join('\n') };
+  return { data: out, quoted, seen, bodyStart: end + 2, body: lines.slice(end + 1).join('\n') };
 }
 
 export function parseAdr(text, file) {
-  const { data: out } = parseFrontMatter(text, file, { keys: KEYS, listKeys: ['reopenIf'], required: REQUIRED });
+  const { data: out, seen } = parseFrontMatter(text, file, { keys: KEYS, listKeys: ['reopenIf', 'fitness'], required: REQUIRED });
+  // `fitness` (architecture fitness rules, see references/fitness.md) is optional: only present when written.
+  if (!seen.has('fitness')) delete out.fitness;
   if (!STATUSES.includes(out.status)) {
     throw new Error(`${file}: status must be one of ${STATUSES.join(', ')}, got "${out.status}"`);
   }

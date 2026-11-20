@@ -1,0 +1,2 @@
+rootProject.name = 'fitness-app'
+include ':app', ':feature:a', ':feature:b', ':core:data'

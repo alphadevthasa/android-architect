@@ -5,6 +5,7 @@
 ### Tool
 
 - `scripts/lib-update.js`: security-first library update planning. Security fixes come first (highest severity first), then patch and minor updates per update group, then major updates with their `requires` listed as prerequisites. Dynamic, unresolved, BOM-managed and unknown dependencies are listed as "cannot update automatically" and never get a guessed target. `--scope <module>`, `--format json|md`, `--out`. Reference: `references/library-updates.md`.
+- `scripts/fitness.js`: architecture fitness checks from the new optional `fitness` key of accepted ADRs (`module-no-dep` and `package-no-import` rules, tiny linear glob grammar, strict validation with `<adr file>: rule "<n>"` errors). `--check` evaluates the rules statically; the default writes a Gradle `architectureFitness` task, a Konsist test, `verify-commands.json` and a README into `.ai/fitness/` for the user to review and copy. Reference: `references/fitness.md`.
 
 ### Catalog
 
