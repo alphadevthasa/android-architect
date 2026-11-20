@@ -1,0 +1,194 @@
+{
+  "schemaVersion": 1,
+  "asOf": "2026-11-20",
+  "verified": false,
+  "dataNote": "Written from memory; maintainers must audit before release",
+  "libraries": [
+    {
+      "coord": "androidx.core:core-ktx",
+      "stable": "1.15.0",
+      "group": "androidx-core"
+    },
+    {
+      "coord": "androidx.appcompat:appcompat",
+      "stable": "1.7.0",
+      "group": "androidx-core"
+    },
+    {
+      "coord": "androidx.activity:activity-ktx",
+      "stable": "1.9.3",
+      "group": "androidx-core"
+    },
+    {
+      "coord": "androidx.fragment:fragment-ktx",
+      "stable": "1.8.5",
+      "group": "androidx-core"
+    },
+    {
+      "coord": "androidx.constraintlayout:constraintlayout",
+      "stable": "2.2.0",
+      "group": "androidx-ui"
+    },
+    {
+      "coord": "androidx.recyclerview:recyclerview",
+      "stable": "1.3.2",
+      "group": "androidx-ui"
+    },
+    {
+      "coord": "com.google.android.material:material",
+      "stable": "1.12.0",
+      "group": "androidx-ui"
+    },
+    {
+      "coord": "androidx.lifecycle:lifecycle-runtime-ktx",
+      "stable": "2.8.7",
+      "group": "androidx-lifecycle"
+    },
+    {
+      "coord": "androidx.lifecycle:lifecycle-viewmodel-ktx",
+      "stable": "2.8.7",
+      "group": "androidx-lifecycle"
+    },
+    {
+      "coord": "androidx.navigation:navigation-fragment-ktx",
+      "stable": "2.8.5",
+      "group": "androidx-navigation"
+    },
+    {
+      "coord": "androidx.navigation:navigation-compose",
+      "stable": "2.8.5",
+      "group": "androidx-navigation"
+    },
+    {
+      "coord": "androidx.room:room-runtime",
+      "stable": "2.6.1",
+      "group": "androidx-room",
+      "notes": "Room and its compiler artifacts must move together; KSP must match the Kotlin version."
+    },
+    {
+      "coord": "androidx.work:work-runtime-ktx",
+      "stable": "2.10.0",
+      "group": "androidx-work",
+      "requires": {
+        "minSdk": 21
+      }
+    },
+    {
+      "coord": "androidx.datastore:datastore-preferences",
+      "stable": "1.1.1",
+      "group": "androidx-datastore"
+    },
+    {
+      "coord": "androidx.compose:compose-bom",
+      "stable": "2024.12.01",
+      "group": "compose",
+      "notes": "Calendar versioning: a year change reads as a major jump here; the Compose compiler must match the Kotlin version."
+    },
+    {
+      "coord": "org.jetbrains.kotlinx:kotlinx-coroutines-core",
+      "stable": "1.9.0",
+      "group": "kotlinx"
+    },
+    {
+      "coord": "org.jetbrains.kotlinx:kotlinx-coroutines-android",
+      "stable": "1.9.0",
+      "group": "kotlinx"
+    },
+    {
+      "coord": "org.jetbrains.kotlinx:kotlinx-serialization-json",
+      "stable": "1.7.3",
+      "group": "kotlinx",
+      "requires": {
+        "kotlin": ">=1.9"
+      }
+    },
+    {
+      "coord": "com.squareup.okhttp3:okhttp",
+      "stable": "4.12.0",
+      "group": "networking"
+    },
+    {
+      "coord": "com.squareup.okhttp3:logging-interceptor",
+      "stable": "4.12.0",
+      "group": "networking"
+    },
+    {
+      "coord": "com.squareup.retrofit2:retrofit",
+      "stable": "2.11.0",
+      "group": "networking"
+    },
+    {
+      "coord": "com.squareup.retrofit2:converter-gson",
+      "stable": "2.11.0",
+      "group": "networking"
+    },
+    {
+      "coord": "com.squareup.moshi:moshi",
+      "stable": "1.15.1",
+      "group": "json"
+    },
+    {
+      "coord": "com.google.code.gson:gson",
+      "stable": "2.11.0",
+      "group": "json"
+    },
+    {
+      "coord": "io.ktor:ktor-client-core",
+      "stable": "3.0.2",
+      "group": "ktor"
+    },
+    {
+      "coord": "io.coil-kt:coil",
+      "stable": "2.7.0",
+      "group": "images"
+    },
+    {
+      "coord": "io.coil-kt:coil-compose",
+      "stable": "2.7.0",
+      "group": "images"
+    },
+    {
+      "coord": "com.github.bumptech.glide:glide",
+      "stable": "4.16.0",
+      "group": "images"
+    },
+    {
+      "coord": "com.google.dagger:hilt-android",
+      "stable": "2.52",
+      "group": "di-dagger",
+      "requires": {
+        "kotlin": ">=1.9"
+      }
+    },
+    {
+      "coord": "com.google.dagger:dagger",
+      "stable": "2.52",
+      "group": "di-dagger"
+    },
+    {
+      "coord": "io.insert-koin:koin-android",
+      "stable": "4.0.0",
+      "group": "di-koin"
+    },
+    {
+      "coord": "junit:junit",
+      "stable": "4.13.2",
+      "group": "testing"
+    },
+    {
+      "coord": "io.mockk:mockk",
+      "stable": "1.13.13",
+      "group": "testing"
+    },
+    {
+      "coord": "app.cash.turbine:turbine",
+      "stable": "1.2.0",
+      "group": "testing"
+    },
+    {
+      "coord": "androidx.test.espresso:espresso-core",
+      "stable": "3.6.1",
+      "group": "testing"
+    }
+  ]
+}

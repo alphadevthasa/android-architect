@@ -412,6 +412,12 @@ function buildContext(root) {
   return { ctx, files, read, modules, moduleOf: makeModuleOf(modules) };
 }
 
+/** Gradle build units (modules plus the root build file) and the discovered modules, for planners that read dependency rows. */
+export function collectBuildUnits(root) {
+  const { ctx, modules } = buildContext(root);
+  return { units: ctx.buildUnits, modules };
+}
+
 /** Matches of every entry of a dimension after file exclusions and supersede rules (not yet capped). */
 function dimensionAccs(dim, ctx, moduleOf) {
   const accs = new Map();

@@ -5,10 +5,10 @@ const PRE_RE = /^[-._]?(?:alpha|beta|rc|cr|m\d+|milestone|snapshot|dev|preview|e
 const SPLIT_RE = /^(\d+(?:\.\d+)*)(.*)$/s;
 // A concrete version: numeric dotted core plus an optional plain qualifier.
 // Dynamic selectors (`2.+`, `latest.release`, `[2.8,3.0)`) never match.
-const CONCRETE_RE = /^\d+(?:\.\d+)*(?:[-._][A-Za-z0-9][A-Za-z0-9._-]*)?$/;
+export const CONCRETE_RE = /^\d+(?:\.\d+)*(?:[-._][A-Za-z0-9][A-Za-z0-9._-]*)?$/;
 
 /** Vulnerability-matching comparator: like compareVersions, but pre-releases sort below the release. */
-function compareForVuln(a, b) {
+export function compareForVuln(a, b) {
   const [, ca = '0', qa = ''] = SPLIT_RE.exec(String(a)) ?? [];
   const [, cb = '0', qb = ''] = SPLIT_RE.exec(String(b)) ?? [];
   const c = compareVersions(ca, cb);

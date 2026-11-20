@@ -299,3 +299,78 @@ export function loadScoring(dir = DEFAULT_DIR) {
   if (errs.length) throw new Error(errs.join('\n'));
   return data;
 }
+
+const MAX_VERSION_LIBRARIES = 200;
+const MAX_VERSION_ERRORS = 50;
+const MAX_VERSIONS_BYTES = 1024 * 1024;
+const COORD_RE = /^[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+$/;
+const STABLE_RE = /^\d+(\.\d+){0,3}([.-][A-Za-z0-9]+)*$/;
+const GROUP_ID_RE = /^[a-z0-9-]+$/;
+const CONSTRAINT_RE = /^(>=|>|<=|<|=)\d+(\.\d+){0,2}$/;
+const VERSIONS_KEYS = ['schemaVersion', 'asOf', 'libraries', 'verified', 'dataNote'];
+const LIBRARY_KEYS = ['coord', 'stable', 'group', 'requires', 'notes'];
+const REQUIRES_KEYS = ['kotlin', 'agp', 'minSdk'];
+
+function isIsoDate(s) {
+  if (typeof s !== 'string' || !ISO_DATE_RE.test(s)) return false;
+  const d = new Date(`${s}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
+}
+
+function validateLibrary(i, lib, seen, errs) {
+  const at = `libraries[${i}]`;
+  if (!isObj(lib)) {
+    errs.push(`versions.json: ${at} must be an object`);
+    return;
+  }
+  for (const k of Object.keys(lib)) if (!LIBRARY_KEYS.includes(k)) errs.push(`versions.json: ${at} unknown key ${JSON.stringify(k.slice(0, 40))}`);
+  if (typeof lib.coord !== 'string' || lib.coord.length > 200 || !COORD_RE.test(lib.coord)) errs.push(`versions.json: ${at} coord must look like group:name`);
+  else if (seen.has(lib.coord)) errs.push(`versions.json: ${at} duplicate coord ${lib.coord}`);
+  else seen.add(lib.coord);
+  if (typeof lib.stable !== 'string' || lib.stable.length > 40 || !STABLE_RE.test(lib.stable)) errs.push(`versions.json: ${at} stable must be a version string`);
+  if (typeof lib.group !== 'string' || lib.group.length > 40 || !GROUP_ID_RE.test(lib.group)) errs.push(`versions.json: ${at} group must match [a-z0-9-]+`);
+  if (lib.notes !== undefined && (typeof lib.notes !== 'string' || lib.notes.length > 300)) errs.push(`versions.json: ${at} notes must be a string of at most 300 characters`);
+  if (lib.requires !== undefined) {
+    if (!isObj(lib.requires)) errs.push(`versions.json: ${at} requires must be an object`);
+    else {
+      for (const [k, v] of Object.entries(lib.requires)) {
+        if (!REQUIRES_KEYS.includes(k)) errs.push(`versions.json: ${at} requires has unknown key ${JSON.stringify(k.slice(0, 40))}`);
+        else if (k === 'minSdk' ? !Number.isInteger(v) || v < 1 || v > 100 : typeof v !== 'string' || !CONSTRAINT_RE.test(v)) {
+          errs.push(`versions.json: ${at} requires.${k} is invalid`);
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Load and strictly validate versions.json (the library update data: a stable version, an update group and optional
+ * requirements per coordinate) from a catalog directory (path or URL). Throws an Error whose message lists the problems
+ * (at most 50), each line prefixed with `versions.json:`. The data is written by hand and may be unverified: see `verified`.
+ */
+export function loadVersions(dir = DEFAULT_DIR) {
+  const base = dir instanceof URL ? dir : pathToFileURL(path.resolve(String(dir)) + path.sep);
+  let data;
+  try {
+    const file = new URL('versions.json', base);
+    if (fs.statSync(file).size > MAX_VERSIONS_BYTES) throw new Error('file too large');
+    data = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch (e) {
+    throw new Error(`versions.json: cannot read or parse (${String(e.code ?? e.message).slice(0, 80)})`);
+  }
+  if (!isObj(data)) throw new Error('versions.json: must be a JSON object');
+  const errs = [];
+  for (const k of Object.keys(data)) if (!VERSIONS_KEYS.includes(k)) errs.push(`versions.json: unknown key ${JSON.stringify(k.slice(0, 40))}`);
+  if (data.schemaVersion !== 1) errs.push('versions.json: schemaVersion must be 1');
+  if (!isIsoDate(data.asOf)) errs.push('versions.json: asOf must be an ISO date (YYYY-MM-DD)');
+  if (data.verified !== undefined && typeof data.verified !== 'boolean') errs.push('versions.json: verified must be a boolean');
+  if (data.dataNote !== undefined && (typeof data.dataNote !== 'string' || data.dataNote.length > 300)) errs.push('versions.json: dataNote must be a string of at most 300 characters');
+  if (!Array.isArray(data.libraries)) errs.push('versions.json: libraries must be an array');
+  else if (data.libraries.length > MAX_VERSION_LIBRARIES) errs.push(`versions.json: libraries has at most ${MAX_VERSION_LIBRARIES} entries`);
+  else {
+    const seen = new Set();
+    data.libraries.forEach((lib, i) => validateLibrary(i, lib, seen, errs));
+  }
+  if (errs.length) throw new Error(errs.slice(0, MAX_VERSION_ERRORS).join('\n'));
+  return data;
+}

@@ -2,9 +2,14 @@
 
 ## [0.4.0] - Unreleased
 
+### Tool
+
+- `scripts/lib-update.js`: security-first library update planning. Security fixes come first (highest severity first), then patch and minor updates per update group, then major updates with their `requires` listed as prerequisites. Dynamic, unresolved, BOM-managed and unknown dependencies are listed as "cannot update automatically" and never get a guessed target. `--scope <module>`, `--format json|md`, `--out`. Reference: `references/library-updates.md`.
+
 ### Catalog
 
 - Catalog 2026.11.3: `room` gains the successor `sqldelight` (the Room to SQLDelight playbook needs the edge) and `sqldelight` gains the prerequisite `language` anyOf `kmp`, so non-KMP projects see it as blocked rather than as a next step. Written from memory, unverified.
+- `catalog/versions.json` (new data file, within catalog 2026.11.3): stable versions, update groups and `requires` for 35 widely used libraries, `asOf` 2026-11-20. **Written from memory and unverified (`"verified": false`): maintainers must audit every version before release.** No entry claims to be the latest release; targets are only suggestions and the plan marks them `verify` once the data is older than 90 days.
 
 ## [0.3.0] - Unreleased
 
