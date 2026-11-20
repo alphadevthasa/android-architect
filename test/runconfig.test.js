@@ -49,7 +49,7 @@ test('rejections are file-prefixed errors', () => {
   rejects(cfg({ agent: { kind: 'claude', command: 'claude --print' } }), /agent\.command: must be an array/);
   rejects(cfg({ agent: { kind: 'claude', command: [] } }), /must not be empty/);
   rejects(cfg({ agent: { kind: 'claude', command: ['claude', 5] } }), /non-empty string/);
-  rejects(cfg({ agent: { kind: 'claude', command: ['claude', 'x'.repeat(501)] } }), /longer than 500/);
+  rejects(cfg({ agent: { kind: 'claude', command: ['claude', 'x'.repeat(301)] } }), /longer than 300/);
   rejects(cfg({ agent: { kind: 'claude', command: ['claude', 'a\nb'] } }), /control characters/);
   rejects(cfg({ agent: { kind: 'claude', command: ['claude', 'a\0b'] } }), /control characters/);
   rejects(cfg({ agent: { kind: 'claude', command: ['./bin/claude'] } }), /exactly "claude"/);
