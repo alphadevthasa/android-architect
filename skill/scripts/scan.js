@@ -57,7 +57,7 @@ export function main(argv) {
     catalog = loadCatalogWithOverrides(undefined, root, { overrides: opts.overrides }).catalog;
     profile = detectStack(root, catalog);
   } catch (e) {
-    fail(1, e.message);
+    fail(1, e.name === 'ManifestError' ? `${e.message}; or pass --no-overrides` : e.message);
   }
   const text = opts.format === 'md' ? renderProfileMarkdown(profile, catalog) : JSON.stringify(profile, null, 2) + '\n';
   if (opts.out) {

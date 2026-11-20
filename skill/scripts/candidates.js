@@ -35,7 +35,7 @@ export function main(argv) {
     catalog = loadCatalogWithOverrides(undefined, root, { overrides }).catalog;
     profile = detectStack(root, catalog);
   } catch (e) {
-    fail(1, e.message);
+    fail(1, e.name === 'ManifestError' ? `${e.message}; or pass --no-overrides` : e.message);
   }
   process.stdout.write(JSON.stringify(candidatePaths(profile, catalog), null, 2) + '\n');
 }

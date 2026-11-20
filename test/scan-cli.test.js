@@ -58,7 +58,7 @@ test('standalone project with an unreadable manifest: plain actionable error, --
   const { execFileSync, spawnSync } = await import('node:child_process');
   const cases = [
     ['corrupt JSON', (ai) => fs.writeFileSync(path.join(ai, 'manifest.json'), '{ nope'), /invalid manifest \.ai\/manifest\.json/],
-    ['newer schema', (ai) => fs.writeFileSync(path.join(ai, 'manifest.json'), '{"schemaVersion":99}'), /newer than supported.*update android-architect|newer than supported.*newer android-architect/],
+    ['newer schema', (ai) => fs.writeFileSync(path.join(ai, 'manifest.json'), '{"schemaVersion":99}'), /newer than supported.*use a newer android-architect/],
     ['a directory instead of a file', (ai) => fs.mkdirSync(path.join(ai, 'manifest.json')), /cannot read \.ai\/manifest\.json: /],
   ];
   for (const [name, setup, reason] of cases) {

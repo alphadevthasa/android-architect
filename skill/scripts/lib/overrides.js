@@ -296,22 +296,32 @@ export const baseVersion = (catalog) => catalog.baseCatalogVersion ?? catalog.ca
  * `label` prefixes error messages (null: the bare file name), `filePrefix` the reported file names (null: bare names).
  * `workspace` undefined means "read it from <root>/.ai/manifest.json"; null means standalone.
  */
-/** An unreadable or invalid own manifest: a plain, actionable message (no absolute path, not a catalog error). */
-export class ManifestError extends Error {
+/**
+ * An unreadable or invalid own manifest: a plain, actionable message (no absolute path, no "Invalid catalog:" header).
+ * It extends CatalogError so every existing catch of catalog problems handles it; `message` is the plain text.
+ */
+export class ManifestError extends CatalogError {
   constructor(root, cause) {
     let reason = String(cause?.message ?? cause);
-    for (const p of [path.join(root, '.ai', 'manifest.json'), path.join(fs.realpathSync.native?.(root) ?? root, '.ai', 'manifest.json')]) reason = reason.split(p).join('.ai/manifest.json');
-    reason = reason.split(root).join('<project>');
+    const abs = [root, safeReal(root)].filter((p) => typeof p === 'string' && p.length > 3);
+    for (const p of abs) reason = reason.split(path.join(p, '.ai', 'manifest.json')).join('.ai/manifest.json');
+    for (const p of abs) reason = reason.split(p).join('<project>');
     const newer = /newer than supported/.test(reason);
-    super(
+    const text =
       `cannot read .ai/manifest.json: ${shownPath(reason)}; ` +
-        (newer
-          ? 'use a newer android-architect, or pass --no-overrides where the script supports it'
-          : 'repair it with "doctor --root", "refresh" or "init", or pass --no-overrides where the script supports it'),
-    );
+      (newer ? 'use a newer android-architect' : 'fix or delete .ai/manifest.json by hand, or restore it from version control');
+    super([text]);
+    this.message = text;
     this.name = 'ManifestError';
   }
 }
+const safeReal = (p) => {
+  try {
+    return fs.realpathSync(p);
+  } catch {
+    return null;
+  }
+};
 
 export function overrideSource(root, workspace, { trustedHub = false } = {}) {
   if (workspace === undefined) {

@@ -17,10 +17,10 @@ export function readManifest(aiDir) {
   try {
     m = JSON.parse(text);
   } catch (e) {
-    throw new Error(`invalid manifest ${file}: ${e.message}`);
+    throw new Error(`invalid manifest .ai/manifest.json: ${e.message}`);
   }
   if (m === null || typeof m !== 'object' || Array.isArray(m) || !Number.isInteger(m.schemaVersion) || m.schemaVersion < 1) {
-    throw new Error(`invalid manifest ${file}: expected an object with an integer schemaVersion`);
+    throw new Error(`invalid manifest .ai/manifest.json: expected an object with an integer schemaVersion`);
   }
   if (m.schemaVersion > MANIFEST_SCHEMA_VERSION) {
     throw new Error(
