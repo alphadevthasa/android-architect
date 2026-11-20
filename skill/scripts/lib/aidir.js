@@ -170,7 +170,7 @@ const AI_FILE_ALLOW = ['migration/plan.json', 'migration/roadmap.md', 'migration
  * check-every-target-before-the-first-write rules), limited to migration/plan.json, migration/roadmap.md and
  * migration/roadmap.md.new, each replaced atomically (temp file in the same folder, then rename). `redactText` (default
  * true) runs every text through redact(); callers that edit a user-owned file in place (setStatus) pass false so the
- * user's other bytes stay exactly as they were. Returns { written } (paths relative to root, sorted).
+ * user's other bytes stay exactly as they were. A text may be a Buffer (written as is). An existing file keeps its mode. Returns { written } (paths relative to root, sorted).
  */
 export function writeAiFiles(root, files, { redactText = true } = {}) {
   for (const rel of Object.keys(files)) {
@@ -225,11 +225,13 @@ function guardedWrite(root, files, { remove, redactText, atomic }) {
     const abs = guard(`.ai/${rel}`);
     fs.mkdirSync(path.dirname(abs), { recursive: true });
     guard(`.ai/${rel}`);
-    const out = redactText ? redact(String(text)).text : String(text);
+    const out = Buffer.isBuffer(text) ? text : redactText ? redact(String(text)).text : String(text);
     if (atomic) {
       const tmp = `${abs}.tmp-${process.pid}`;
       try {
+        const mode = lstatOrNull(abs)?.mode;
         fs.writeFileSync(tmp, out, { flag: 'wx' });
+        if (mode !== undefined) fs.chmodSync(tmp, mode & 0o7777);
         fs.renameSync(tmp, abs);
       } catch (err) {
         fs.rmSync(tmp, { force: true });

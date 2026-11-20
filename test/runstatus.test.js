@@ -60,3 +60,14 @@ test('3 MB of hostile output is scanned in bounded time', () => {
   assert.equal(parseStatus(big, STEP).ok, true);
   assert.ok(Number(process.hrtime.bigint() - t) / 1e6 < 1500);
 });
+
+test('control characters are stripped from summary and verification; bad file paths invalidate the status', () => {
+  const r = parseStatus(block({ ...good, summary: 'a\u0000b\u001b[31mc\u202ed\nline2', verification: 'x\u0007y' }), STEP);
+  assert.equal(r.ok, true);
+  assert.equal(r.status.summary, 'ab[31mc d\nline2');
+  assert.equal(r.status.verification, 'xy');
+  for (const f of ['/etc/passwd', '../x', 'a/../b', 'a\\..\\b', '-rf', 'a\nb', 'a\u0000b', '', 'C:\\x', '\\\\host\\x']) {
+    assert.equal(parseStatus(block({ ...good, filesChanged: [f] }), STEP).ok, false, JSON.stringify(f));
+  }
+  assert.equal(parseStatus(block({ ...good, filesChanged: ['a..b/c.kt', 'a:b'] }), STEP).ok, true);
+});

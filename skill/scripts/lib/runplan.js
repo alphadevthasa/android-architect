@@ -24,15 +24,37 @@ export const isStepId = (id) => {
 
 const isSeparatorRow = (line) => line.startsWith('|') && [...line].every((c) => c === '|' || c === ' ' || c === '-' || c === ':') && line.includes('-');
 
+/**
+ * Locates the roadmap table in `lines`: the first header line outside fenced code blocks. Returns null or
+ * { head, first } (index of the header, index of the first line after header and separator).
+ */
+export function findTable(lines) {
+  let fence = null;
+  for (let i = 0; i < lines.length; i++) {
+    const t = lines[i].trim();
+    const mark = t.startsWith('```') ? '```' : t.startsWith('~~~') ? '~~~' : null;
+    if (mark !== null) {
+      if (fence === null) fence = mark;
+      else if (fence === mark) fence = null;
+      continue;
+    }
+    if (fence === null && t === HEADER) {
+      let first = i + 1;
+      if (first < lines.length && isSeparatorRow(lines[first].trim())) first++;
+      return { head: i, first };
+    }
+  }
+  return null;
+}
+
 /** Row scan shared by parseRoadmap and setStatus. Rows: { id, desc, status (raw cell), cellStart, cellEnd, line (1-based), index }. */
 function scanRoadmap(markdown) {
   const lines = String(markdown).split('\n');
   const rows = [];
   const errors = [];
-  const head = lines.findIndex((l) => l.trim() === HEADER);
-  if (head === -1) return { rows, errors: ['roadmap table header not found'], lines };
-  let i = head + 1;
-  if (i < lines.length && isSeparatorRow(lines[i].trim())) i++;
+  const table = findTable(lines);
+  if (table === null) return { rows, errors: ['roadmap table header not found'], lines };
+  let i = table.first;
   for (; i < lines.length; i++) {
     const text = lines[i].endsWith('\r') ? lines[i].slice(0, -1) : lines[i];
     if (!text.startsWith('|')) break;
@@ -87,7 +109,7 @@ export function parseRoadmap(markdown) {
   return { steps, errors };
 }
 
-function readRegular(root, rel, maxBytes) {
+function readRegular(root, rel, maxBytes, encoding = 'utf8') {
   const abs = path.join(root, rel);
   let st;
   try {
@@ -105,7 +127,7 @@ function readRegular(root, rel, maxBytes) {
   }
   if (!st.isFile()) throw new Error(`${rel}: must be a regular file (symlinks are not followed)`);
   if (st.size > maxBytes) throw new Error(`${rel}: is larger than ${maxBytes} bytes`);
-  return fs.readFileSync(abs, 'utf8');
+  return fs.readFileSync(abs, encoding);
 }
 
 /**
@@ -145,20 +167,24 @@ const isGated = (s) => s.tags.some((t) => GATED.includes(t));
 /**
  * The next step to run: the first `todo` step in plan order whose dependencies are all `done` and that is not gated and
  * not in `skip` (ids that failed or stopped in this run: they and their dependents do not run, independent steps do).
- * Without one: { gated } (todo gated steps whose dependencies are done, waiting for a human), else { blocked } (every
- * remaining step), else { done: true }.
+ * `skip` may be a Set, an array or missing. Without a runnable step: { gated } (todo gated steps whose dependencies are
+ * done, waiting for a human), else { blocked } (every remaining step), else { done: true }.
+ * Every result also carries `doing`: the steps whose row says `doing`. Contract: the caller (Task 4) must resume those
+ * before it starts a new step; this function never returns a `doing` step as runnable.
  */
-export function nextRunnable(plan, { skip = new Set() } = {}) {
+export function nextRunnable(plan, { skip } = {}) {
+  const skipSet = skip instanceof Set ? skip : new Set(Array.isArray(skip) ? skip : []);
   const status = new Map(plan.steps.map((s) => [s.id, s.status]));
   const depsDone = (s) => s.dependsOn.every((d) => status.get(d) === 'done');
   const remaining = plan.steps.filter((s) => s.status !== 'done');
-  if (remaining.length === 0) return { done: true };
-  const ready = remaining.filter((s) => s.status === 'todo' && !skip.has(s.id) && depsDone(s));
+  const doing = remaining.filter((s) => s.status === 'doing');
+  if (remaining.length === 0) return { done: true, doing };
+  const ready = remaining.filter((s) => s.status === 'todo' && !skipSet.has(s.id) && depsDone(s));
   const runnable = ready.find((s) => !isGated(s));
-  if (runnable) return { step: runnable, reason: runnable.dependsOn.length === 0 ? 'first todo step with no dependencies' : 'first todo step with all dependencies done' };
+  if (runnable) return { step: runnable, reason: runnable.dependsOn.length === 0 ? 'first todo step with no dependencies' : 'first todo step with all dependencies done', doing };
   const gated = ready.filter(isGated);
-  if (gated.length > 0) return { gated };
-  return { blocked: remaining };
+  if (gated.length > 0) return { gated, doing };
+  return { blocked: remaining, doing };
 }
 
 /**
@@ -171,7 +197,8 @@ export function setStatus(root, id, status, expect) {
   if (!isStepId(id)) throw new Error('invalid step id');
   if (!STATUSES.includes(status)) throw new Error('status must be todo, doing or done');
   if (expect !== undefined && !STATUSES.includes(expect)) throw new Error('expected status must be todo, doing or done');
-  const text = readRegular(root, ROADMAP_FILE, MAX_ROADMAP_BYTES);
+  // latin1 maps every byte to one character, so any file (even invalid UTF-8) round-trips exactly.
+  const text = readRegular(root, ROADMAP_FILE, MAX_ROADMAP_BYTES, 'latin1');
   if (text === null) throw new Error(`${ROADMAP_FILE}: not found`);
   const { rows, lines } = scanRoadmap(text);
   const matches = rows.filter((r) => r.id === id);
@@ -186,6 +213,6 @@ export function setStatus(root, id, status, expect) {
   const cell = line.slice(row.cellStart, row.cellEnd);
   const lead = cell.length - cell.trimStart().length;
   lines[row.index] = line.slice(0, row.cellStart + lead) + status + line.slice(row.cellStart + lead + cell.trim().length);
-  writeAiFiles(root, { 'migration/roadmap.md': lines.join('\n') }, { redactText: false });
+  writeAiFiles(root, { 'migration/roadmap.md': Buffer.from(lines.join('\n'), 'latin1') }, { redactText: false });
   return { previous };
 }

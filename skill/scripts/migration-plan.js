@@ -18,6 +18,7 @@ import { buildPlan, checkPlan, renderRoadmap, renameUnsafeIds } from './lib/migp
 import { safeOutPath, writeOut } from './lib/outpath.js';
 import { redact, redactJson } from './lib/redact.js';
 import { writeAiFiles } from './lib/aidir.js';
+import { findTable } from './lib/runplan.js';
 
 const USAGE = 'usage: node migration-plan.js <root> --recs <file> [--profile <file>] [--adr-dir <dir>] [--format json|md] [--out <file>] [--write]';
 const BUILD_FILES = ['build.gradle', 'build.gradle.kts', 'settings.gradle', 'settings.gradle.kts', 'build.xml'];
@@ -52,31 +53,53 @@ const TEMPLATE_MARKER = `${'TO'}${'DO'}: run "setup"`;
 const TABLE_HEADER = '| Step | Description | Status |';
 const MAX_ROADMAP_BYTES = 4 * 1024 * 1024;
 
-/** The roadmap text with the table replaced by `table`, or null when the file has content of its own (no marker). */
-function replaceTemplateTable(existing, table) {
-  if (!existing.includes(TEMPLATE_MARKER)) return null;
-  const lines = existing.split('\n');
-  const head = lines.findIndex((l) => l.trim() === TABLE_HEADER);
-  const kept = (head === -1 ? lines : lines.slice(0, head)).filter((l) => !l.includes(TEMPLATE_MARKER));
-  return kept.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd() + '\n\n' + table;
+const PLACEHOLDER_LINE = `${TEMPLATE_MARKER} in your agent`;
+
+/**
+ * The roadmap bytes (as a Buffer) with the table replaced by `table`, or null when the file has content of its own.
+ * Replacement happens only when the existing roadmap has a table (header outside code fences) with no data rows; every
+ * other byte before and after it stays verbatim, line endings included, except the exact placeholder line. A marker in
+ * prose or hand-edited rows never triggers it.
+ */
+function replaceEmptyTable(existing, table) {
+  // latin1: one character per byte, so the user's bytes survive even when the file is not valid UTF-8.
+  const text = existing.toString('latin1');
+  const lines = text.split('\n');
+  const found = findTable(lines);
+  if (found === null) return null;
+  if (found.first < lines.length && lines[found.first].trim().startsWith('|')) return null;
+  const crlf = text.includes('\r\n');
+  const eol = crlf ? '\r\n' : '\n';
+  const pre = lines.slice(0, found.head).filter((l) => l.trim() !== PLACEHOLDER_LINE).join('\n');
+  const post = lines.slice(found.first).join('\n');
+  const tableText = crlf ? table.replaceAll('\n', '\r\n') : table;
+  return Buffer.concat([
+    Buffer.from(pre.length > 0 ? pre + '\n' : '', 'latin1'),
+    Buffer.from(tableText, 'utf8'),
+    Buffer.from(post.trim().length > 0 ? eol + post : post, 'latin1'),
+  ]);
 }
 
-/** Writes plan.json and the roadmap. The roadmap is replaced only while it still has the template marker, else roadmap.md.new. */
+/**
+ * Writes plan.json and the roadmap. The roadmap table is filled only while it has no rows; otherwise the proposal goes to
+ * roadmap.md.new and roadmap.md is left alone (plan.json is written either way; run refuses to start until the roadmap
+ * rows match the plan steps).
+ */
 function writePlanFiles(root, planText, table) {
   const roadmap = path.join(root, '.ai/migration/roadmap.md');
   let existing = null;
   try {
     const st = fs.lstatSync(roadmap);
     if (!st.isFile() || st.size > MAX_ROADMAP_BYTES) throw new Error('.ai/migration/roadmap.md must be a regular file of reasonable size');
-    existing = fs.readFileSync(roadmap, 'utf8');
+    existing = fs.readFileSync(roadmap);
   } catch (e) {
     if (e.code !== 'ENOENT') throw e;
   }
-  const replaced = existing === null ? `# Migration roadmap\n\n${table}` : replaceTemplateTable(existing, table);
+  const replaced = existing === null ? Buffer.from(`# Migration roadmap\n\n${table}`) : replaceEmptyTable(existing, table);
   const files = { 'migration/plan.json': planText, [replaced === null ? 'migration/roadmap.md.new' : 'migration/roadmap.md']: replaced ?? table };
   writeAiFiles(root, files);
   const lines = ['wrote .ai/migration/plan.json'];
-  if (replaced === null) lines.push('.ai/migration/roadmap.md has your content: wrote the proposed table to .ai/migration/roadmap.md.new (merge it by hand)');
+  if (replaced === null) lines.push('.ai/migration/roadmap.md already has rows or content of its own: wrote the proposed table to .ai/migration/roadmap.md.new (merge it by hand; run refuses to start until the roadmap rows match the plan)');
   else lines.push('wrote .ai/migration/roadmap.md');
   return lines;
 }

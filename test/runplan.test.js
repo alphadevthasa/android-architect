@@ -7,6 +7,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { renderRoadmap, checkPlan } from '../skill/scripts/lib/migplan.js';
 import { parseRoadmap, loadPlan, nextRunnable, setStatus } from '../skill/scripts/lib/runplan.js';
+import { writeAiFiles } from '../skill/scripts/lib/aidir.js';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const tmps = [];
@@ -126,7 +127,7 @@ test('nextRunnable: dependency order, gated step skipped, independent steps stil
 
 test('nextRunnable: skip, only-gated, blocked and done', () => {
   const allDone = Object.fromEntries(BASIC.steps.map((s) => [s.id, 'done']));
-  assert.deepEqual(nextRunnable(plan(allDone)), { done: true });
+  assert.deepEqual(nextRunnable(plan(allDone)), { done: true, doing: [] });
   const onlyGated = nextRunnable(plan({ ...allDone, c: 'todo', 'safety-net:login': 'todo', d: 'todo' }));
   assert.deepEqual(onlyGated.gated.map((s) => s.id), ['c', 'safety-net:login']);
   // a skipped (failed) step blocks its dependents, independent ones run
@@ -219,14 +220,101 @@ test('migration-plan --write: plan.json, and the template roadmap table is repla
   assert.deepEqual(parseRoadmap(md).errors, []);
   assert.equal(parseRoadmap(md).steps.length, plan.steps.length);
   assert.equal(loadPlan(root).steps.length, plan.steps.length);
-  // A second run never replaces the roadmap again: the user's content (edits) is kept and a .new file is written.
-  const edited = md + '\nmy own line\n';
+  // A second run never replaces the roadmap again: it has rows now, so the proposal goes to .new.
+  const edited = md.replace('| --- | --- | --- |\n', '| --- | --- | --- |\n| `a` | x | done |\n');
+  assert.notEqual(edited, md);
   fs.writeFileSync(roadmapPath(root), edited);
   const r2 = runCli([root, '--recs', recs, '--write']);
   assert.equal(r2.status, 0, r2.stderr);
   assert.match(r2.stdout, /roadmap\.md\.new/);
   assert.equal(fs.readFileSync(roadmapPath(root), 'utf8'), edited);
   assert.ok(fs.existsSync(path.join(root, '.ai/migration/roadmap.md.new')));
+});
+
+const PLACEHOLDER = `${'TO'}${'DO'}: run "setup" in your agent`;
+function writeRoadmapCase(content) {
+  const { root, recs } = gradleProject();
+  fs.mkdirSync(path.join(root, '.ai/migration'), { recursive: true });
+  fs.writeFileSync(roadmapPath(root), content);
+  const r = runCli([root, '--recs', recs, '--write']);
+  assert.equal(r.status, 0, r.stderr);
+  return { root, r, md: fs.readFileSync(roadmapPath(root)), hasNew: fs.existsSync(path.join(root, '.ai/migration/roadmap.md.new')) };
+}
+const EMPTY_TABLE = '| Step | Description | Status |\n| --- | --- | --- |\n';
+
+test('--write keeps text before and after an empty table verbatim and drops only the placeholder line', () => {
+  const { md, hasNew } = writeRoadmapCase(`# Mine\n\n${PLACEHOLDER}\n\nIntro \u00e9 text\n\n${EMPTY_TABLE}\n## My notes\n\nkeep me | here\n`);
+  const text = md.toString('utf8');
+  assert.equal(hasNew, false);
+  assert.ok(text.startsWith('# Mine\n\n\nIntro \u00e9 text\n\n| Step |'));
+  assert.ok(text.endsWith('\n\n## My notes\n\nkeep me | here\n'));
+  assert.ok(!text.includes(PLACEHOLDER));
+});
+
+test('--write preserves CRLF line endings', () => {
+  const { md } = writeRoadmapCase(`# Mine\r\n\r\n${EMPTY_TABLE.replaceAll('\n', '\r\n')}\r\nafter\r\n`);
+  const text = md.toString('utf8');
+  assert.ok(!/[^\r]\n/.test(text), 'every newline is CRLF');
+  assert.ok(text.includes('| Step |') && text.endsWith('after\r\n'));
+});
+
+test('--write: the marker in prose does not trigger replacement; rows with the placeholder present go to .new', () => {
+  const prose = `# R\n\nThe old file said: ${PLACEHOLDER}\n\nmy own text\n`;
+  const a = writeRoadmapCase(prose);
+  assert.equal(a.md.toString('utf8'), prose);
+  assert.ok(a.hasNew);
+  const rows = `# R\n\n${PLACEHOLDER}\n\n${EMPTY_TABLE}| \`a\` | hand written | doing |\n`;
+  const b = writeRoadmapCase(rows);
+  assert.equal(b.md.toString('utf8'), rows);
+  assert.ok(b.hasNew);
+  const fenced = `# R\n\n\`\`\`\n${EMPTY_TABLE}| \`a\` | in a fence | todo |\n\`\`\`\n`;
+  assert.ok(writeRoadmapCase(fenced).hasNew);
+});
+
+test('--write keeps non-UTF-8 bytes around the table', () => {
+  const pre = Buffer.from([0x23, 0x20, 0xe9, 0xff, 0x0a, 0x0a]);
+  const post = Buffer.from([0x0a, 0x80, 0xfe, 0x0a]);
+  const { md } = writeRoadmapCase(Buffer.concat([pre, Buffer.from(EMPTY_TABLE), post]));
+  assert.ok(md.subarray(0, pre.length).equals(pre));
+  assert.ok(md.subarray(md.length - post.length).equals(post));
+});
+
+test('parseRoadmap uses the first header outside fenced code', () => {
+  const md = `\`\`\`\n${EMPTY_TABLE}| \`fake\` | x | done |\n\`\`\`\n\n${EMPTY_TABLE}| \`real\` | x | todo |\n`;
+  assert.deepEqual(parseRoadmap(md).steps.map((x) => x.id), ['real']);
+});
+
+test('setStatus round-trips non-UTF-8 bytes and keeps content after the table', () => {
+  const root = project();
+  const raw = Buffer.concat([Buffer.from(renderRoadmap(BASIC)), Buffer.from([0x0a, 0xe9, 0xff, 0x80, 0x0a])]);
+  fs.writeFileSync(roadmapPath(root), raw);
+  setStatus(root, 'a', 'doing');
+  const out = fs.readFileSync(roadmapPath(root));
+  assert.ok(out.subarray(out.length - 5).equals(raw.subarray(raw.length - 5)));
+  assert.equal(out.length, raw.length - 'todo'.length + 'doing'.length);
+});
+
+test('writeAiFiles only writes the migration plan files, and keeps the file mode', () => {
+  const root = project();
+  const before = fs.readFileSync(roadmapPath(root));
+  for (const rel of ['knowledge/conventions.md', 'run.config.json', 'migration/other.md', '../x']) {
+    assert.throws(() => writeAiFiles(root, { [rel]: 'x' }), /outside the migration plan files/);
+  }
+  assert.throws(() => writeAiFiles(root, { 'migration/plan.json': 'ok', 'run.config.json': 'x' }), /outside/);
+  assert.ok(fs.readFileSync(roadmapPath(root)).equals(before));
+  assert.equal(fs.readFileSync(path.join(root, '.ai/migration/plan.json'), 'utf8').includes('"steps"'), true, 'nothing was written');
+  fs.chmodSync(roadmapPath(root), 0o640);
+  writeAiFiles(root, { 'migration/roadmap.md': 'new\n' });
+  assert.equal(fs.statSync(roadmapPath(root)).mode & 0o777, 0o640);
+});
+
+test('nextRunnable reports doing steps in every variant and coerces skip', () => {
+  const p = plan({ a: 'doing' });
+  assert.deepEqual(nextRunnable(p).doing.map((x) => x.id), ['a']);
+  assert.equal(nextRunnable(plan({}), { skip: ['a'] }).step.id, 'e');
+  for (const skip of [null, undefined, [], ['zzz']]) assert.ok(nextRunnable(plan({}), { skip }).step);
+  assert.ok(Array.isArray(nextRunnable(plan(Object.fromEntries(BASIC.steps.map((x) => [x.id, 'done'])))).doing));
+  assert.ok(Array.isArray(nextRunnable(plan({}), { skip: new Set(BASIC.steps.map((x) => x.id)) }).blocked));
 });
 
 test('migration-plan --write needs .ai and refuses a symlinked roadmap', () => {

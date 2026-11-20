@@ -1,6 +1,8 @@
-// .ai/run.config.json: settings of the autonomous run loop. The file lives in the repo, so it is untrusted input:
-// everything is validated before use (strict keys, caps, argv arrays only, a denylist of network and publishing
-// commands), nothing is evaluated and nothing is passed to a shell. Errors are prefixed with the file name.
+// .ai/run.config.json: settings of the autonomous run loop. The file is committed, so it is PR-controlled input and a
+// guard rail, not a sandbox: everything is validated before use (strict keys, caps, argv arrays only, an executable
+// ALLOWLIST for verification commands and per agent kind, a denylist of network and publishing words as defense in
+// depth, denied environment names), nothing is evaluated and nothing is passed to a shell. kind "custom" is user-trusted
+// (any bare name or project-relative script). Errors are prefixed with the file name.
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -43,14 +45,47 @@ const baseName = (s) => {
 };
 const hasSep = (s) => s.includes('/') || s.includes('\\');
 const hasDotDot = (s) => s.split(/[\\/]/).some((seg) => seg === '..');
-const isAbsolute = (s) => s.startsWith('/') || s.startsWith('\\') || s.startsWith('~') || /^[A-Za-z]:/.test(s);
+const isAbsolute = (s) => s.startsWith('/') || s.startsWith('\\') || s.startsWith('~') || /^[A-Za-z]:[\\/]/.test(s);
 
 function checkKeys(obj, allowed, where, bad) {
   for (const k of Object.keys(obj)) if (!allowed.includes(k)) bad(`${where}: unknown key ${JSON.stringify(k.slice(0, 40))}`);
 }
 
-/** Problems of one argv (empty when fine). `exeRule`: 'bare' (no separators) or 'project' (bare name or relative path inside the project). */
-function argvProblems(argv, where, root, exeRule) {
+const GRADLE_EXES = ['./gradlew', 'gradlew', 'gradle'];
+
+/** True for a script path that is relative, has no ".." and stays inside the project. */
+function insideProject(p, root) {
+  return !isAbsolute(p) && !hasDotDot(p) && (path.resolve(root, p) + path.sep).startsWith(path.resolve(root) + path.sep);
+}
+
+/** Allowlist for one verification command (empty when fine). */
+function verificationAllowProblems(argv, where, root) {
+  const exe = argv[0];
+  if (GRADLE_EXES.includes(exe)) {
+    const out = [];
+    for (let i = 1; i < argv.length; i++) {
+      const a = argv[i].toLowerCase();
+      const task = a.slice(a.lastIndexOf(':') + 1);
+      if (task.startsWith('publish')) out.push(`${where}[${i}]: publishing tasks are not allowed`);
+      else if (argv[i] === '-I' || a === '--init-script' || a.startsWith('--init-script=')) out.push(`${where}[${i}]: init scripts are not allowed`);
+    }
+    return out;
+  }
+  if (exe === 'node') {
+    if (argv.length < 2 || argv[1].startsWith('-') || !insideProject(argv[1], root)) {
+      return [`${where}[1]: node must run a script path relative to the project root (no flags such as -e, --eval, -p, --print, -r)`];
+    }
+    return [];
+  }
+  if (exe === 'npm') {
+    const ok = (argv.length === 2 && argv[1] === 'test') || (argv.length === 3 && argv[1] === 'run' && argv[2] === 'test');
+    return ok ? [] : [`${where}: npm is only allowed as "npm test" or "npm run test"`];
+  }
+  return [`${where}[0]: is not an allowed verification command (allowed: ./gradlew, gradlew, gradle, node <script>, npm test)`];
+}
+
+/** Problems of one argv (empty when fine). `kind`: 'verification' or the agent kind (claude, codex, custom). */
+function argvProblems(argv, where, root, kind) {
   if (!Array.isArray(argv)) return [`${where}: must be an array of strings`];
   if (argv.length === 0) return [`${where}: must not be empty`];
   if (argv.length > MAX_ARGV) return [`${where}: has more than ${MAX_ARGV} elements`];
@@ -64,25 +99,31 @@ function argvProblems(argv, where, root, exeRule) {
   }
   if (out.length > 0) return out;
   const exe = argv[0];
-  if (hasSep(exe)) {
-    if (exeRule === 'bare') out.push(`${where}[0]: must be a bare command name without a path (use kind "custom" for a project script)`);
-    else if (isAbsolute(exe) || hasDotDot(exe) || !(path.resolve(root, exe) + path.sep).startsWith(path.resolve(root) + path.sep)) {
-      out.push(`${where}[0]: a path must be relative to the project root and stay inside it`);
-    }
+  if (kind === 'claude' || kind === 'codex') {
+    if (exe !== kind) out.push(`${where}[0]: must be exactly "${kind}" for kind "${kind}" (use kind "custom" for another program)`);
+  } else if (kind === 'custom') {
+    if (hasSep(exe) && !insideProject(exe, root)) out.push(`${where}[0]: a path must be relative to the project root and stay inside it`);
+  } else {
+    out.push(...verificationAllowProblems(argv, where, root));
   }
   for (let i = 1; i < argv.length; i++) {
     if (isAbsolute(argv[i]) || hasDotDot(argv[i])) out.push(`${where}[${i}]: absolute paths and ".." are not allowed as arguments`);
   }
+  // Defense in depth: executables and subcommands that publish or touch the network.
   const exeName = baseName(exe);
-  for (let i = 0; i < argv.length; i++) {
-    if (DENIED_EXES.includes(baseName(argv[i]))) out.push(`${where}[${i}]: network commands are not allowed`);
-    else if (i > 0 && VCS_EXES.includes(exeName) && DENIED_SUBCOMMANDS.includes(argv[i].toLowerCase())) {
-      out.push(`${where}[${i}]: "${argv[i].toLowerCase()}" is not allowed after ${exeName}`);
+  if (DENIED_EXES.includes(exeName)) out.push(`${where}[0]: network commands are not allowed`);
+  if (VCS_EXES.includes(exeName)) {
+    for (let i = 1; i < argv.length; i++) {
+      if (DENIED_SUBCOMMANDS.includes(argv[i].toLowerCase())) out.push(`${where}[${i}]: "${argv[i].toLowerCase()}" is not allowed after ${exeName}`);
     }
   }
   return out;
 }
 
+const deniedEnvName = (k) => {
+  const u = k.toUpperCase();
+  return u === 'PATH' || u === 'HOME' || u === 'NODE_OPTIONS' || u.startsWith('LD_') || u.startsWith('DYLD_') || u.startsWith('GIT_') || u.startsWith('SSH_') || u.endsWith('_PROXY');
+};
 const validEnvName = (k) => {
   if (k.length === 0 || k.length > 64) return false;
   for (let i = 0; i < k.length; i++) {
@@ -129,7 +170,7 @@ export function validateRunConfig(value, root) {
           if (a.kind === 'custom') bad('agent.command is required for kind "custom"');
           else config.agent.command = [a.kind];
         } else {
-          const p = argvProblems(a.command, 'agent.command', root, a.kind === 'custom' ? 'project' : 'bare');
+          const p = argvProblems(a.command, 'agent.command', root, a.kind);
           problems.push(...p);
           if (p.length === 0) config.agent.command = [...a.command];
         }
@@ -142,7 +183,8 @@ export function validateRunConfig(value, root) {
           const env = {};
           for (const k of keys.slice(0, MAX_ENV)) {
             const v = a.env[k];
-            if (!validEnvName(k)) bad(`agent.env key ${JSON.stringify(k.slice(0, 40))} must be A-Z, 0-9 and "_" only`);
+            if (validEnvName(k) && deniedEnvName(k)) bad(`agent.env.${k} is not allowed (PATH, HOME, LD_*, DYLD_*, NODE_OPTIONS, GIT_*, SSH_* and *_PROXY are reserved)`);
+            else if (!validEnvName(k)) bad(`agent.env key ${JSON.stringify(k.slice(0, 40))} must be A-Z, 0-9 and "_" only`);
             else if (typeof v !== 'string' || v.length > MAX_ARG || hasControl(v)) bad(`agent.env.${k} must be a printable string of at most ${MAX_ARG} characters`);
             else env[k] = v;
           }
@@ -177,7 +219,7 @@ export function validateRunConfig(value, root) {
         else {
           const cmds = [];
           v.commands.forEach((c, i) => {
-            const p = argvProblems(c, `verification.commands[${i}]`, root, 'project');
+            const p = argvProblems(c, `verification.commands[${i}]`, root, 'verification');
             problems.push(...p);
             if (p.length === 0) cmds.push([...c]);
           });
@@ -208,8 +250,10 @@ export function loadRunConfig(root) {
   const file = path.join(root, RUN_CONFIG_FILE);
   let st;
   try {
+    if (fs.lstatSync(path.join(root, '.ai')).isSymbolicLink()) throw new Error(`${PREFIX}must be a regular file (symlinks are not followed)`);
     st = fs.lstatSync(file);
   } catch (err) {
+    if (err.message.startsWith(PREFIX)) throw err;
     if (err.code === 'ENOENT') return validateRunConfig({ schemaVersion: 1 }, root).config;
     throw new Error(`${PREFIX}cannot be read (${err.code ?? 'error'})`);
   }

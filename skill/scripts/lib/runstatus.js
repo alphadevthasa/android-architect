@@ -9,6 +9,28 @@ const MAX_FILES = 200;
 const MAX_PATH = 300;
 const MAX_BLOCK = 256 * 1024;
 
+import { stripUnsafe } from './mdtext.js';
+
+/** Text without control characters (newline and tab stay) and without bidi controls. */
+const cleanText = (s) => {
+  let out = '';
+  for (const ch of stripUnsafe(s)) {
+    const c = ch.charCodeAt(0);
+    if (c === 10 || c === 9 || (c >= 0x20 && c !== 0x7f && !(c >= 0x80 && c <= 0x9f))) out += ch;
+  }
+  return out;
+};
+
+/** A changed-file path: relative, no ".." segment, no control characters, not starting with "-". */
+const validPath = (f) => {
+  if (f.length === 0 || f.length > MAX_PATH || f.startsWith('-') || f.startsWith('/') || f.startsWith('\\') || /^[A-Za-z]:[\\/]/.test(f)) return false;
+  for (let i = 0; i < f.length; i++) {
+    const c = f.charCodeAt(i);
+    if (c < 0x20 || c === 0x7f) return false;
+  }
+  return !f.split(/[\\/]/).some((seg) => seg === '..');
+};
+
 const fail = (reason) => ({ ok: false, reason });
 
 /** True when the marker found at `at` is alone on its line (only a CR may follow it). */
@@ -51,7 +73,7 @@ export function parseStatus(raw, expectedStepId) {
   if (typeof value.summary !== 'string' || value.summary.length > MAX_TEXT) return fail(`summary must be text of at most ${MAX_TEXT} characters`);
   if (typeof value.verification !== 'string' || value.verification.length > MAX_TEXT) return fail(`verification must be text of at most ${MAX_TEXT} characters`);
   if (!Array.isArray(value.filesChanged) || value.filesChanged.length > MAX_FILES) return fail(`filesChanged must be a list of at most ${MAX_FILES} paths`);
-  for (const f of value.filesChanged) if (typeof f !== 'string' || f.length > MAX_PATH) return fail(`filesChanged entries must be text of at most ${MAX_PATH} characters`);
+  for (const f of value.filesChanged) if (typeof f !== 'string' || !validPath(f)) return fail('filesChanged entries must be relative paths without "..", control characters or a leading "-"');
   const { step, status, summary, filesChanged, verification } = value;
-  return { ok: true, status: { step, status, summary, filesChanged: [...filesChanged], verification } };
+  return { ok: true, status: { step, status, summary: cleanText(summary), filesChanged: [...filesChanged], verification: cleanText(verification) } };
 }
