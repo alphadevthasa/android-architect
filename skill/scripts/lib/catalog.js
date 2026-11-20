@@ -159,6 +159,9 @@ export function validateEntry(dimId, e, ctx) {
       }
     }
   }
+  if (e.minVersion !== undefined && !(isStr(e.minVersion) && /^\d+(\.\d+)*$/.test(e.minVersion))) {
+    errs.push(`${where}: minVersion must be a dotted numeric version`);
+  }
   if (e.appliesWhen !== undefined) validateAppliesWhen(where, e.appliesWhen, errs);
   if (e.source !== undefined && !isAllowedSource(e.source)) {
     errs.push(`${where}: source must be an https URL on ${SOURCE_HOSTS.join(' or ')}`);
@@ -213,6 +216,9 @@ export function validateCatalog(raw) {
       continue;
     }
     if (index.has(d.id)) errs.push(`duplicate dimension id "${d.id}"`);
+    if (d.asOf !== undefined && !(typeof d.asOf === 'string' && ISO_DATE_RE.test(d.asOf))) errs.push(`${d.id}: asOf must be YYYY-MM-DD`);
+    if (d.verified !== undefined && typeof d.verified !== 'boolean') errs.push(`${d.id}: verified must be a boolean`);
+    if (d.dataNote !== undefined && !isStr(d.dataNote)) errs.push(`${d.id}: dataNote must be a non-empty string`);
     const ids = new Set();
     for (const e of d.entries) {
       if (isObj(e) && isStr(e.id)) {

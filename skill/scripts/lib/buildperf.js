@@ -5,8 +5,11 @@ import path from 'node:path';
 import { compareVersions } from './version.js';
 
 export const KAPT_PLUGINS = new Set(['kotlin-kapt', 'org.jetbrains.kotlin.kapt']);
-/** Kotlin version from which the catalog marks K2 as current (language.kotlin-k2). */
-export const K2_MIN_VERSION = '2.0';
+/** Minimum Kotlin version of the catalog's current `language.kotlin-k2` entry, or null when the catalog has none. */
+export function kotlinK2Min(catalog) {
+  const e = catalog.dimensions.find((d) => d.id === 'language')?.entries.find((x) => x.id === 'kotlin-k2');
+  return e && e.status === 'current' && typeof e.minVersion === 'string' ? e.minVersion : null;
+}
 const PROPS = 'gradle.properties';
 
 /** First kapt use across build units ({ file, line }) or null: the kapt plugin applied, or a kapt* dependency configuration. */
@@ -62,19 +65,20 @@ function switchItem(sw, file, props) {
 
 function kotlinItem(ctx, catalog) {
   const k2 = catalog.dimensions.find((d) => d.id === 'language')?.entries.find((e) => e.id === 'kotlin-k2');
+  const k2Min = kotlinK2Min(catalog);
   const cands = [];
   for (const u of ctx.buildUnits) {
     for (const p of u.build.plugins) if (p.id.startsWith('org.jetbrains.kotlin') && p.version) cands.push({ file: u.file, line: p.line, version: p.version });
     for (const d of u.build.dependencies) if (d.group === 'org.jetbrains.kotlin' && d.version) cands.push({ file: u.file, line: d.line, version: d.version });
   }
-  if (!k2 || k2.status !== 'current' || cands.length === 0) {
+  if (k2Min === null || cands.length === 0) {
     return { id: 'kotlin-version', status: 'unknown', detail: 'Kotlin version not statically resolvable (or no current Kotlin entry in the catalog)', file: null, line: null };
   }
-  const old = cands.find((c) => compareVersions(c.version, K2_MIN_VERSION) < 0);
+  const old = cands.find((c) => compareVersions(c.version, k2Min) < 0);
   if (old) {
-    return { id: 'kotlin-version', status: 'gap', detail: `Kotlin ${old.version} is older than ${K2_MIN_VERSION}, the version of the catalog's current entry "${k2.name}"`, file: old.file, line: old.line };
+    return { id: 'kotlin-version', status: 'gap', detail: `Kotlin ${old.version} is older than ${k2Min}, the version of the catalog's current entry "${k2.name}"`, file: old.file, line: old.line };
   }
-  return { id: 'kotlin-version', status: 'ok', detail: `Kotlin ${cands[0].version} is at least ${K2_MIN_VERSION}`, file: cands[0].file, line: cands[0].line };
+  return { id: 'kotlin-version', status: 'ok', detail: `Kotlin ${cands[0].version} is at least ${k2Min}`, file: cands[0].file, line: cands[0].line };
 }
 
 /** `profile.buildPerformance.items`: [{ id, status: ok|gap|unknown, detail, file, line|null }]. */

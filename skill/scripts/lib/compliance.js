@@ -3,11 +3,12 @@
 // policy applies but the project cannot be verified statically the status is `check` (or `unknown` when the
 // target level is not resolvable); `ok` is only reported with evidence or when the policy does not bite yet.
 
+import { stripCode, stripXmlComments } from './strip.js';
+
 const COMPLIANCE_DIM = 'compliance';
 const TARGET_SDK_MIN = 'targetSdkMin';
 const PAGE_SIZE = 'pageSizeBytes';
 const MAX_SERVICE_LINES = 20;
-const isComment = (t) => t.startsWith('//') || t.startsWith('*') || t.startsWith('/*') || t.startsWith('<!--');
 const tagStart = (text, tag) => {
   // `<service` but not `<service-alias` or `<serviceX`.
   let from = 0;
@@ -27,14 +28,18 @@ function scanSignals(ctx) {
   };
   const services = { typed: 0, untyped: 0 };
   for (const f of ctx.manifests) {
-    const lines = ctx.read(f);
-    if (!lines) continue;
-    lines.forEach((raw, i) => {
-      const t = raw.trim();
-      if (isComment(t)) return;
+    const raw = ctx.read(f);
+    if (!raw) continue;
+    const lines = stripXmlComments(raw);
+    lines.forEach((text, i) => {
+      const t = text.trim();
       if (t.includes('SCHEDULE_EXACT_ALARM') || t.includes('USE_EXACT_ALARM')) mark('exactAlarmManifest', f, i + 1);
       if (t.includes('POST_NOTIFICATIONS')) mark('postNotifications', f, i + 1);
-      if (t.includes('READ_EXTERNAL_STORAGE')) mark('readExternalStorage', f, i + 1);
+      if (t.includes('READ_EXTERNAL_STORAGE')) {
+        let tag = t;
+        for (let j = i + 1; j < lines.length && j < i + MAX_SERVICE_LINES && !tag.includes('>'); j++) tag += ' ' + lines[j];
+        mark(tag.includes('maxSdkVersion') ? 'readExternalScoped' : 'readExternalStorage', f, i + 1);
+      }
       if (t.includes('READ_MEDIA_')) mark('readMedia', f, i + 1);
       if (t.includes('enableOnBackInvokedCallback') && /enableOnBackInvokedCallback\s*=\s*"true"/.test(t)) mark('backCallback', f, i + 1);
       if (tagStart(t, '<service')) {
@@ -49,11 +54,10 @@ function scanSignals(ctx) {
     });
   }
   for (const f of ctx.sourceFiles) {
-    const lines = ctx.read(f);
-    if (!lines) continue;
-    lines.forEach((raw, i) => {
-      const t = raw.trim();
-      if (isComment(t)) return;
+    const raw = ctx.read(f);
+    if (!raw) continue;
+    stripCode(raw).forEach((text, i) => {
+      const t = text.trim();
       if (t.includes('startForeground(')) mark('startForeground', f, i + 1);
       if (t.includes('NotificationManager')) mark('notificationManager', f, i + 1);
       if (t.includes('setExact')) mark('exactAlarmCall', f, i + 1);
@@ -65,7 +69,7 @@ function scanSignals(ctx) {
     if (f.endsWith('.so') && f.split('/').includes('jniLibs')) mark('nativeLib', f, null);
     if (/\.gradle(\.kts)?$/.test(f)) {
       const lines = ctx.read(f);
-      lines?.forEach((text, i) => {
+      if (lines) stripCode(lines).forEach((text, i) => {
         if (text.includes('externalNativeBuild')) mark('nativeBuild', f, i + 1);
         else if (/\bndk\s*\{/.test(text)) mark('nativeBuild', f, i + 1);
       });
@@ -83,7 +87,7 @@ function signalValues({ ev }) {
     usesForegroundService: ev.startForeground !== undefined,
     usesExactAlarm: ev.exactAlarmManifest !== undefined || ev.exactAlarmCall !== undefined,
     usesNotifications: ev.notificationManager !== undefined || ev.postNotifications !== undefined,
-    usesMediaStorage: ev.readExternalStorage !== undefined || ev.readMedia !== undefined,
+    usesMediaStorage: ev.readExternalStorage !== undefined || ev.readExternalScoped !== undefined || ev.readMedia !== undefined,
   };
 }
 
@@ -108,25 +112,31 @@ const JUDGE = {
   'fgs-types': ({ s, sdk, value }) => {
     const { ev, services } = s;
     if (sdk.targetSdk < value) return { status: 'ok', detail: `${below(sdk, value)}; ${at(ev.startForeground)} calls startForeground(` };
-    if (ev.startForeground === undefined || services.untyped === 0) {
-      return { status: 'ok', detail: `every <service> found declares android:foregroundServiceType` };
+    const found = services.typed + services.untyped;
+    const call = ev.startForeground === undefined ? 'no startForeground( call' : `startForeground( at ${at(ev.startForeground)}`;
+    if (found === 0) {
+      return { status: 'check', detail: `${call}, but no <service> was found in the scanned manifests; services can be declared by dependencies or unscanned manifests, confirm android:foregroundServiceType in the merged manifest` };
     }
-    if (services.typed === 0) {
-      return { status: 'gap', detail: `startForeground( at ${at(ev.startForeground)} but no <service> in a scanned manifest declares android:foregroundServiceType (untyped service at ${at(ev.untypedService)})` };
+    if (services.untyped === 0) return { status: 'ok', detail: `${call}; every <service> found declares android:foregroundServiceType` };
+    if (ev.startForeground !== undefined && services.typed === 0) {
+      return { status: 'gap', detail: `statically detected likely violation: startForeground( at ${at(ev.startForeground)} and the <service> at ${at(ev.untypedService)} declares no android:foregroundServiceType; confirm in the merged manifest` };
     }
-    return { status: 'check', detail: `startForeground( at ${at(ev.startForeground)}; some <service> declarations have no android:foregroundServiceType (${at(ev.untypedService)}) and a call cannot be matched to its service statically` };
+    return { status: 'check', detail: `${call}; some <service> declarations have no android:foregroundServiceType (${at(ev.untypedService)}) and a call cannot be matched to its service statically` };
   },
   'post-notifications': ({ s, sdk, value }) => {
     const { ev } = s;
     if (sdk.targetSdk < value) return { status: 'ok', detail: below(sdk, value) };
     if (ev.postNotifications !== undefined) return { status: 'ok', detail: `POST_NOTIFICATIONS declared at ${at(ev.postNotifications)}; the runtime request flow is not verified` };
-    return { status: 'gap', detail: `notifications are used (${at(ev.notificationManager)}) but POST_NOTIFICATIONS is not declared in a scanned manifest` };
+    return { status: 'check', detail: `notifications are used (${at(ev.notificationManager)}); POST_NOTIFICATIONS not found in the scanned manifests; confirm in the merged manifest (dependencies can add it)` };
   },
   'media-permissions': ({ s, sdk, value }) => {
     const { ev } = s;
     if (sdk.targetSdk < value) return { status: 'ok', detail: below(sdk, value) };
     if (ev.readMedia !== undefined) return { status: 'ok', detail: `READ_MEDIA_* declared at ${at(ev.readMedia)}` };
-    return { status: 'gap', detail: `READ_EXTERNAL_STORAGE declared at ${at(ev.readExternalStorage)} without any READ_MEDIA_* permission` };
+    if (ev.readExternalStorage !== undefined) {
+      return { status: 'gap', detail: `statically detected likely violation: READ_EXTERNAL_STORAGE declared at ${at(ev.readExternalStorage)} without maxSdkVersion and no READ_MEDIA_* permission; confirm in the merged manifest` };
+    }
+    return { status: 'check', detail: `READ_EXTERNAL_STORAGE is scoped with maxSdkVersion at ${at(ev.readExternalScoped)} and no READ_MEDIA_* permission was found in the scanned manifests; confirm media access (READ_MEDIA_* or the photo picker) in the merged manifest` };
   },
   'exact-alarm': ({ s, sdk, value }) => {
     const { ev } = s;

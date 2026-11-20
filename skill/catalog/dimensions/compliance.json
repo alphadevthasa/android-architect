@@ -1,6 +1,9 @@
 {
   "id": "compliance",
   "name": "Platform compliance",
+  "asOf": "2026-11-20",
+  "verified": false,
+  "dataNote": "Policy values, effective dates and source links written from memory; maintainers must audit before release",
   "entries": [
     {
       "id": "target-sdk-35",

@@ -135,6 +135,7 @@ test('I7: SKILL.md ground rules, recommend loop and profile notes', () => {
   assert.match(rec, /Exit 2 because your own recommendations JSON is malformed[^\n]*counts as an attempt/);
   assert.match(rec, /more than 5 times in total/);
   assert.match(body, /`profile\.compliance`[^\n]*`ok`, `gap`, `check` or `unknown`/);
+  assert.match(body, /`gap` is a statically detected likely violation \(confirm in the merged manifest/);
   assert.match(body, /`check` means the policy applies but the project cannot be verified statically/);
   assert.match(body, /`profile\.buildPerformance\.items`[^\n]*`ok`, `gap` or `unknown`/);
   assert.doesNotMatch(body, /`compliance` checks\)/);

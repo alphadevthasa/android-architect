@@ -8,7 +8,7 @@ import { securityFindings, summarizeFindings } from './security.js';
 import { compareVersions } from './version.js';
 import { vulnerableDependencies } from './vuln.js';
 import { evaluateCompliance } from './compliance.js';
-import { evaluateBuildPerformance, kaptUse, K2_MIN_VERSION } from './buildperf.js';
+import { evaluateBuildPerformance, kaptUse, kotlinK2Min } from './buildperf.js';
 
 export { compareVersions };
 
@@ -227,12 +227,12 @@ function evaluateComputed(dimId, entryId, ctx) {
   if (key === 'language.kotlin-k2') {
     for (const u of ctx.buildUnits) {
       for (const p of u.build.plugins) {
-        if (p.id.startsWith('org.jetbrains.kotlin') && p.version && compareVersions(p.version, K2_MIN_VERSION) >= 0) {
+        if (p.id.startsWith('org.jetbrains.kotlin') && p.version && ctx.k2Min !== null && compareVersions(p.version, ctx.k2Min) >= 0) {
           addEvidence(acc, u.key, 'module', { file: u.file, line: p.line, signal: `kotlin plugin ${p.version}` });
         }
       }
       for (const dep of u.build.dependencies) {
-        if (dep.group === 'org.jetbrains.kotlin' && dep.version && compareVersions(dep.version, K2_MIN_VERSION) >= 0) {
+        if (dep.group === 'org.jetbrains.kotlin' && dep.version && ctx.k2Min !== null && compareVersions(dep.version, ctx.k2Min) >= 0) {
           addEvidence(acc, u.key, 'module', { file: u.file, line: dep.line, signal: `kotlin ${dep.version}` });
         }
       }
@@ -421,6 +421,7 @@ export function collectEntryMatches(root, catalog, dimId, entryId) {
   const dim = catalog.dimensions.find((d) => d.id === dimId);
   if (dim === undefined || dim.id === COMPLIANCE_DIM) return [];
   const { ctx, moduleOf } = buildContext(root);
+  ctx.k2Min = kotlinK2Min(catalog);
   const acc = dimensionAccs(dim, ctx, moduleOf).get(entryId);
   if (acc === undefined) return [];
   const seen = new Set();
@@ -437,6 +438,7 @@ export function collectEntryMatches(root, catalog, dimId, entryId) {
 /** Map an Android project onto every catalog dimension. */
 export function detectStack(root, catalog) {
   const { ctx, files, read, modules, moduleOf } = buildContext(root);
+  ctx.k2Min = kotlinK2Min(catalog);
   const sdk = sdkSummary(modules);
   const dimensions = {};
   for (const dim of catalog.dimensions) {

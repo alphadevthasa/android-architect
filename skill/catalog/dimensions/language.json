@@ -67,7 +67,8 @@
       ],
       "detect": {
         "computed": true
-      }
+      },
+      "minVersion": "2.0"
     },
     {
       "id": "kmp",

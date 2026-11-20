@@ -51,6 +51,7 @@ test('foreground service without a declared type is a gap at targetSdk 34+, ok w
   withProject({ ...base(34), ...kt, 'app/src/main/AndroidManifest.xml': MANIFEST_SVC }, (p) => {
     const c = item(p, 'fgs-types');
     assert.equal(c.status, 'gap');
+    assert.match(c.detail, /likely violation/);
     assert.match(c.detail, /startForeground/);
     assert.match(c.detail, /Sync\.kt:3/);
   });
@@ -80,11 +81,12 @@ test('a policy effective after the catalog asOf is upcoming and never a gap', ()
 
 test('notification, media and exact alarm advice', () => {
   const kt = (s) => ({ 'app/src/main/java/N.kt': s });
-  withProject({ ...base(34), ...kt('val m: NotificationManager = x\n'), 'app/src/main/AndroidManifest.xml': '<manifest>\n</manifest>\n' }, (p) => assert.equal(item(p, 'post-notifications').status, 'gap'));
+  withProject({ ...base(34), ...kt('val m: NotificationManager = x\n'), 'app/src/main/AndroidManifest.xml': '<manifest>\n</manifest>\n' }, (p) => { assert.equal(item(p, 'post-notifications').status, 'check'); assert.match(item(p, 'post-notifications').detail, /confirm in the merged manifest/); });
   withProject({ ...base(34), ...kt('val m: NotificationManager = x\n'), 'app/src/main/AndroidManifest.xml': '<manifest>\n<uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>\n</manifest>\n' }, (p) => assert.equal(item(p, 'post-notifications').status, 'ok'));
   withProject({ ...base(32), ...kt('val m: NotificationManager = x\n') }, (p) => assert.equal(item(p, 'post-notifications').status, 'ok'));
   withProject(base(34), (p) => assert.equal(item(p, 'post-notifications'), undefined));
   withProject({ ...base(34), 'app/src/main/AndroidManifest.xml': '<manifest>\n<uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>\n</manifest>\n' }, (p) => assert.equal(item(p, 'media-permissions').status, 'gap'));
+  withProject({ ...base(34), 'app/src/main/AndroidManifest.xml': '<manifest>\n<uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"\n  android:maxSdkVersion="32"/>\n</manifest>\n' }, (p) => assert.equal(item(p, 'media-permissions').status, 'check'));
   withProject({ ...base(34), 'app/src/main/AndroidManifest.xml': '<manifest>\n<uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>\n<uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>\n</manifest>\n' }, (p) => assert.equal(item(p, 'media-permissions').status, 'ok'));
   withProject({ ...base(34), ...kt('alarm.setExactAndAllowWhileIdle(a, b, c)\n') }, (p) => assert.equal(item(p, 'exact-alarm').status, 'check'));
   withProject({ ...base(34), ...kt('if (alarm.canScheduleExactAlarms()) alarm.setExact(a, b, c)\n') }, (p) => assert.equal(item(p, 'exact-alarm').status, 'ok'));
@@ -134,4 +136,54 @@ test('shipped compliance entries carry sources on allowed hosts and apply signal
     const entry = dim.entries.find((e) => e.id === id);
     assert.ok(entry.appliesWhen && entry.source, id);
   }
+});
+
+test('foreground service evidence: no service found is check, string literals and comments are not signals', () => {
+  withProject({ ...base(35), 'app/src/main/java/Sync.kt': SVC_KT }, (p) => {
+    const c = item(p, 'fgs-types');
+    assert.equal(c.status, 'check');
+    assert.match(c.detail, /merged manifest/);
+  });
+  const quiet = { ...base(35), 'app/src/main/AndroidManifest.xml': MANIFEST_SVC };
+  withProject({ ...quiet, 'app/src/main/java/A.kt': 'val s = "startForeground(1, n)"\n' }, (p) => assert.equal(item(p, 'fgs-types'), undefined));
+  const raw = '// startForeground(1, n)\n/* a\n startForeground(2, n)\n*/\nval t = """\nstartForeground(3)\n"""\n';
+  withProject({ ...quiet, 'app/src/main/java/A.kt': raw }, (p) => assert.equal(item(p, 'fgs-types'), undefined));
+  const man = '<manifest>\n<!--\n<service android:foregroundServiceType="x"/>\n-->\n<service android:name=".S"/>\n</manifest>\n';
+  withProject({ ...base(35), 'app/src/main/java/A.kt': 'fun f() {\n  startForeground(1, n) // go\n}\n', 'app/src/main/AndroidManifest.xml': man }, (p) => assert.equal(item(p, 'fgs-types').status, 'gap'));
+});
+
+test('commented-out or quoted native build signals are ignored', () => {
+  withProject({ ...base(35), 'app/build.gradle.kts': gradle(35) + '// externalNativeBuild {\n/* ndk {\n} */\nval x = "ndk { }"\n' }, (p) => assert.equal(item(p, 'page-size-16kb'), undefined));
+});
+
+test('hostile inputs stay linear', () => {
+  const big = 'a'.repeat(1024 * 1000 - 10);
+  const t0 = Date.now();
+  withProject({
+    ...base(35),
+    'app/src/main/java/A.kt': `/* ${big}`,
+    'app/src/main/java/B.kt': `val s = "${big}`,
+    'app/src/main/java/C.kt': `${big} startForeground(`,
+    'app/src/main/AndroidManifest.xml': `<manifest>\n<!-- ${big}`,
+    'app/build.gradle': `x = '${big}`,
+  }, (p) => assert.ok(p.compliance.length > 0));
+  assert.ok(Date.now() - t0 < 5000);
+});
+
+test('modern-compose emits the edge-to-edge check row', () => {
+  const fx = path.join(path.dirname(new URL(import.meta.url).pathname), 'fixtures', 'modern-compose');
+  assert.equal(item(detectStack(fx, catalog), 'edge-to-edge').status, 'check');
+});
+
+test('dimension asOf, verified and dataNote are validated; minVersion is numeric', async () => {
+  const { validateCatalog } = await import('../skill/scripts/lib/catalog.js');
+  const meta = { schemaVersion: 1, catalogVersion: 'x', asOf: '2026-01-01' };
+  const e = { id: 'a', name: 'a', era: 1, status: 'current', successors: [], detect: { computed: true } };
+  const run = (extra, entry = e) => validateCatalog({ meta, dimensions: [{ id: 'compliance', name: 'c', entries: [entry], ...extra }] });
+  assert.deepEqual(run({ asOf: '2026-11-20', verified: false, dataNote: 'x' }), []);
+  assert.ok(run({ asOf: 'soon' }).some((m) => m.includes('asOf')));
+  assert.ok(run({ verified: 'no' }).some((m) => m.includes('verified')));
+  assert.ok(run({ dataNote: '' }).some((m) => m.includes('dataNote')));
+  assert.ok(run({}, { ...e, minVersion: 'two' }).some((m) => m.includes('minVersion')));
+  assert.equal(catalog.dimensions.find((d) => d.id === 'compliance').verified, false);
 });
