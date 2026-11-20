@@ -334,7 +334,7 @@ test('every git invocation avoids push/fetch/remote/merge (PATH shim)', () => {
 });
 
 // ---------- hardening ----------
-test('repo-local config cannot execute code through the runner (fsmonitor, alias, external diff)', () => {
+test('repo-local config cannot execute code through runGit (fsmonitor, alias, external diff); the scan refuses such a repo', () => {
   const d = repo('feature');
   const marker = path.join(d, '..', `marker-${path.basename(d)}`);
   tmps.push(marker);
@@ -348,13 +348,12 @@ test('repo-local config cannot execute code through the runner (fsmonitor, alias
   execFileSync('git', ['status', '--porcelain'], { cwd: d, stdio: 'ignore' });
   assert.equal(fs.existsSync(marker), true, 'control: fsmonitor should run for plain git');
   fs.rmSync(marker);
-  start(d);
-  write(d, 'a.txt', 'x\n');
-  hasChanges(d);
   runGit(d, ['status', '--porcelain=v1']);
-  commitStep(d, { id: 's1', title: 't' });
-  diffSince(d, g(d, 'rev-parse', 'HEAD~1').trim());
-  assert.equal(fs.existsSync(marker), false, 'runner git must not execute repo-local config commands');
+  runGit(d, ['diff', '--no-ext-diff', 'HEAD']);
+  assert.equal(fs.existsSync(marker), false, 'runGit must not execute repo-local config commands');
+  refuses(() => start(d), /core\.fsmonitor|diff\.external|alias/);
+  refuses(() => hasChanges(d), /run programs/);
+  assert.equal(fs.existsSync(marker), false);
 });
 
 test('hostile GIT_* variables in process.env are dropped', () => {
@@ -401,7 +400,10 @@ test('confirmFirstUse prompts, writes a hash-bound consent, and re-prompts on an
   const out = said.join('\n');
   assert.match(out, /verification runs your project's Gradle build code and may reach the network/);
   assert.match(out, /run as you|run as the user|as your user/i);
-  const consent = JSON.parse(fs.readFileSync(path.join(d, '.ai/runs/.confirmed'), 'utf8'));
+  const consentPath = path.join(d, '.git/android-architect/confirmed.json');
+  assert.equal(fs.statSync(consentPath).mode & 0o777, 0o600);
+  assert.equal(fs.existsSync(path.join(d, '.ai/runs/.confirmed')), false);
+  const consent = JSON.parse(fs.readFileSync(consentPath, 'utf8'));
   const expected = crypto.createHash('sha256').update(Buffer.concat([Buffer.from(text), Buffer.from('\n' + JSON.stringify(argv))])).digest('hex');
   assert.equal(consent.schemaVersion, 1);
   assert.equal(consent.hash, expected);
@@ -418,23 +420,50 @@ test('confirmFirstUse prompts, writes a hash-bound consent, and re-prompts on an
   assert.equal(await confirmFirstUse(d, { confirm: () => (asked++, false), say: () => {}, config, agentArgv: argv }), false);
   assert.equal(asked, 3);
   // declined does not rewrite the consent
-  assert.equal(JSON.parse(fs.readFileSync(path.join(d, '.ai/runs/.confirmed'), 'utf8')).hash, expected);
+  assert.equal(JSON.parse(fs.readFileSync(consentPath, 'utf8')).hash, expected);
 });
 
-test('confirmFirstUse never trusts a garbage or tracked consent file', async () => {
+test('a consent file shipped inside the working tree is ignored; garbage in the git dir is ignored', async () => {
   const d = repo('feature');
   cfgFile(d, '{"schemaVersion":1}');
   const config = loadRunConfig(d);
-  write(d, '.ai/runs/.confirmed', 'not json');
+  const hash = crypto.createHash('sha256').update('{"schemaVersion":1}\n["claude"]').digest('hex');
+  for (const rel of ['.ai/runs/.confirmed', '.ai/.confirmed', '.confirmed', '.git/../android-architect/confirmed.json']) {
+    write(d, rel, JSON.stringify({ schemaVersion: 1, hash, confirmedAt: 'x' }));
+  }
   let asked = 0;
   assert.equal(await confirmFirstUse(d, { confirm: () => (asked++, false), say: () => {}, config, agentArgv: ['claude'] }), false);
   assert.equal(asked, 1);
-  fs.rmSync(path.join(d, '.ai/runs'), { recursive: true });
-  const hash = crypto.createHash('sha256').update('{"schemaVersion":1}\n["claude"]').digest('hex');
-  write(d, '.ai/runs/.confirmed', JSON.stringify({ schemaVersion: 1, hash, confirmedAt: 'x' }));
-  g(d, 'add', '-f', '.ai/runs/.confirmed');
-  g(d, 'commit', '-q', '-m', 'forged');
-  await assert.rejects(() => confirmFirstUse(d, { confirm: () => true, say: () => {}, config, agentArgv: ['claude'] }), (e) => e instanceof RunRefusal && /tracked/.test(e.message));
+  write(d, '.git/android-architect/confirmed.json', 'not json');
+  assert.equal(await confirmFirstUse(d, { confirm: () => (asked++, false), say: () => {}, config, agentArgv: ['claude'] }), false);
+  assert.equal(asked, 2);
+});
+
+test('tracked .ai/runs in any letter case (core.ignorecase=true) is refused and cannot pre-confirm', async () => {
+  for (const rel of ['.AI/RUNS/.confirmed', '.Ai/runs/x.log', '.ai/Runs/.confirmed']) {
+    const d = repo('feature');
+    g(d, 'config', 'core.ignorecase', 'true');
+    cfgFile(d, '{"schemaVersion":1}');
+    write(d, rel, '{}');
+    g(d, 'add', '-f', '-A');
+    g(d, 'commit', '-q', '-m', 'forged');
+    refuses(() => start(d), /tracked/);
+    await assert.rejects(() => confirmFirstUse(d, { confirm: () => true, say: () => {}, config: loadRunConfig(d), agentArgv: ['claude'] }), (e) => e instanceof RunRefusal && /tracked/.test(e.message));
+  }
+});
+
+test('confirmFirstUse input checks: confirm must be a function; config must match the bytes; statement mentions inherited HOME/PATH', async () => {
+  const d = repo('feature');
+  cfgFile(d, '{"schemaVersion":1}');
+  const config = loadRunConfig(d);
+  await assert.rejects(() => confirmFirstUse(d, { confirm: true, say: () => {}, config, agentArgv: ['claude'] }), RunRefusal);
+  await assert.rejects(() => confirmFirstUse(d, { confirm: () => true, say: () => {}, config: { ...config, branchPrefix: 'other/x' }, agentArgv: ['claude'] }), (e) => e instanceof RunRefusal && /changed/.test(e.message));
+  const said = [];
+  await confirmFirstUse(d, { confirm: () => false, say: (x) => said.push(x), config, agentArgv: ['claude'] });
+  assert.match(said.join('\n'), /HOME and PATH.*~\/\.ssh/);
+  fs.rmSync(path.join(d, '.ai/run.config.json'));
+  fs.symlinkSync('/etc/hosts', path.join(d, '.ai/run.config.json'));
+  await assert.rejects(() => confirmFirstUse(d, { confirm: () => true, say: () => {}, config, agentArgv: ['claude'] }), RunRefusal);
 });
 
 test('confirmFirstUse statement is sanitized and does not print stack or absolute paths', async () => {
@@ -446,4 +475,146 @@ test('confirmFirstUse statement is sanitized and does not print stack or absolut
   const out = said.join('\n');
   assert.doesNotMatch(out, /AKIAIOSFODNN7EXAMPLE|‮/);
   assert.equal(out.includes(d), false);
+});
+
+// ---------- repo-local config that runs programs ----------
+const gitPlain = (cwd, ...args) => execFileSync('git', args, { cwd, stdio: 'ignore' });
+function filterRepo(extraCfg = []) {
+  const d = repo('feature');
+  const markerDir = mk('aa-mk-');
+  const marker = path.join(markerDir, 'ran');
+  const script = path.join(markerDir, 'f.sh');
+  fs.writeFileSync(script, `#!/bin/sh\ntouch '${marker}'\ncat\n`, { mode: 0o755 });
+  g(d, 'config', 'filter.x.clean', script);
+  g(d, 'config', 'filter.x.smudge', script);
+  write(d, '.gitattributes', '*.txt filter=x\n');
+  g(d, 'add', '.gitattributes');
+  g(d, 'config', '--unset', 'filter.x.clean');
+  g(d, 'commit', '-q', '-m', 'attrs');
+  g(d, 'config', 'filter.x.clean', script);
+  for (const [k, v] of extraCfg) g(d, 'config', k, v);
+  write(d, 'a.txt', 'hello\n');
+  return { d, marker };
+}
+
+test('a repo-local clean filter is refused everywhere and never runs (plain git does run it)', () => {
+  const { d, marker } = filterRepo();
+  gitPlain(d, 'add', '-A');
+  assert.equal(fs.existsSync(marker), true, 'control: plain git add runs the filter');
+  gitPlain(d, 'reset', '-q');
+  fs.rmSync(marker);
+  refuses(() => start(d), /filter\.x\..*run programs/);
+  refuses(() => hasChanges(d), /filter\./);
+  refuses(() => commitStep(d, { id: 's1', title: 't' }), /filter\./);
+  refuses(() => diffSince(d, g(d, 'rev-parse', 'HEAD').trim()), /filter\./);
+  assert.equal(fs.existsSync(marker), false, 'the runner path must not run the filter');
+  assert.equal(branchOf(d), 'feature');
+});
+
+test('runGit alone neutralizes repo-local filters with empty overrides (defense in depth)', () => {
+  const { d, marker } = filterRepo();
+  runGit(d, ['add', '-A']);
+  runGit(d, ['status', '--porcelain=v1']);
+  assert.equal(fs.existsSync(marker), false);
+});
+
+test('other program-running repo-local keys are refused: merge driver, diff textconv, fsmonitor, core.worktree, include, info/attributes', () => {
+  const cases = [
+    [['merge.m.driver', 'x %A'], /merge\.m\.driver/],
+    [['diff.d.textconv', 'cat'], /diff\.d\.textconv/],
+    [['core.fsmonitor', '/bin/true'], /core\.fsmonitor/],
+    [['core.sshCommand', 'x'], /core\.sshcommand/],
+    [['core.pager', 'x'], /core\.pager/],
+    [['core.editor', 'x'], /core\.editor/],
+    [['include.path', '/nonexistent-aa-dir/x.cfg'], /include\.path/],
+  ];
+  for (const [[k, v], re] of cases) {
+    const d = repo('feature');
+    g(d, 'config', k, v);
+    refuses(() => start(d), re);
+    assert.equal(branchOf(d), 'feature');
+  }
+  const d = repo('feature');
+  const other = repo('feature');
+  g(d, 'config', 'core.worktree', other);
+  refuses(() => start(d), /core\.worktree|working tree git reports/);
+  const e = repo('feature');
+  write(e, '.git/info/attributes', '*.txt filter=x\n');
+  refuses(() => start(e), /info\/attributes/);
+});
+
+test('a filter defined only in the user global config is trusted, not refused', () => {
+  const home = mk('aa-home-');
+  fs.writeFileSync(path.join(home, '.gitconfig'), '[user]\n\tname = t\n\temail = t@example.invalid\n[filter "lfsish"]\n\tclean = cat\n\tsmudge = cat\n');
+  const d = repo('feature');
+  write(d, '.gitattributes', '*.bin filter=lfsish\n');
+  g(d, 'add', '.gitattributes');
+  g(d, 'commit', '-q', '-m', 'attrs');
+  const saved = { HOME: process.env.HOME, XDG: process.env.XDG_CONFIG_HOME };
+  process.env.HOME = home;
+  delete process.env.XDG_CONFIG_HOME;
+  try {
+    assert.equal(start(d).baseBranch, 'feature');
+    write(d, 'a.bin', 'x');
+    assert.ok(commitStep(d, { id: 's1', title: 't' }));
+  } finally {
+    process.env.HOME = saved.HOME;
+    if (saved.XDG !== undefined) process.env.XDG_CONFIG_HOME = saved.XDG;
+  }
+});
+
+// ---------- symlink resolution ----------
+test('a new link that climbs out through an existing in-repo link (dd/../file) is refused', () => {
+  const d = repo('feature');
+  start(d);
+  const outside = mk('aa-outside-');
+  fs.writeFileSync(path.join(outside, '..', `f-${path.basename(outside)}`), 'x');
+  tmps.push(path.join(outside, '..', `f-${path.basename(outside)}`));
+  fs.symlinkSync(path.join(outside, 'sub-not-there'), path.join(d, 'dd'));
+  fs.mkdirSync(path.join(outside, 'sub-not-there'), { recursive: true });
+  fs.symlinkSync(`dd/../f-${path.basename(outside)}`, path.join(d, 'ss'));
+  refuses(() => commitStep(d, { id: 's1', title: 't' }), /symlink/);
+  fs.rmSync(path.join(d, 'ss'));
+  fs.symlinkSync('dd/../README.md', path.join(d, 'tt'));
+  refuses(() => commitStep(d, { id: 's2', title: 't' }), /symlink/);
+});
+
+test('a symlink loop is refused', () => {
+  const d = repo('feature');
+  start(d);
+  fs.symlinkSync('b', path.join(d, 'a'));
+  fs.symlinkSync('a', path.join(d, 'b'));
+  fs.symlinkSync('a/x', path.join(d, 'c'));
+  refuses(() => commitStep(d, { id: 's1', title: 't' }), /symlink/);
+});
+
+// ---------- plain errors, allowlist ----------
+test('assertNeverNetwork is an allowlist of the subcommands this module uses', () => {
+  for (const sub of ['status', 'rev-parse', 'config', 'ls-files', 'switch', 'add', 'commit', 'diff', 'cat-file', 'reset']) assert.doesNotThrow(() => assertNeverNetwork(['git', '-c', 'a=b', sub]), sub);
+  for (const sub of ['gc', 'worktree', 'am', 'apply', 'archive', 'bundle', 'filter-branch', 'checkout', 'stash', 'tag', 'update-ref']) assert.throws(() => assertNeverNetwork(['git', sub]), RunRefusal, sub);
+  assert.throws(() => assertNeverNetwork(['git']), RunRefusal);
+});
+
+test('errors are plain: missing folder, non-repo, no absolute paths', () => {
+  const missing = path.join(os.tmpdir(), 'aa-definitely-missing-dir');
+  refuses(() => start(missing), /does not exist/);
+  refuses(() => hasChanges(missing), /does not exist/);
+  const plain = mk();
+  refuses(() => commitStep(plain, { id: 'a', title: 'b' }), /not a git repository/);
+  const d = repo('feature');
+  g(d, 'branch', 'evil\u202e-x');
+  refuses(() => diffSince(d, 'zzzz'), /not a commit id/);
+});
+
+test('addToExclude refuses a symlinked info/exclude and newline patterns', async () => {
+  const { addToExclude } = await import('../skill/scripts/lib/git.js');
+  const d = repo('feature');
+  const target = path.join(mk('aa-tgt-'), 'x');
+  fs.mkdirSync(path.join(d, '.git/info'), { recursive: true });
+  fs.rmSync(path.join(d, '.git/info/exclude'), { force: true });
+  fs.symlinkSync(target, path.join(d, '.git/info/exclude'));
+  assert.throws(() => addToExclude(d, ['/a/']), /symlink/);
+  assert.equal(fs.existsSync(target), false);
+  fs.rmSync(path.join(d, '.git/info/exclude'));
+  assert.throws(() => addToExclude(d, ['/a\n!b']), /one line/);
 });

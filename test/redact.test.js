@@ -176,3 +176,18 @@ test('an Android string resource with a credential name is redacted; labels and 
   assert.ok(!r.text.includes(value), 'value removed');
   assert.deepEqual(r.hits, [{ kind: 'credential', line: 1 }]);
 });
+
+test('Authorization and Bearer headers are redacted, linear time', () => {
+  const t = 'abcdef1234567890ABCDEF';
+  for (const line of [`Authorization: Bearer ${t}`, `authorization=${t}`, `curl -H "Authorization: Basic ${t}=="`, `Bearer ${t}`, `bearer\t${t}`]) {
+    const r = redact(line);
+    assert.ok(!r.text.includes(t), line);
+    assert.ok(r.hits.length >= 1, line);
+  }
+  assert.equal(redact('the bearer of news').text, 'the bearer of news');
+  for (const l of ['Bearer ' + ' '.repeat(1024 * 1024) + 'y', 'authorization:' + ' '.repeat(1024 * 1024), 'Bearer '.repeat(100 * 1024), 'Authorization: '.repeat(60 * 1024)]) {
+    const t0 = Date.now();
+    redact(l);
+    assert.ok(Date.now() - t0 < 1000, 'slow on a long line');
+  }
+});

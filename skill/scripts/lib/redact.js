@@ -23,6 +23,8 @@ const TOKEN_RULES = [
   { kind: 'github-token', re: /gh[pousr]_[A-Za-z0-9]{36,}/g },
   { kind: 'slack-token', re: /xox[abprs]-[A-Za-z0-9-]{10,}/g },
   { kind: 'jwt', re: /eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g },
+  { kind: 'authorization-header', re: /\bauthorization\s*[:=]\s*(?:(?:bearer|basic|token)\s+)?(?=[A-Za-z._~+\/=-]*\d)[A-Za-z0-9._~+/=-]{8,}/gi },
+  { kind: 'bearer-token', re: /\bbearer\s+(?=[A-Za-z._~+\/=-]*\d)[A-Za-z0-9._~+/=-]{8,}/gi },
 ];
 
 export const SECRET_RULES = Object.freeze([

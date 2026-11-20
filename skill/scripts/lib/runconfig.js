@@ -221,6 +221,7 @@ export function validateRunConfig(value, root) {
         else if (v.commands.length > MAX_COMMANDS) bad(`verification.commands has more than ${MAX_COMMANDS} commands`);
         else {
           const cmds = [];
+          if (v.commands.length === 0) bad('verification.commands must contain at least one command');
           v.commands.forEach((c, i) => {
             const p = argvProblems(c, `verification.commands[${i}]`, root, 'verification');
             problems.push(...p);

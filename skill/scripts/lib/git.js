@@ -84,7 +84,17 @@ function commonGitDir(root) {
 export function addToExclude(root, patterns, { commonDir } = {}) {
   const dir = commonDir ?? commonGitDir(root);
   if (!dir) throw new Error('--local needs a git repository');
+  if (patterns.some((p) => /[\r\n]/.test(p))) throw new Error('an exclude pattern must be one line');
   const file = path.join(dir, 'info', 'exclude');
+  for (const p of [path.dirname(file), file]) {
+    let st = null;
+    try {
+      st = fs.lstatSync(p);
+    } catch {
+      st = null;
+    }
+    if (st !== null && st.isSymbolicLink()) throw new Error('.git/info/exclude must not be a symlink');
+  }
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const existing = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
   const have = new Set(existing.split(/\r?\n/));

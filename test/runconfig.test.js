@@ -181,3 +181,7 @@ test('protectedBranches: default empty, validated names, at most 20', () => {
   rejects(cfg({ protectedBranches: [5] }), /protectedBranches\[0\]/);
   rejects(cfg({ protectedBranches: Array.from({ length: 21 }, (_, i) => `b${i}`) }), /more than 20/);
 });
+
+test('an empty verification.commands list is rejected', () => {
+  rejects(cfg({ verification: { commands: [], timeoutSeconds: 60 } }), /at least one command/);
+});

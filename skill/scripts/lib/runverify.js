@@ -9,7 +9,7 @@ import { stripUnsafe } from './mdtext.js';
 
 const TAIL_BYTES = 20 * 1024;
 const KILL_GRACE_MS = 5000;
-const CLOSE_GRACE_MS = 2000;
+const CLOSE_GRACE_MS = 500;
 const ENV_NAMES = ['PATH', 'HOME', 'LANG', 'JAVA_HOME', 'ANDROID_HOME', 'ANDROID_SDK_ROOT', 'GRADLE_USER_HOME'];
 const SIGNATURE_LINES = 5;
 const SIGNATURE_LINE_MAX = 500;
@@ -20,6 +20,22 @@ function childEnv() {
   for (const k of ENV_NAMES) if (typeof process.env[k] === 'string' && process.env[k] !== '') env[k] = process.env[k];
   env.CI = '1';
   return env;
+}
+
+// A tail that starts inside a PEM block has lost its BEGIN line, so redact() cannot see the block: drop the leading
+// base64-looking lines (mixed case and digits, as key bodies are) and the END line after them; a run of 64 or more
+// such lines is dropped even without an END line. Plain repeated-character output is not mistaken for a key body.
+const B64_LINE = /^[A-Za-z0-9+/]{40,}={0,2}$/;
+const PEM_END = /^-----END [A-Z ]{3,40}-----$/;
+const looksBase64 = (l) => B64_LINE.test(l) && /[A-Z]/.test(l) && /[a-z]/.test(l) && /[0-9]/.test(l);
+
+function dropOpenBlock(text) {
+  const lines = text.split('\n');
+  let i = 0;
+  while (i < lines.length && looksBase64(lines[i].trim())) i++;
+  if (i < lines.length && PEM_END.test(lines[i].trim())) i++;
+  else if (i < 64) i = 0;
+  return lines.slice(i).join('\n');
 }
 
 /** Keeps the last TAIL_BYTES bytes of everything fed to it; memory never exceeds TAIL_BYTES plus one chunk (<= 64 KB). */
@@ -48,6 +64,7 @@ class Tail {
       s = b.toString('utf8');
       const nl = s.indexOf('\n');
       s = nl >= 0 ? s.slice(nl + 1) : s.slice(128);
+      s = dropOpenBlock(s);
     } else s = b.toString('utf8');
     return s;
   }
@@ -107,18 +124,68 @@ function killGroup(pid, signal) {
   }
 }
 
+const groupAlive = (pid) => {
+  try {
+    process.kill(-pid, 0);
+    return true;
+  } catch (err) {
+    return err.code === 'EPERM';
+  }
+};
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function waitGone(pid, ms) {
+  const end = Date.now() + ms;
+  while (groupAlive(pid) && Date.now() < end) await sleep(25);
+}
+
+/** SIGTERM to the whole process group, SIGKILL after the grace period; resolves when the group is gone. Idempotent. */
+async function terminateGroup(pid) {
+  if (!groupAlive(pid)) return;
+  killGroup(pid, 'SIGTERM');
+  await waitGone(pid, KILL_GRACE_MS);
+  if (groupAlive(pid)) {
+    killGroup(pid, 'SIGKILL');
+    await waitGone(pid, 1000);
+  }
+}
+
+// Live process groups, killed when the runner itself exits or is interrupted. One set of handlers for the whole process.
+const live = new Set();
+let cleanupInstalled = false;
+
+/** Kills every live verification process group now (default SIGKILL). Safe to call repeatedly. */
+export function killLiveGroups(signal = 'SIGKILL') {
+  for (const pid of [...live]) killGroup(pid, signal);
+}
+
+function installCleanup() {
+  if (cleanupInstalled) return;
+  cleanupInstalled = true;
+  process.on('exit', () => killLiveGroups('SIGKILL'));
+  for (const sig of ['SIGINT', 'SIGTERM']) {
+    const handler = () => {
+      killLiveGroups('SIGKILL');
+      process.off(sig, handler);
+      if (process.listenerCount(sig) === 0) process.kill(process.pid, sig); // keep the default exit behavior
+    };
+    process.on(sig, handler);
+  }
+}
+
 function runOne(root, argv, timeoutMs) {
   return new Promise((resolve) => {
     const tail = new Tail();
     let timedOut = false;
     let settled = false;
     let child;
+    let termTimer = null;
     const finish = (exitCode, signal, note) => {
       if (settled) return;
       settled = true;
-      clearTimeout(killTimer);
       clearTimeout(termTimer);
-      clearTimeout(closeTimer);
+      if (child?.pid) live.delete(child.pid);
       const shown = note ? `${note}\n` : '';
       const text = cleanTail(shown + tail.text());
       const ended = timedOut ? 'timeout' : signal ? `signal ${signal}` : `exit ${exitCode}`;
@@ -131,9 +198,7 @@ function runOne(root, argv, timeoutMs) {
         signature: exitCode === 0 && !timedOut ? '' : signatureOf(text, ended),
       });
     };
-    let killTimer = null;
-    let termTimer = null;
-    let closeTimer = null;
+    installCleanup();
     try {
       child = spawn(argv[0], argv.slice(1), { cwd: root, shell: false, env: childEnv(), stdio: ['ignore', 'pipe', 'pipe'], detached: true });
     } catch {
@@ -141,22 +206,21 @@ function runOne(root, argv, timeoutMs) {
       return;
     }
     child.on('error', () => finish(null, null, 'the command could not be started'));
+    if (!child.pid) return;
+    live.add(child.pid);
     child.stdout.on('data', (c) => tail.push(c));
     child.stderr.on('data', (c) => tail.push(c));
-    child.on('exit', (code, signal) => {
-      if (timedOut) killGroup(child.pid, 'SIGKILL'); // stragglers that ignored SIGTERM
-      // A grandchild may keep the pipes open: do not wait for 'close' forever.
-      closeTimer = setTimeout(() => {
-        child.stdout.destroy();
-        child.stderr.destroy();
-        finish(code, signal);
-      }, CLOSE_GRACE_MS);
-      child.once('close', () => finish(code, signal));
+    child.on('exit', async (code, signal) => {
+      // Whatever the leader started (a backgrounded grandchild) dies with it: the whole group, after every exit.
+      await terminateGroup(child.pid);
+      await Promise.race([new Promise((r) => child.once('close', r)), sleep(CLOSE_GRACE_MS)]);
+      child.stdout.destroy();
+      child.stderr.destroy();
+      finish(code, signal);
     });
     termTimer = setTimeout(() => {
       timedOut = true;
-      killGroup(child.pid, 'SIGTERM');
-      killTimer = setTimeout(() => killGroup(child.pid, 'SIGKILL'), KILL_GRACE_MS);
+      terminateGroup(child.pid);
     }, timeoutMs);
   });
 }
@@ -164,12 +228,13 @@ function runOne(root, argv, timeoutMs) {
 /**
  * Runs config.verification.commands one after the other in `root`; the first failure stops the list.
  * Returns { ok, results: [{ argv, exitCode, signal, timedOut, tail, signature }] }. `timeoutMs` is per command
- * (default config.verification.timeoutSeconds). An empty command list is ok with no results (the caller decides
- * whether verifying nothing is acceptable).
+ * (default config.verification.timeoutSeconds). An empty command list is ok:false with a `reason` (verifying nothing
+ * is never a pass). After every command, normal or not, its whole process group is terminated.
  */
 export async function runVerification(root, config, { timeoutMs } = {}) {
   const limit = timeoutMs ?? (config?.verification?.timeoutSeconds ?? 1800) * 1000;
   const results = [];
+  if ((config?.verification?.commands ?? []).length === 0) return { ok: false, results, reason: 'no verification commands are configured' };
   for (const argv of config?.verification?.commands ?? []) {
     const r = await runOne(root, argv, limit);
     results.push(r);

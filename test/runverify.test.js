@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { runVerification } from '../skill/scripts/lib/runverify.js';
+import crypto from 'node:crypto';
+import { runVerification, killLiveGroups } from '../skill/scripts/lib/runverify.js';
 
 const tmps = [];
 const project = () => {
@@ -167,4 +168,58 @@ test('a missing executable fails without throwing', async () => {
   assert.equal(r.results[0].exitCode, null);
   assert.match(r.results[0].tail, /could not be started/);
   assert.equal(r.results[0].tail.includes(root), false);
+});
+
+test('a backgrounded grandchild is gone after a NORMAL exit (whole group killed)', async () => {
+  const root = project();
+  const pidFile = path.join(root, 'bg.pid');
+  const bg = script(root, 'bg.js', `require('fs').writeFileSync(${JSON.stringify(pidFile)},String(process.pid));setInterval(()=>{},1000)`);
+  const parent = script(root, 'p.js', `require('child_process').spawn(process.execPath,[${JSON.stringify(bg)}],{stdio:'ignore'}).unref();setTimeout(()=>{},400)`);
+  const r = await runVerification(root, cfg(node(parent)), { timeoutMs: 20000 });
+  assert.equal(r.ok, true);
+  const pid = Number(fs.readFileSync(pidFile, 'utf8'));
+  assert.equal(await waitGone(pid, 8000), true);
+});
+
+test('process-level cleanup is installed once, idempotent, and kills live groups', async () => {
+  const root = project();
+  const before = [process.listenerCount('exit'), process.listenerCount('SIGINT'), process.listenerCount('SIGTERM')];
+  const hang = script(root, 'h.js', 'setInterval(()=>{},1000)');
+  const run = runVerification(root, cfg(node(hang)), { timeoutMs: 60000 });
+  await new Promise((r) => setTimeout(r, 400));
+  killLiveGroups();
+  killLiveGroups();
+  const r = await run;
+  assert.equal(r.ok, false);
+  await runVerification(root, cfg(node(script(root, 'ok.js', '1'))), { timeoutMs: 20000 });
+  const after = [process.listenerCount('exit'), process.listenerCount('SIGINT'), process.listenerCount('SIGTERM')];
+  for (let i = 0; i < 3; i++) assert.ok(after[i] - before[i] <= 1, 'at most one handler per event');
+  assert.doesNotThrow(() => killLiveGroups());
+});
+
+test('an empty command list is not ok', async () => {
+  const root = project();
+  const r = await runVerification(root, { verification: { commands: [], timeoutSeconds: 5 } });
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /no verification commands/);
+});
+
+test('a tail that starts inside a PEM block is scrubbed; plain repeated output is kept', async () => {
+  const root = project();
+  const body = Array.from({ length: 400 }, (_, i) => crypto.createHash('sha256').update(String(i)).digest('base64').replace(/=+$/, '') + crypto.createHash('md5').update(String(i)).digest('base64').slice(0, 20)).join('\n');
+  const s = script(root, 'pem.js', `console.log("-----BEGIN PRIVATE KEY-----");console.log(${JSON.stringify(body)});console.log("-----END PRIVATE KEY-----");console.error("Error: done");process.exit(1)`);
+  const r = await runVerification(root, cfg(node(s)), { timeoutMs: 20000 });
+  const sample = crypto.createHash('sha256').update('399').digest('base64').slice(0, 30);
+  assert.ok(!r.results[0].tail.includes(sample), 'key body must not appear');
+  assert.match(r.results[0].tail, /Error: done/);
+  const flood = script(root, 'flood.js', 'const l="x".repeat(99)+"\\n";for(let i=0;i<52000;i++)process.stdout.write(l);process.exit(1)');
+  const f = await runVerification(root, cfg(node(flood)), { timeoutMs: 30000 });
+  assert.ok(f.results[0].tail.length > 15 * 1024);
+});
+
+test('a Bearer token and an Authorization header printed by a command are redacted', async () => {
+  const root = project();
+  const s = script(root, 'b.js', 'console.log("Authorization: Bearer abcdef1234567890abcdef");console.log("curl -H \\"authorization: token ghx1234567890abcd\\"");process.exit(1)');
+  const r = await runVerification(root, cfg(node(s)), { timeoutMs: 20000 });
+  assert.doesNotMatch(r.results[0].tail, /abcdef1234567890abcdef|ghx1234567890abcd/);
 });
