@@ -114,8 +114,8 @@ export function selfCheckTools(aiDir) {
   return { status, ...diff };
 }
 
-/** The .ai dir when the module at `url` runs from a vendored <.ai>/tools/scripts directory, else null. */
-export function vendoredAiDir(url) {
+/** The .ai dir above a vendored <.ai>/tools/scripts directory the module at `url` runs from, else null (manifest or not). */
+function vendoredLocation(url) {
   let dir;
   try {
     dir = fs.realpathSync(path.dirname(fileURLToPath(url)));
@@ -123,13 +123,26 @@ export function vendoredAiDir(url) {
     return null;
   }
   if (!dir.endsWith(`${path.sep}.ai${path.sep}tools${path.sep}scripts`)) return null;
-  const aiDir = path.dirname(path.dirname(dir));
-  return fs.existsSync(path.join(aiDir, 'manifest.json')) ? aiDir : null;
+  return path.dirname(path.dirname(dir));
 }
 
-/** For entry scripts: true when running from a vendored copy whose tools fail the self-check (and trust was not given). */
-export function vendoredToolsRefused(url, argv) {
-  if (argv.includes(TRUST_FLAG)) return false;
-  const aiDir = vendoredAiDir(url);
-  return aiDir !== null && selfCheckTools(aiDir).status !== 'self-check-ok';
+/** The .ai dir when the module at `url` runs from a vendored <.ai>/tools/scripts directory with a manifest, else null. */
+export function vendoredAiDir(url) {
+  const aiDir = vendoredLocation(url);
+  return aiDir !== null && fs.existsSync(path.join(aiDir, 'manifest.json')) ? aiDir : null;
+}
+
+export const MISSING_MANIFEST_MESSAGE =
+  '.ai/manifest.json is missing, so .ai/tools cannot be checked; run "init" or "refresh" with the installed android-architect, or rerun with --trust-modified-tools';
+
+/**
+ * For entry scripts, before they load anything else: the refusal message when running from a vendored copy whose tools
+ * fail the self-check or whose .ai/manifest.json is missing (and trust was not given), else null.
+ */
+export function vendoredRefusal(url, argv) {
+  if (argv.includes(TRUST_FLAG)) return null;
+  const aiDir = vendoredLocation(url);
+  if (aiDir === null) return null;
+  if (!fs.existsSync(path.join(aiDir, 'manifest.json'))) return MISSING_MANIFEST_MESSAGE;
+  return selfCheckTools(aiDir).status === 'self-check-ok' ? null : MODIFIED_MESSAGE;
 }

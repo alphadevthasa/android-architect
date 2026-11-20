@@ -6,17 +6,20 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { loadCatalog } from './lib/catalog.js';
-import { aiStatus } from './lib/aidir.js';
-import { TRUST_FLAG, MODIFIED_MESSAGE, vendoredAiDir, vendoredToolsRefused } from './lib/integrity.js';
+// Only integrity.js (Node builtins, hash.js, manifest.js) is imported statically: a vendored copy checks itself before
+// it loads any other module of .ai/tools.
+import { TRUST_FLAG, vendoredAiDir, vendoredRefusal } from './lib/integrity.js';
 
 function fail(code, message) {
   process.stderr.write(message + '\n');
   process.exit(code);
 }
 
-export function main(argv) {
-  if (vendoredToolsRefused(import.meta.url, argv)) fail(3, MODIFIED_MESSAGE);
+export async function main(argv) {
+  const refusal = vendoredRefusal(import.meta.url, argv);
+  if (refusal) fail(3, refusal);
+  const { loadCatalog } = await import('./lib/catalog.js');
+  const { aiStatus } = await import('./lib/aidir.js');
   const args = argv.filter((a) => a !== TRUST_FLAG);
   if (args.length > 1 || args[0]?.startsWith('--')) fail(1, `usage: node ai-status.js [<root>] [${TRUST_FLAG}]`);
   const root = path.resolve(args[0] ?? '.');

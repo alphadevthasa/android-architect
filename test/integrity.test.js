@@ -203,3 +203,40 @@ test('CLI doctor --root without an installed skill says the tools are unverifiab
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /^tools: unverifiable \(.+\)$/m);
 });
+
+// Item 1: the gate runs before any vendored module other than integrity.js (and its builtin-only deps) is loaded.
+for (const lib of ['lib/bm25.js', 'lib/aidir.js']) {
+  test(`a tampered vendored ${lib} never runs when vendored index.js / ai-status.js refuse`, () => {
+    const marker = path.join(tmp, 'marker');
+    const payload = `\nimport { writeFileSync as __w } from 'node:fs';\n__w(${JSON.stringify(marker)}, 'ran');\n`;
+    fs.appendFileSync(tools(`scripts/${lib}`), payload);
+    for (const args of [[tools('scripts/index.js'), 'query', 'x'], [tools('scripts/ai-status.js'), root]]) {
+      const r = node(args);
+      assert.equal(r.status, 3, r.stderr);
+      assert.equal(r.stderr.trim(), REFUSAL);
+      assert.equal(fs.existsSync(marker), false, `${lib} top-level code ran before the gate (${path.basename(args[0])})`);
+    }
+  });
+}
+
+test('vendored index.js / ai-status.js refuse when .ai/manifest.json is missing, unless trusted', () => {
+  fs.rmSync(manifestFile());
+  for (const args of [[tools('scripts/index.js'), 'query', 'x'], [tools('scripts/ai-status.js'), root]]) {
+    const r = node(args);
+    assert.equal(r.status, 3, r.stderr);
+    assert.match(r.stderr, /manifest\.json is missing/);
+  }
+  const r = node([tools('scripts/index.js'), 'query', 'x', '--trust-modified-tools']);
+  assert.equal(r.status, 0, r.stderr);
+});
+
+test('an untampered vendored index.js and ai-status.js still work; installed scripts are not gated by a missing manifest', () => {
+  let r = node([tools('scripts/index.js'), 'query', 'compose']);
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(Array.isArray(JSON.parse(r.stdout)));
+  r = node([tools('scripts/ai-status.js'), root]);
+  assert.equal(r.status, 0, r.stderr);
+  fs.rmSync(manifestFile());
+  r = node([path.join(SKILL, 'scripts/ai-status.js'), root]);
+  assert.equal(r.status, 2, r.stderr);
+});

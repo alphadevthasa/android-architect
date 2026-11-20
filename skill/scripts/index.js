@@ -6,10 +6,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { loadCatalog } from './lib/catalog.js';
-import { headCommit } from './lib/git.js';
-import { buildIndex, queryIndex } from './lib/indexer.js';
-import { TRUST_FLAG, MODIFIED_MESSAGE, vendoredToolsRefused } from './lib/integrity.js';
+// Only integrity.js (Node builtins, hash.js, manifest.js) is imported statically: a vendored copy checks itself before
+// it loads any other module of .ai/tools.
+import { TRUST_FLAG, vendoredRefusal } from './lib/integrity.js';
 
 const USAGE =
   'usage: node index.js build <root> [--out <file>] [--trust-modified-tools]\n' +
@@ -50,7 +49,7 @@ function parseArgs(argv) {
   return opts;
 }
 
-function build(opts) {
+function build(opts, { loadCatalog, headCommit, buildIndex }) {
   const root = path.resolve(opts.positional);
   let isDir = false;
   try {
@@ -78,7 +77,7 @@ function build(opts) {
   process.stdout.write(JSON.stringify({ out, docs: index.docs.length, commit }) + '\n');
 }
 
-function query(opts) {
+function query(opts, { queryIndex }) {
   const file = path.resolve(opts.index ?? path.join('.ai', 'index', 'index.json'));
   let index;
   try {
@@ -91,11 +90,19 @@ function query(opts) {
   process.stdout.write(JSON.stringify(hits, null, 2) + '\n');
 }
 
-export function main(argv) {
-  if (vendoredToolsRefused(import.meta.url, argv)) fail(3, MODIFIED_MESSAGE);
+export async function main(argv) {
+  const refusal = vendoredRefusal(import.meta.url, argv);
+  if (refusal) fail(3, refusal);
   const opts = parseArgs(argv.filter((a) => a !== TRUST_FLAG));
-  if (opts.cmd === 'build') build(opts);
-  else query(opts);
+  if (opts.cmd === 'build') {
+    const { loadCatalog } = await import('./lib/catalog.js');
+    const { headCommit } = await import('./lib/git.js');
+    const { buildIndex } = await import('./lib/indexer.js');
+    build(opts, { loadCatalog, headCommit, buildIndex });
+  } else {
+    const { queryIndex } = await import('./lib/indexer.js');
+    query(opts, { queryIndex });
+  }
 }
 
 const isMain = () => {
