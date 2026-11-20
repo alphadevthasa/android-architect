@@ -128,7 +128,7 @@ function rawGit(root, args, { input, extra = [] } = {}) {
 const sigOf = (file) => {
   try {
     const st = fs.lstatSync(file);
-    return `${st.size}:${st.mtimeMs}:${st.isSymbolicLink() ? 'l' : 'f'}`;
+    return `${st.size}:${st.mtimeMs}:${st.ctimeMs}:${st.ino}:${st.isSymbolicLink() ? 'l' : 'f'}`;
   } catch {
     return '-';
   }
@@ -158,11 +158,29 @@ function scanLocalConfig(root, gitDir, common) {
   const cached = configCache.get(common);
   if (cached && cached.sig === sig) return cached.result;
   const result = { problem: null, filters: [] };
-  // `git config --worktree` fails (exit 128) in a repo with linked worktrees unless extensions.worktreeConfig is set, and
-  // git ignores config.worktree unless it is set: scan that scope only when the local config enables it.
-  let worktreeConfig = false;
+  // git honours <gitdir>/config.worktree only when extensions.worktreeConfig is true, as git itself parses it (any
+  // non-zero integer, yes/on/true, or a key without a value). Ask git; an unparsable value is treated as true.
+  let worktreeConfig = true;
+  try {
+    worktreeConfig = rawGit(root, ['config', '--local', '--type=bool', '--get', 'extensions.worktreeConfig']).trim() === 'true';
+  } catch (err) {
+    if (err instanceof GitFailure && err.status === 1) worktreeConfig = false; // key not set
+  }
   for (const scope of ['--local', '--worktree']) {
-    if (scope === '--worktree' && !worktreeConfig) continue;
+    if (scope === '--worktree') {
+      if (!worktreeConfig) continue;
+      try {
+        const st = fs.lstatSync(files[1]);
+        if (st.isSymbolicLink() || !st.isFile()) {
+          result.problem = 'config.worktree must be a regular file';
+          break;
+        }
+      } catch (err) {
+        if (err.code === 'ENOENT') continue; // no worktree config: nothing to scan (git exits 128 on it)
+        result.problem = 'cannot read the repository git config; refusing to continue';
+        break;
+      }
+    }
     let out;
     try {
       out = rawGit(root, ['config', scope, '--list', '-z', '--no-includes']);
@@ -174,8 +192,6 @@ function scanLocalConfig(root, gitDir, common) {
       if (!entry) continue;
       const nl = entry.indexOf('\n');
       const key = nl < 0 ? entry : entry.slice(0, nl);
-      const value = nl < 0 ? '' : entry.slice(nl + 1);
-      if (scope === '--local' && key.toLowerCase() === 'extensions.worktreeconfig' && ['true', 'yes', 'on', '1', ''].includes(value.toLowerCase())) worktreeConfig = true;
       const { section, sub } = splitKey(key);
       if (section === 'filter' && /^[A-Za-z0-9._-]{1,100}$/.test(sub) && !result.filters.includes(sub)) result.filters.push(sub);
       if (result.problem === null && dangerousKey(key)) {
@@ -485,8 +501,19 @@ function symlinkEscapes(root, top, rec, gitDirs) {
   }
   const real = resolveTarget(base, target);
   if (real === null || !(real === top || real.startsWith(top + path.sep))) return true;
-  // A link into the git folder would expose or let others rewrite config and hooks.
-  return [path.join(top, '.git'), ...gitDirs].some((g) => real === g || real.startsWith(g + path.sep));
+  // A link into the git folder would expose or let others rewrite config and hooks. Compared case-insensitively
+  // (macOS and Windows fold names) and also by canonical on-disk spelling.
+  const forms = [real];
+  try {
+    forms.push(fs.realpathSync.native(real));
+  } catch {
+    // does not exist: only the lexical form
+  }
+  const lowers = forms.map((f) => f.toLowerCase());
+  return [path.join(top, '.git'), ...gitDirs].some((g) => {
+    const gl = [g, (() => { try { return fs.realpathSync.native(g); } catch { return g; } })()].map((x) => x.toLowerCase());
+    return lowers.some((l) => gl.some((x) => l === x || l.startsWith(x + path.sep)));
+  });
 }
 
 /** Returns a plain refusal message for the first unsafe staged record, or null. */

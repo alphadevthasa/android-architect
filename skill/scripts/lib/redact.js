@@ -25,7 +25,8 @@ const TOKEN_RULES = [
   { kind: 'google-api-key', re: /AIza[0-9A-Za-z_-]{35}/g },
   { kind: 'github-token', re: /gh[pousr]_[A-Za-z0-9]{36,}/g },
   { kind: 'slack-token', re: /xox[abprs]-[A-Za-z0-9-]{10,}/g },
-  { kind: 'jwt', re: /eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g },
+  // The lookbehind keeps the scan linear: a match can only start at the beginning of a run of token characters.
+  { kind: 'jwt', re: /(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g },
   // Header-shaped credentials. Each regex matches one scheme word, a short whitespace run and ONE plain run of token
   // characters (no lookahead, no nesting: linear), and `decide` then keeps prose such as "bearer refresh" untouched.
   { kind: 'authorization-header', re: /\bauthorization[ \t]{0,16}[:=][ \t]{0,16}(?:(bearer|basic|token)[ \t]{1,16})?([A-Za-z0-9._~+/=-]+)/gi, decide: (scheme, token) => (scheme ? looksLikeToken(token) : token.length >= 20 && /\d/.test(token)) },

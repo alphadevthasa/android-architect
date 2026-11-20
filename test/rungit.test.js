@@ -683,3 +683,52 @@ test('runGit does not spawn extra git processes per call (rev-parse results are 
   }
   assert.equal(fs.readFileSync(log, 'utf8').split('\n').filter(Boolean).length, 5);
 });
+
+// ---------- round 3 ----------
+const HOSTILE_WT = '[filter "x"]\n\tclean = /bin/true\n';
+test('extensions.worktreeConfig is read the way git reads it: every true spelling scans config.worktree', () => {
+  for (const v of ['true', 'yes', 'on', '1', '2', '-1', '0x1', null]) {
+    const d = repo('feature');
+    if (v === null) fs.appendFileSync(path.join(d, '.git/config'), '[extensions]\n\tworktreeConfig\n');
+    else g(d, 'config', 'extensions.worktreeConfig', v);
+    write(d, '.git/config.worktree', HOSTILE_WT);
+    refuses(() => start(d), /filter\.x\.clean/);
+  }
+  for (const v of ['false', 'no', 'off', '0']) {
+    const d = repo('feature');
+    g(d, 'config', 'extensions.worktreeConfig', v);
+    write(d, '.git/config.worktree', HOSTILE_WT);
+    assert.equal(start(d).baseBranch, 'feature', v);
+  }
+  const bad = repo('feature');
+  fs.appendFileSync(path.join(bad, '.git/config'), '[extensions]\n\tworktreeConfig = banana\n');
+  write(bad, '.git/config.worktree', HOSTILE_WT);
+  refuses(() => start(bad), /git repository|run programs|cannot read/);
+});
+
+test('extension on and no config.worktree file is allowed in the main and a linked checkout; a present file is scanned', () => {
+  const d = repo('feature');
+  g(d, 'config', 'extensions.worktreeConfig', 'true');
+  const wt = path.join(mk('aa-wt-'), 'wt');
+  g(d, 'worktree', 'add', '-q', '-b', 'other', wt);
+  fs.mkdirSync(path.join(wt, '.ai'));
+  assert.equal(start(d).baseBranch, 'feature');
+  assert.equal(start(wt, { now: new Date(NOW.getTime() + 9000) }).baseBranch, 'other');
+  assert.equal(hasChanges(wt), false);
+  const gitDirOfWt = g(wt, 'rev-parse', '--absolute-git-dir').trim();
+  write(gitDirOfWt, 'config.worktree', '[user]\n\tname = benign\n');
+  assert.equal(hasChanges(wt), false);
+  write(gitDirOfWt, 'config.worktree', HOSTILE_WT);
+  refuses(() => hasChanges(wt), /filter\.x\.clean/);
+  write(d, '.git/config.worktree', HOSTILE_WT);
+  refuses(() => hasChanges(d), /filter\.x\.clean/);
+});
+
+test('a staged symlink into the git folder is refused in any letter case and spelling', () => {
+  for (const target of ['.GIT/hooks', './.Git', '.git/', 'sub/../.GIT/hooks', '.gIt/config', 'a/../.git']) {
+    const d = repo('feature');
+    start(d);
+    fs.symlinkSync(target, path.join(d, 'lnk'));
+    refuses(() => commitStep(d, { id: 's1', title: 't' }), /symlink/);
+  }
+});
