@@ -148,7 +148,8 @@ export function preflight(root, { local = false, catalogDir = path.join(DEFAULT_
  * files written at the top of .ai (always rewritten, through the same guarded writer).
  * `prepared` is { loaded, profile } from a caller that already ran preflight (same options) and detectStack on its
  * catalog (refresh), so neither runs twice; the profile is recomputed when the pointers create a file.
- * Returns { written, kept, conflicts, pointers, excluded } with paths relative to root, sorted.
+ * Returns { written, kept, conflicts, pointers, excluded, suspicious } with paths relative to root, sorted (suspicious:
+ * scanAiDir findings once everything is written).
  */
 export function writeAiDir(
   root,
@@ -328,6 +329,7 @@ export function writeAiDir(
     conflicts: conflicts.sort(byText),
     pointers,
     excluded,
+    suspicious: scanAiDir(root),
   };
 }
 

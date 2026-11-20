@@ -51,9 +51,21 @@ function projectRoot() {
   return root;
 }
 
+const SUSPICIOUS_SHOWN = 10;
+
+/** `suspicious: N (file:line rule, ...)`, or null when there are none. */
+function suspiciousLine(findings) {
+  if (!findings?.length) return null;
+  const shown = findings.slice(0, SUSPICIOUS_SHOWN).map((f) => `${f.file}:${f.line} ${f.rule}`);
+  if (findings.length > SUSPICIOUS_SHOWN) shown.push(`... ${findings.length - SUSPICIOUS_SHOWN} more`);
+  return `suspicious: ${findings.length} (${shown.join(', ')})`;
+}
+
 function summarize(label, r) {
   const lines = [`${label}${r.written.length} written, ${r.kept.length} kept (yours, untouched), ${r.conflicts.length} conflicts`];
   for (const c of r.conflicts) lines.push(`  conflict: ${c} (see the .new file next to it)`);
+  const sus = suspiciousLine(r.suspicious);
+  if (sus) lines.push(sus);
   const pending = r.pointers.filter((p) => p.action === 'needs-confirmation');
   if (pending.length) {
     lines.push(`Pointer files left unchanged (they already exist): ${pending.map((p) => p.file).join(', ')}`);
@@ -101,6 +113,8 @@ function printProject(p) {
   if (t.status === 'modified') console.log(`tools: modified (${n} files)`);
   else if (t.status === 'unverifiable') console.log(`tools: unverifiable (${t.reason})`);
   else console.log('tools: ok');
+  const sus = suspiciousLine(s.suspicious);
+  if (sus) console.log(sus);
 }
 
 try {
