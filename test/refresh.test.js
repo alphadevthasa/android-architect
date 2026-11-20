@@ -153,7 +153,10 @@ test('a missing old vendored catalog yields empty status diffs and a note', () =
 });
 
 test('refresh keeps the member workspace role and local mode from the manifest', () => {
-  fs.mkdirSync(path.join(tmp, 'hub')); // members load the hub's catalog overrides, so the hub must exist
+  // members load the hub's catalog overrides, so the hub must exist and list this repo
+  fs.mkdirSync(path.join(tmp, 'hub/.ai'), { recursive: true });
+  fs.writeFileSync(path.join(tmp, 'hub/.ai/manifest.json'), JSON.stringify({ schemaVersion: 1, workspace: { role: 'hub', hub: '.' } }));
+  fs.writeFileSync(path.join(tmp, 'hub/.ai/repos.json'), JSON.stringify({ schemaVersion: 1, repos: [{ name: 'proj', path: path.relative(path.join(tmp, 'hub'), root) }] }));
   writeAiDir(root, { now: NOW, toolVersion: '1.0.0', workspace: { role: 'member', hub: '../hub' } });
   const report = refresh();
   assert.equal(report.recommendations, null);

@@ -52,3 +52,67 @@ test('build on a non-Gradle dir exits 2', () => {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+const planted = () => {
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'aa-icli-'));
+  fs.cpSync(fixture, proj, { recursive: true });
+  fs.writeFileSync(path.join(proj, 'victim.txt'), 'keep');
+  return proj;
+};
+
+test('default build refuses a pre-planted symlink or hardlink at .ai/index/index.json', () => {
+  const proj = planted();
+  try {
+    const target = path.join(proj, '.ai', 'index', 'index.json');
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.symlinkSync(path.join(proj, 'victim.txt'), target);
+    let r = run('build', proj);
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /symbolic link/);
+    assert.equal(fs.readFileSync(path.join(proj, 'victim.txt'), 'utf8'), 'keep');
+    fs.rmSync(target);
+    fs.linkSync(path.join(proj, 'victim.txt'), target);
+    r = run('build', proj);
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /hard-linked/);
+    assert.equal(fs.readFileSync(path.join(proj, 'victim.txt'), 'utf8'), 'keep');
+    assert.ok(!r.stderr.includes(proj), 'no absolute path');
+  } finally {
+    fs.rmSync(proj, { recursive: true, force: true });
+  }
+});
+
+test('default build refuses a symlinked .ai/index folder and writes nothing through it', () => {
+  const proj = planted();
+  const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), 'aa-icli-else-'));
+  try {
+    fs.mkdirSync(path.join(proj, '.ai'));
+    fs.symlinkSync(elsewhere, path.join(proj, '.ai', 'index'));
+    const r = run('build', proj);
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /link or not a folder/);
+    assert.deepEqual(fs.readdirSync(elsewhere), []);
+  } finally {
+    fs.rmSync(proj, { recursive: true, force: true });
+    fs.rmSync(elsewhere, { recursive: true, force: true });
+  }
+});
+
+test('build --out: a directory that cannot be created gives a clean message without the path', () => {
+  const proj = planted();
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'aa-icli-out-'));
+  try {
+    fs.writeFileSync(path.join(tmp, 'afile'), 'x');
+    const r = run('build', proj, '--out', path.join(tmp, 'afile', 'sub', 'index.json'));
+    assert.equal(r.status, 1);
+    assert.equal(r.stderr.trim(), 'cannot create the output directory');
+    // a hardlink to a project file is refused and the file is untouched
+    fs.linkSync(path.join(proj, 'victim.txt'), path.join(tmp, 'hard.json'));
+    const h = run('build', proj, '--out', path.join(tmp, 'hard.json'));
+    assert.equal(h.status, 1);
+    assert.equal(fs.readFileSync(path.join(proj, 'victim.txt'), 'utf8'), 'keep');
+  } finally {
+    fs.rmSync(proj, { recursive: true, force: true });
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});

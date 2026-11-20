@@ -340,6 +340,18 @@ test('safeOutPath: links, directories, hardlinks, inside-project and normal path
   assert.equal(fs.readFileSync(path.join(proj, 'target.txt'), 'utf8'), 'keep');
 });
 
+test('writeOut re-checks the opened file: a pre-planted hardlink is refused and its content is not truncated', () => {
+  const { outside, proj } = mkout();
+  const link = path.join(outside, 'hard.json');
+  fs.linkSync(path.join(proj, 'target.txt'), link);
+  assert.throws(() => writeOut(link, 'x'), /regular file/);
+  assert.equal(fs.readFileSync(path.join(proj, 'target.txt'), 'utf8'), 'keep');
+  const sym = path.join(outside, 'sym.json');
+  fs.symlinkSync(path.join(proj, 'target.txt'), sym);
+  assert.throws(() => writeOut(sym, 'x'), /regular file/);
+  assert.equal(fs.readFileSync(path.join(proj, 'target.txt'), 'utf8'), 'keep');
+});
+
 for (const [name, script, extra] of [
   ['migration-plan', 'migration-plan.js', () => ['--recs', writeRecs([])]],
   ['features', 'features.js', () => []],

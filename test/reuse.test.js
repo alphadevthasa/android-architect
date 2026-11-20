@@ -309,7 +309,7 @@ test('refresh updates only the block and surfaces the malformed note', () => {
 
 test('members get no components.md', () => {
   const proj = copyFixture('reuse-app');
-  const r = writeAiDir(proj, { now: NOW, toolVersion: '9.9.9', workspace: { role: 'member', hub: '..' } });
+  const r = writeAiDir(proj, { now: NOW, toolVersion: '9.9.9', workspace: { role: 'member', hub: '..' }, trustedHub: true });
   assert.ok(!r.written.includes('.ai/knowledge/components.md'));
   assert.ok(!fs.existsSync(path.join(proj, '.ai/knowledge/components.md')));
 });

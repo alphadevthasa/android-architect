@@ -121,6 +121,19 @@ test('vendored index.js refuses to run after an edit, unless --trust-modified-to
   assert.equal(r.status, 0, r.stderr);
 });
 
+test('a tampered vendored lib file never runs: the gate exits 3 before any dynamic import', () => {
+  const marker = path.join(tmp, 'ran.txt');
+  for (const lib of ['indexer.js', 'outpath.js', 'catalog.js', 'git.js']) {
+    fs.appendFileSync(tools(`scripts/lib/${lib}`), `\nimport('node:fs').then((f) => f.writeFileSync(${JSON.stringify(marker)}, 'ran'));\n`);
+  }
+  for (const args of [['build', root], ['query', 'x']]) {
+    const r = node([tools('scripts/index.js'), ...args]);
+    assert.equal(r.status, 3, r.stderr);
+    assert.equal(r.stderr.trim(), REFUSAL);
+  }
+  assert.equal(fs.existsSync(marker), false, 'tampered lib code did not run');
+});
+
 test('the installed index.js accepts --trust-modified-tools and is not gated', () => {
   tamper();
   const r = node([path.join(SKILL, 'scripts/index.js'), 'query', 'x']);

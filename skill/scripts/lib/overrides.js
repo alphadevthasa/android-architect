@@ -296,33 +296,85 @@ export const baseVersion = (catalog) => catalog.baseCatalogVersion ?? catalog.ca
  * `label` prefixes error messages (null: the bare file name), `filePrefix` the reported file names (null: bare names).
  * `workspace` undefined means "read it from <root>/.ai/manifest.json"; null means standalone.
  */
-export function overrideSource(root, workspace) {
+export function overrideSource(root, workspace, { trustedHub = false } = {}) {
   if (workspace === undefined) {
     try {
       workspace = readManifest(path.join(root, '.ai'))?.workspace ?? null;
     } catch {
-      workspace = null; // an unreadable manifest is reported by the commands that need it
+      // The manifest may be what names a hub: do not guess that this repo is standalone.
+      throw new CatalogError([
+        `${OVERRIDES_DIR}: cannot tell whether this repo is a workspace member (its .ai/manifest.json is unreadable); fix or remove it, or run init again`,
+      ]);
     }
   }
   const own = path.join(root, '.ai', OVERRIDES_DIR);
-  if (workspace?.role === 'member' && typeof workspace.hub === 'string') {
-    const label = `${workspace.hub}/.ai/${OVERRIDES_DIR}`;
-    const hubAbs = path.resolve(root, workspace.hub);
+  if (workspace?.role === 'member') {
+    const hub = typeof workspace.hub === 'string' ? workspace.hub : '';
+    const label = `${shownPath(hub)}/.ai/${OVERRIDES_DIR}`;
+    const hubAbs = path.resolve(root, hub);
+    const refuse = (why) => new CatalogError([`${label}: ${why}`]);
     let found = false;
     try {
-      found = fs.statSync(hubAbs).isDirectory();
+      found = hub !== '' && fs.statSync(hubAbs).isDirectory();
     } catch {
       found = false;
     }
     if (!found) {
-      throw new CatalogError([
-        `${label}: workspace hub not found (this member's .ai/manifest.json points at ${workspace.hub}); restore the hub repo there or run init again from the hub`,
-      ]);
+      throw refuse(`workspace hub not found (this member's .ai/manifest.json points at ${shownPath(hub)}); restore the hub repo there or run init again from the hub`);
     }
+    if (!trustedHub) verifyHub(root, hubAbs, refuse);
     return { dir: path.join(hubAbs, '.ai', OVERRIDES_DIR), label, filePrefix: label };
   }
   if (workspace?.role === 'hub') return { dir: own, label: `${path.basename(path.resolve(root))}/.ai/${OVERRIDES_DIR}`, filePrefix: null };
   return { dir: own, label: null, filePrefix: null };
+}
+
+// Text echoed from a manifest: one line, no control or direction characters, bounded.
+const shownPath = (s) => oneLine(String(s).replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, ' ')).slice(0, 200);
+
+/** A member's manifest is committed text: check that the hub it names is a real hub that lists this repo. Throws via refuse(). */
+function verifyHub(root, hubAbs, refuse) {
+  const notHub = 'the folder is not a verified workspace hub for this repo';
+  const lstat = (p) => {
+    try {
+      return fs.lstatSync(p);
+    } catch {
+      return null;
+    }
+  };
+  const ai = path.join(hubAbs, '.ai');
+  const aiSt = lstat(ai);
+  if (aiSt === null || !aiSt.isDirectory()) throw refuse(`${notHub} (it has no .ai folder, or .ai is a symlink)`);
+  const ovSt = lstat(path.join(ai, OVERRIDES_DIR));
+  if (ovSt !== null && !ovSt.isDirectory()) throw refuse(`${notHub} (catalog-overrides is a symlink or not a folder)`);
+  let manifest;
+  let repos;
+  try {
+    const files = ['manifest.json', 'repos.json'].map((n) => {
+      const st = lstat(path.join(ai, n));
+      if (st === null || !st.isFile()) throw new Error('missing or not a regular file');
+      return JSON.parse(fs.readFileSync(path.join(ai, n), 'utf8'));
+    });
+    [manifest, repos] = files;
+  } catch {
+    throw refuse(`${notHub} (its .ai/manifest.json or .ai/repos.json is missing or unreadable)`);
+  }
+  if (manifest?.workspace?.role !== 'hub') throw refuse(`${notHub} (its manifest does not declare a hub)`);
+  let realRoot;
+  try {
+    realRoot = fs.realpathSync(root);
+  } catch {
+    throw refuse(notHub);
+  }
+  const listed = (Array.isArray(repos?.repos) ? repos.repos : []).some((r) => {
+    if (typeof r?.path !== 'string' || r.path === '') return false;
+    try {
+      return fs.realpathSync(path.resolve(hubAbs, r.path)) === realRoot;
+    } catch {
+      return false;
+    }
+  });
+  if (!listed) throw refuse(`${notHub} (its repos.json does not list this repo)`);
 }
 
 /** Rewrites "<name>: ..." and "catalog-overrides: ..." messages as "<label>/<name>: ..." and "<label>: ...". */
@@ -336,10 +388,10 @@ function relabel(err, label) {
  * .ai/catalog-overrides, or the hub's for a workspace member (see overrideSource; `workspace` as there).
  * Returns { catalog, base, files } (files: the override file names applied, hub-relative paths for a member; empty when none).
  */
-export function loadCatalogWithOverrides(catalogDir, root, { overrides = true, workspace } = {}) {
+export function loadCatalogWithOverrides(catalogDir, root, { overrides = true, workspace, trustedHub = false } = {}) {
   const base = catalogDir === undefined ? loadCatalog() : loadCatalog(catalogDir);
   if (!overrides) return { catalog: base, base, files: [] };
-  const { dir, label, filePrefix } = overrideSource(root, workspace);
+  const { dir, label, filePrefix } = overrideSource(root, workspace, { trustedHub });
   if (!fs.existsSync(dir)) return { catalog: base, base, files: [] };
   let loaded;
   try {
@@ -348,5 +400,7 @@ export function loadCatalogWithOverrides(catalogDir, root, { overrides = true, w
     throw relabel(err, label);
   }
   const files = filePrefix ? loaded.files.map((f) => `${filePrefix}/${f}`) : loaded.files;
-  return { catalog: applyOverrides(base, loaded), base, files };
+  const catalog = applyOverrides(base, loaded);
+  if (filePrefix && catalog.overridden) catalog.overridden.source = label; // a member's overrides come from the hub
+  return { catalog, base, files };
 }

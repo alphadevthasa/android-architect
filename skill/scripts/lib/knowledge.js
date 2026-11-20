@@ -52,7 +52,8 @@ function renderArchitecture(profile, catalog) {
   }
   const ov = catalog.overridden;
   if (ov && (ov.added.length || ov.statusPinned.length)) {
-    out.push('## Catalog overrides', '', 'Project-specific catalog changes from `.ai/catalog-overrides/` (not part of the shared catalog).', '');
+    const source = oneLine(ov.source ?? '.ai/catalog-overrides').replaceAll('`', "'");
+    out.push('## Catalog overrides', '', `Project-specific catalog changes from \`${source}/\` (not part of the shared catalog).`, '');
     for (const id of ov.added) out.push(`- Added entry: ${id} (${oneLine(catalog.entry(id.slice(0, id.indexOf('.')), id.slice(id.indexOf('.') + 1))?.name ?? id)})`);
     for (const [id, p] of Object.entries(ov.pins)) out.push(`- Status pin: ${id} is ${p.status} (reason: ${oneLine(p.reason)})`);
     out.push('');
@@ -80,7 +81,7 @@ function renderArchitecture(profile, catalog) {
   const count = (sev) => severityCount(profile.security, sev);
   out.push('', '## Security signals', '');
   out.push(`- high: ${count('high')}, medium: ${count('medium')}, low: ${count('low')}`);
-  out.push(...findingCountLines(profile.security));
+  out.push(...findingCountLines(profile.security, { shown: findings.slice(0, 10) }));
   for (const f of findings.slice(0, 10)) out.push(`- [${f.severity}] ${f.id}: ${f.file}:${f.line} (${f.detail})`);
   const vulnerable = profile.security?.vulnerable ?? [];
   if (vulnerable.length) {

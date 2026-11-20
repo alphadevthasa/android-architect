@@ -131,7 +131,7 @@ function makeGuard(root, realRoot) {
  * Returns { catalog, base, files, listed }: the merged catalog (base + overrides), the base catalog, the override file
  * names and the project files (git-ignored ones dropped).
  */
-export function preflight(root, { local = false, catalogDir = path.join(DEFAULT_SKILL_DIR, 'catalog'), workspace } = {}) {
+export function preflight(root, { local = false, catalogDir = path.join(DEFAULT_SKILL_DIR, 'catalog'), workspace, trustedHub = false } = {}) {
   const realRoot = fs.realpathSync(root);
   const aiDir = path.join(root, '.ai');
   if (local && !gitDir(root)) throw new Error('--local needs a git repository');
@@ -139,7 +139,7 @@ export function preflight(root, { local = false, catalogDir = path.join(DEFAULT_
   guard('.ai');
   if (fs.existsSync(aiDir)) regularFiles(aiDir);
   for (const f of ['AGENTS.md', 'CLAUDE.md', 'CLAUDE.local.md']) guard(f);
-  const loaded = loadCatalogWithOverrides(catalogDir, root, { workspace });
+  const loaded = loadCatalogWithOverrides(catalogDir, root, { workspace, trustedHub });
   return { ...loaded, listed: listFiles(root, { gitignore: true }) };
 }
 
@@ -225,7 +225,7 @@ export function writeGenerated(root, files, { remove = [] } = {}) {
  */
 export function writeAiDir(
   root,
-  { now, local = false, appendPointers = false, workspace = null, repos = null, toolVersion, skillDir = DEFAULT_SKILL_DIR, catalogDir, extraGenerated = null, prepared = null } = {},
+  { now, local = false, appendPointers = false, workspace = null, repos = null, toolVersion, skillDir = DEFAULT_SKILL_DIR, catalogDir, extraGenerated = null, prepared = null, trustedHub = false } = {},
 ) {
   const realRoot = fs.realpathSync(root);
   const aiDir = path.join(root, '.ai');
@@ -254,7 +254,7 @@ export function writeAiDir(
   const putRedacted = (rel, text) => putAi(rel, redact(text).text);
 
   // Overrides are validated here, before the first write; the result is reused for detection below.
-  const loaded = prepared?.loaded ?? preflight(root, { local, catalogDir, workspace });
+  const loaded = prepared?.loaded ?? preflight(root, { local, catalogDir, workspace, trustedHub });
 
   // Vendor sources are read into memory before the first write, and must not live inside .ai.
   const vendorSources = collectVendorSources(skillDir, catalogDir, { aiDir });

@@ -49,6 +49,15 @@ function parseArgs(argv) {
   return opts;
 }
 
+// Directory creation failures say nothing about the path: the raw system message carries absolute paths.
+function mkdirOut(dir) {
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+  } catch {
+    throw new Error('cannot create the output directory');
+  }
+}
+
 function build(opts, { loadCatalog, headCommit, buildIndex, safeOutPath, writeOut }) {
   const root = path.resolve(opts.positional);
   let isDir = false;
@@ -74,18 +83,29 @@ function build(opts, { loadCatalog, headCommit, buildIndex, safeOutPath, writeOu
   // The default lives in .ai/index. An explicit --out may also point inside the project (documented behavior), but it still
   // must not be a link, a directory or a hard-linked file.
   let out;
-  if (opts.out === null) {
-    out = path.resolve(path.join(root, '.ai', 'index', 'index.json'));
-    fs.mkdirSync(path.dirname(out), { recursive: true });
-    fs.writeFileSync(out, JSON.stringify(index) + '\n');
-  } else {
-    try {
-      fs.mkdirSync(path.dirname(path.resolve(opts.out)), { recursive: true });
+  try {
+    const text = JSON.stringify(index) + '\n';
+    if (opts.out === null) {
+      // .ai and .ai/index must be real folders (never links) before the default file is created in them.
+      const dir = path.join(root, '.ai', 'index');
+      for (const d of [path.join(root, '.ai'), dir]) {
+        let st = null;
+        try {
+          st = fs.lstatSync(d);
+        } catch {
+          st = null;
+        }
+        if (st !== null && !st.isDirectory()) throw new Error('refusing to write the index: .ai or .ai/index is a link or not a folder');
+      }
+      mkdirOut(dir);
+      out = safeOutPath(path.join(dir, 'index.json'), root, { allowInside: true });
+    } else {
+      mkdirOut(path.dirname(path.resolve(opts.out)));
       out = safeOutPath(opts.out, root, { allowInside: true });
-      writeOut(out, JSON.stringify(index) + '\n');
-    } catch (e) {
-      fail(1, e.message);
     }
+    writeOut(out, text);
+  } catch (e) {
+    fail(1, e.message);
   }
   process.stdout.write(JSON.stringify({ out, docs: index.docs.length, commit }) + '\n');
 }

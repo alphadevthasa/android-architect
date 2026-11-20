@@ -60,7 +60,7 @@ function planWorkspace(root, { local, workspace, catalogDir }) {
     if (path.basename(abs) === path.basename(hub) || members.some((m) => m.name === path.basename(abs))) throw new Error(`workspace repos need distinct names: ${path.basename(abs)}`);
     const hubRel = path.relative(abs, hub).split(path.sep).join('/');
     if (confirmed) {
-      preflight(abs, { local, catalogDir, workspace: { role: 'member', hub: hubRel } });
+      preflight(abs, { local, catalogDir, workspace: { role: 'member', hub: hubRel }, trustedHub: true });
       const setup = existingSetup(abs);
       if (setup && (setup.role !== 'member' || setup.mode !== (local ? 'local' : 'committed'))) {
         throw refuseSwitch(p, setup, `making it a ${local ? 'local' : 'committed'} workspace member`);
@@ -131,7 +131,7 @@ export function initProject(root, { now = new Date(), local = false, appendPoint
   }
   const hub = writeAiDir(root, { ...base, workspace: { role: 'hub', hub: '.' }, repos: plan.repos });
   for (const m of plan.members) {
-    members[m.name] = writeAiDir(m.abs, { ...base, workspace: { role: 'member', hub: m.hubRel } });
+    members[m.name] = writeAiDir(m.abs, { ...base, workspace: { role: 'member', hub: m.hubRel }, trustedHub: true });
   }
   return { hub, members, repos: plan.repos };
 }

@@ -191,13 +191,17 @@ export function summarizeFindings(all, max = MAX_FINDINGS_PER_ID) {
   return { findings, counts: sorted };
 }
 
-/** Markdown list lines "- <id>: <n>" per finding id, with "(showing first N)" where the profile holds fewer. */
-export function findingCountLines(security) {
+/**
+ * Markdown list lines "- <id>: <n>" per finding id, with "(showing first N)" where the profile holds fewer. `shown` (the
+ * findings a document actually lists, default: all the profile holds) switches the note to "(showing first N of <n>)".
+ */
+export function findingCountLines(security, { shown: listed } = {}) {
   const shown = {};
-  for (const f of security?.findings ?? []) shown[f.id] = (shown[f.id] ?? 0) + 1;
-  return Object.entries(security?.counts ?? {}).map(
-    ([id, n]) => `- ${id}: ${n}${n > (shown[id] ?? 0) ? ` (showing first ${shown[id] ?? 0})` : ''}`,
-  );
+  for (const f of listed ?? security?.findings ?? []) shown[f.id] = (shown[f.id] ?? 0) + 1;
+  return Object.entries(security?.counts ?? {}).map(([id, n]) => {
+    const note = n > (shown[id] ?? 0) ? ` (showing first ${shown[id] ?? 0}${listed ? ` of ${n}` : ''})` : '';
+    return `- ${id}: ${n}${note}`;
+  });
 }
 
 /** Number of findings of one severity, from the uncapped counts when the profile has them. */

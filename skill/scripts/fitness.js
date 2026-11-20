@@ -16,6 +16,7 @@ import { parseFitnessRules, checkFitness, generateFitness, validModules, FITNESS
 import { readManifest } from './lib/manifest.js';
 import { oneLine } from './lib/overrides.js';
 import { redact, redactJson } from './lib/redact.js';
+import { safeOutPath, writeOut } from './lib/outpath.js';
 
 const USAGE = 'usage: node fitness.js <projectRoot> [--check] [--out <dir>]';
 const BUILD_FILES = ['build.gradle', 'build.gradle.kts', 'settings.gradle', 'settings.gradle.kts'];
@@ -65,22 +66,24 @@ function outDir(out, root) {
   return abs;
 }
 
-function writeOut(dir, files) {
-  fs.mkdirSync(dir, { recursive: true });
-  if (fs.lstatSync(dir).isSymbolicLink()) throw new Error('refusing to write through a symlink: --out');
-  for (const name of Object.keys(files)) {
-    let st = null;
-    try {
-      st = fs.lstatSync(path.join(dir, name));
-    } catch {
-      st = null;
-    }
-    if (st !== null && !st.isFile()) throw new Error(`refusing to replace a non-regular file in --out: ${name}`);
+function writeOutDir(dir, files, root0) {
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+  } catch {
+    throw new Error('cannot create --out directory');
   }
+  if (fs.lstatSync(dir).isSymbolicLink()) throw new Error('refusing to write through a symlink: --out');
+  // Every target is checked (links, hard links, non-regular files) before the first one is written.
+  const targets = Object.keys(files).map((name) => {
+    try {
+      return [name, safeOutPath(path.join(dir, name), root0)];
+    } catch (e) {
+      throw new Error(`refusing to write ${name} in --out: ${e.message.replace(/^--out /, '')}`);
+    }
+  });
   const written = [];
-  for (const [name, text] of Object.entries(files)) {
-    const abs = path.join(dir, name);
-    fs.writeFileSync(abs, redact(text).text);
+  for (const [name, abs] of targets) {
+    writeOut(abs, redact(files[name]).text);
     written.push(name);
   }
   return written.sort();
@@ -143,7 +146,7 @@ export function main(argv) {
       ? writeGenerated(root, Object.fromEntries(Object.entries(generated).map(([n, t]) => [`fitness/${n}`, t])), {
         remove: FITNESS_FILES.map((n) => `fitness/${n}`),
       })
-      : { written: writeOut(outPath, generated), removed: [] };
+      : { written: writeOutDir(outPath, generated, root), removed: [] };
     const out = { rules, notes: [...memberNotes, ...parsed.notes, ...validModules(modules).notes], written, removed };
     process.stdout.write(JSON.stringify(redactJson(out), null, 2) + '\n');
   } catch (e) {

@@ -192,7 +192,9 @@ test('findings are capped at 50 per id in the profile, with full counts (100k lo
     assert.match(md, /- cleartext-traffic: 1\n/);
     const arch = renderKnowledge(p, discoverModules(dir, listFiles(dir)), catalog, { date: '2026-11-20', commit: null, catalogVersion: catalog.catalogVersion })['knowledge/architecture-current.md'];
     assert.match(arch, /- high: 1, medium: 0, low: 100000/);
-    assert.match(arch, /sensitive-log: 100000 \(showing first 50\)/);
+    assert.match(arch, /sensitive-log: 100000 \(showing first 9 of 100000\)/);
+    assert.doesNotMatch(arch, /showing first 50/);
+    assert.equal((arch.match(/^- \[(high|medium|low)\]/gm) ?? []).length, 10, 'the document lists 10 findings');
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

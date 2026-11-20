@@ -343,3 +343,89 @@ test('override errors in a workspace name the repo-relative override file', () =
   assert.equal(r.status, 1);
   assert.match(r.stderr, /\.\.\/hub-app\/\.ai\/catalog-overrides\/bad\.json: is not valid JSON/);
 });
+
+// Task 11: a member's hub path is committed text; it is verified before the hub's overrides are read.
+const setMemberManifest = (mutate) => {
+  const f = path.join(lib, '.ai/manifest.json');
+  const m = json(f);
+  mutate(m);
+  fs.writeFileSync(f, JSON.stringify(m, null, 2));
+};
+const refreshMember = () => script('refresh.js', [lib]);
+
+test('a forged member manifest pointing at an unrelated folder with overrides is refused and nothing there is read', () => {
+  hubOverride('company.json', COMPANY);
+  assert.equal(init(['.', '--workspace', '../lib-core']).status, 0);
+  const evil = path.join(tmp, 'unrelated');
+  fs.mkdirSync(path.join(evil, '.ai/catalog-overrides'), { recursive: true });
+  fs.writeFileSync(path.join(evil, '.ai/catalog-overrides/evil.json'), JSON.stringify({
+    schemaVersion: 1,
+    entries: [{ dimension: 'networking', entry: { id: 'forged-http', name: 'Forged HTTP', era: 2, status: 'current', successors: [], detect: { content: [{ contains: 'class HttpClient' }] } } }],
+  }));
+  setMemberManifest((m) => { m.workspace.hub = '../unrelated'; });
+  for (const r of [refreshMember(), script('scan.js', [lib])]) {
+    assert.equal(r.status, 1, r.stdout);
+    assert.match(r.stderr, /\.\.\/unrelated\/\.ai\/catalog-overrides: the folder is not a verified workspace hub/);
+    assert.doesNotMatch(r.stderr + r.stdout, /forged-http|Forged HTTP/);
+    assert.equal(r.stderr.includes(tmp), false, 'no absolute path');
+  }
+});
+
+test('a hub that does not list the member, is not a hub, or has symlinked .ai pieces is refused', () => {
+  hubOverride('company.json', COMPANY);
+  assert.equal(init(['.', '--workspace', '../lib-core']).status, 0);
+  const reposFile = path.join(hub, '.ai/repos.json');
+  const repos = json(reposFile);
+  fs.writeFileSync(reposFile, JSON.stringify({ ...repos, repos: repos.repos.filter((r) => r.name !== 'lib-core') }));
+  let r = refreshMember();
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /repos\.json does not list this repo/);
+  fs.writeFileSync(reposFile, JSON.stringify(repos));
+  assert.equal(refreshMember().status, 0);
+  // not a hub
+  const mf = path.join(hub, '.ai/manifest.json');
+  const hubManifest = json(mf);
+  fs.writeFileSync(mf, JSON.stringify({ ...hubManifest, workspace: { role: 'member', hub: '../x' } }));
+  r = refreshMember();
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /manifest does not declare a hub/);
+  fs.writeFileSync(mf, JSON.stringify(hubManifest));
+  // symlinked catalog-overrides
+  const ov = path.join(hub, '.ai/catalog-overrides');
+  const moved = path.join(tmp, 'moved-overrides');
+  fs.renameSync(ov, moved);
+  fs.symlinkSync(moved, ov);
+  r = refreshMember();
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /catalog-overrides is a symlink/);
+  fs.rmSync(ov);
+  fs.renameSync(moved, ov);
+  // symlinked .ai
+  const aiMoved = path.join(tmp, 'moved-ai');
+  fs.renameSync(path.join(hub, '.ai'), aiMoved);
+  fs.symlinkSync(aiMoved, path.join(hub, '.ai'));
+  r = refreshMember();
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /\.ai is a symlink/);
+});
+
+test('an unreadable member manifest raises the hub error instead of falling back to own overrides', () => {
+  assert.equal(init(['.', '--workspace', '../lib-core']).status, 0);
+  fs.mkdirSync(path.join(lib, '.ai/catalog-overrides'), { recursive: true });
+  fs.writeFileSync(path.join(lib, '.ai/catalog-overrides/own.json'), JSON.stringify(COMPANY));
+  fs.writeFileSync(path.join(lib, '.ai/manifest.json'), '{ not json');
+  const r = script('scan.js', [lib]);
+  assert.equal(r.status, 1, r.stdout);
+  assert.match(r.stderr, /catalog-overrides: cannot tell whether this repo is a workspace member/);
+  assert.equal(r.stderr.includes(tmp), false);
+});
+
+test('the member heading names the hub overrides folder, sanitized', () => {
+  hubOverride('company.json', COMPANY);
+  assert.equal(init(['.', '--workspace', '../lib-core']).status, 0);
+  const arch = () => fs.readFileSync(path.join(lib, '.ai/knowledge/architecture-current.md'), 'utf8');
+  assert.match(arch(), /changes from `\.\.\/hub-app\/\.ai\/catalog-overrides\/` /);
+  assert.doesNotMatch(arch(), /from `\.ai\/catalog-overrides\/`/);
+  // a hub standalone-style repo keeps the plain heading
+  assert.equal(script('scan.js', [hub]).status, 0);
+});

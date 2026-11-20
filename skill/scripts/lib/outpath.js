@@ -38,7 +38,11 @@ export function safeOutPath(outArg, root, { allowInside = false } = {}) {
   return abs;
 }
 
-/** Write text to a path accepted by safeOutPath: a new file with `wx`, an existing regular file truncated in place. */
+/**
+ * Write text to a path accepted by safeOutPath: a new file with `wx`, an existing regular file truncated in place. The
+ * opened descriptor is checked again (regular file, at most one link) before anything is truncated or written, so a link
+ * swapped in after the checks is refused without touching its target.
+ */
 export function writeOut(target, text) {
   let fd;
   try {
@@ -47,9 +51,16 @@ export function writeOut(target, text) {
     if (e.code !== 'EEXIST') throw new Error('cannot write --out');
     const st = fs.lstatSync(target);
     if (!st.isFile() || st.nlink > 1) throw new Error('--out must be a regular file');
-    fd = fs.openSync(target, fs.constants.O_WRONLY | fs.constants.O_TRUNC | (fs.constants.O_NOFOLLOW ?? 0));
+    try {
+      fd = fs.openSync(target, fs.constants.O_WRONLY | (fs.constants.O_NOFOLLOW ?? 0));
+    } catch {
+      throw new Error('cannot write --out');
+    }
   }
   try {
+    const open = fs.fstatSync(fd);
+    if (!open.isFile() || open.nlink > 1) throw new Error('--out must be a regular file');
+    fs.ftruncateSync(fd, 0);
     fs.writeFileSync(fd, text);
   } finally {
     fs.closeSync(fd);

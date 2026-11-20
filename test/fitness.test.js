@@ -598,3 +598,50 @@ test('init and refresh leave .ai/fitness alone', () => {
     cleanup(dir);
   }
 });
+
+test('CLI --out refuses a pre-planted hardlink to a project file, writes nothing and leaks no path', () => {
+  const dir = project();
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), 'aa-fitness-out-'));
+  try {
+    const victim = path.join(dir, 'victim.txt');
+    fs.writeFileSync(victim, 'keep');
+    fs.linkSync(victim, path.join(out, 'verify-commands.json'));
+    const r = cli([dir, '--out', out]);
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /refusing to write verify-commands\.json in --out: must not be a hard-linked file/);
+    assert.ok(!r.stderr.includes(dir) && !r.stderr.includes(out), 'no absolute path');
+    assert.equal(fs.readFileSync(victim, 'utf8'), 'keep');
+    assert.deepEqual(fs.readdirSync(out), ['verify-commands.json'], 'no other file written');
+    // a symlinked target is refused too
+    fs.rmSync(path.join(out, 'verify-commands.json'));
+    fs.symlinkSync(victim, path.join(out, 'README.md'));
+    const r2 = cli([dir, '--out', out]);
+    assert.equal(r2.status, 1);
+    assert.match(r2.stderr, /symbolic link/);
+    assert.equal(fs.readFileSync(victim, 'utf8'), 'keep');
+    assert.deepEqual(fs.readdirSync(out), ['README.md']);
+  } finally {
+    cleanup(dir);
+    cleanup(out);
+  }
+});
+
+test('CLI --out refuses a symlinked directory and gives a clean message when it cannot be created', () => {
+  const dir = project();
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), 'aa-fitness-out-'));
+  try {
+    fs.writeFileSync(path.join(out, 'afile'), 'x');
+    const r = cli([dir, '--out', path.join(out, 'afile', 'sub')]);
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /cannot create --out directory/);
+    assert.ok(!r.stderr.includes(out), 'no absolute path');
+    fs.mkdirSync(path.join(out, 'real'));
+    fs.symlinkSync(path.join(out, 'real'), path.join(out, 'link'));
+    const r2 = cli([dir, '--out', path.join(out, 'link')]);
+    assert.equal(r2.status, 1);
+    assert.match(r2.stderr, /symlink/);
+  } finally {
+    cleanup(dir);
+    cleanup(out);
+  }
+});
