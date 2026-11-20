@@ -130,9 +130,16 @@ const BUCKET_TITLES = {
 };
 
 /** Markdown for a buildFeatureMap result: notes, one table per bucket, then the reasons per feature. */
+/** One line of Markdown-safe text: whitespace collapsed, pipes escaped, no leading heading, quote or list marker. */
+const mdText = (s) => {
+  const t = String(s).replace(/[\s\u2028\u2029]+/g, ' ').trim().replace(/\|/g, '\\|');
+  return /^[#>-]/.test(t) ? '\\' + t : t;
+};
+
 export function renderFeatureMap(map) {
   const out = ['# Feature map', ''];
-  if (!map) return out.concat('The feature map was not computed for this run.', '').join('\n');
+  if (!map) return out.concat('feature map not computed: no data for this run', '').join('\n');
+  if (map.error !== undefined) return out.concat(`feature map not computed: ${mdText(map.error)}`, '').join('\n');
   out.push('Candidates ranked for migration by a tunable score (weights and thresholds: `catalog/scoring.json`).', '');
   if (map.fallback === 'packages') out.push('No feature modules or `feature/<name>` packages found: units are top-level packages.', '');
   else if (map.fallback === 'app') out.push('No feature structure found: the whole project is one unit.', '');
@@ -147,10 +154,10 @@ export function renderFeatureMap(map) {
     out.push('| feature | kind | score | risk | loc | tests | fan-in | fan-out | churn | proximity |', '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |');
     for (const f of list) {
       const row = [f.name, f.kind, f.score, f.risk, f.loc, f.testFiles, f.fanIn, f.fanOut, f.churn ?? 'n/a', f.proximity];
-      out.push(`| ${row.map(cell).join(' | ')} |`);
+      out.push(`| ${row.map(mdText).join(' | ')} |`);
     }
     out.push('');
-    for (const f of list) out.push(`- ${oneLine(f.name)}: ${f.reasons.map(oneLine).join('; ')}`);
+    for (const f of list) out.push(`- ${mdText(f.name)}: ${f.reasons.map(mdText).join('; ')}`);
     out.push('');
   }
   return out.join('\n').replace(/\n+$/, '\n');

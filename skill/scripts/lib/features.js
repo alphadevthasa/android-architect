@@ -5,6 +5,9 @@ import { FEATURE_SEGMENT, moduleSegments } from './detect.js';
 
 const MAX_READ_BYTES = 1024 * 1024;
 const MIN_PACKAGE_FILES = 3;
+const BULK_COMMIT_FILES = 50; // commits touching more files are bulk reformat/rename: ignored for churn
+const BYTES_PER_LOC = 40; // LOC estimate for files over MAX_READ_BYTES
+const MAX_NAME = 60;
 const IMPORT_RE = /^\s*import\s+(?:static\s+)?([\w.]+)/;
 const FEATURE_PKG = /^features?$/;
 const STATE_FLOW = new Set([
@@ -40,8 +43,9 @@ const round1 = (n) => Math.round(n * 10) / 10;
  *
  * Scoring (see catalog/scoring.json): each input is normalised to 0..1, higher is a better pilot candidate:
  *   isolation 1/(1+fanIn+fanOut); size by LOC band (<= small 1, <= medium 0.9, <= large 0.4, else 0.1);
- *   tests 0 for none, else min(1, testFiles/2); churn = sum of per-file commit counts (non-test source and layout
- *   files, last 6 months) divided by the max over features (higher churn = faster payoff);
+ *   tests 0 for none, else min(1, testFiles/2); churn = number of distinct commits (last 6 months) touching the
+ *   feature's non-test source or layout files, ignoring commits that touch more than 50 files, divided by the max
+ *   over features (higher churn = faster payoff); files over 1 MB are not read: LOC is estimated as bytes / 40;
  *   risk low 1, medium 0.5, high 0 (a penalty); proximity as above.
  * score = 100 * sum(weight * input) / sum(weights used). Without git history the churn weight is dropped and the
  * rest renormalised. A high-risk feature is capped to `next`.
@@ -75,10 +79,14 @@ function makeAnalyzer(root) {
   const cache = new Map();
   return (rel) => {
     if (cache.has(rel)) return cache.get(rel);
-    let info = { loc: 0, imports: [], modern: false, legacy: false };
+    let info = { loc: 0, imports: [], modern: false, legacy: false, big: false };
     try {
       const abs = path.join(root, rel);
-      if (fs.statSync(abs).size <= MAX_READ_BYTES) {
+      const size = fs.statSync(abs).size;
+      if (size > MAX_READ_BYTES) {
+        info.loc = Math.ceil(size / BYTES_PER_LOC);
+        info.big = true;
+      } else {
         const lines = readLines(abs);
         let compose = false;
         let viewModel = false;
@@ -103,11 +111,20 @@ function makeAnalyzer(root) {
         info.legacy = legacy && !info.modern;
       }
     } catch {
-      info = { loc: 0, imports: [], modern: false, legacy: false };
+      info = { loc: 0, imports: [], modern: false, legacy: false, big: false };
     }
     cache.set(rel, info);
     return info;
   };
+}
+
+/** Feature names come from directory names: restrict them to a safe charset. */
+export function sanitizeName(raw, index) {
+  const clean = String(raw)
+    .replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, '')
+    .replace(/[^A-Za-z0-9_.-]/g, '-')
+    .slice(0, MAX_NAME);
+  return clean === '' ? `unit-${index + 1}` : clean;
 }
 
 function newUnit(name, kind) {
@@ -268,7 +285,7 @@ function sizeScore(loc, b) {
 
 /**
  * Rank migration candidates. Returns { features, fallback, churnAvailable }.
- * `churn` is churnByPath output (relative path -> commits) or null when git history is unavailable.
+ * `churn` is churnByCommit output ([{ files }]) or null when git history is unavailable.
  */
 export function buildFeatureMap(root, { profile, scoring, churn = null }) {
   const files = listFiles(root, { gitignore: true });
@@ -301,10 +318,25 @@ export function buildFeatureMap(root, { profile, scoring, churn = null }) {
   units.sort((a, b) => byText(a.name, b.name));
 
   const fan = computeFan(units, unitOfModule, modules, analyze);
-  const churnAvailable = churn !== null && typeof churn === 'object';
-  const rows = units.map((u) => {
+  const churnAvailable = Array.isArray(churn);
+  const commitsOf = new Map(units.map((u) => [u, new Set()]));
+  if (churnAvailable) {
+    const owner = new Map();
+    units.forEach((u, i) => {
+      for (const f of [...u.src, ...u.layouts]) {
+        if (!owner.has(f)) owner.set(f, []);
+        owner.get(f).push(i);
+      }
+    });
+    churn.forEach((c, n) => {
+      if (!Array.isArray(c?.files) || c.files.length > BULK_COMMIT_FILES) return;
+      for (const f of c.files) for (const i of owner.get(f) ?? []) commitsOf.get(units[i]).add(n);
+    });
+  }
+  const rows = units.map((u, index) => {
     const srcFiles = [...u.src].sort(byText);
     const loc = srcFiles.reduce((s, f) => s + analyze(f).loc, 0);
+    const bigFiles = srcFiles.filter((f) => analyze(f).big).length;
     let modern = 0;
     let legacy = u.layouts.size;
     for (const f of srcFiles) {
@@ -314,17 +346,18 @@ export function buildFeatureMap(root, { profile, scoring, churn = null }) {
     }
     const riskHigh = matchRisk(u.name, scoring.riskKeywords.high);
     const riskMedium = matchRisk(u.name, scoring.riskKeywords.medium);
-    const touched = [...srcFiles, ...[...u.layouts]];
+    const name = sanitizeName(u.name, index);
     return {
-      id: u.name,
-      name: u.name,
+      id: name,
+      name,
       kind: u.kind,
       paths: [...u.paths].sort(byText),
       files: srcFiles.length,
       loc,
       testFiles: u.tests.size,
       ...fan(u),
-      churn: churnAvailable ? touched.reduce((s, f) => s + (churn[f] ?? 0), 0) : null,
+      churn: churnAvailable ? commitsOf.get(u).size : null,
+      bigFiles,
       risk: riskHigh.length ? 'high' : riskMedium.length ? 'medium' : 'low',
       riskMatched: riskHigh.length ? riskHigh : riskMedium,
       proximity: modern + legacy === 0 ? 0 : Math.round((modern / (modern + legacy)) * 100) / 100,
@@ -354,14 +387,15 @@ export function buildFeatureMap(root, { profile, scoring, churn = null }) {
     reasons.push(r.fanIn + r.fanOut <= 1 ? `isolated: ${coupling}` : `coupled: ${coupling}`);
     reasons.push(`${BAND_LABEL[size.band]} size: ${r.loc} loc${size.huge ? ', consider splitting before migrating' : ''}`);
     reasons.push(r.testFiles === 0 ? 'no tests: write characterization tests first' : `${r.testFiles} test file${r.testFiles === 1 ? '' : 's'}`);
-    if (churnAvailable) reasons.push(`churn: ${r.churn} file changes in the last 6 months`);
+    if (churnAvailable) reasons.push(`churn: ${r.churn} commits in the last 6 months`);
+    if (r.bigFiles > 0) reasons.push(`${r.bigFiles} files too large to scan (LOC estimated)`);
     if (r.risk !== 'low') reasons.push(`${r.risk} risk: matches ${r.riskMatched.join(', ')}`);
     reasons.push(r.uiFiles === 0 ? 'proximity 0: no UI source detected' : `proximity ${Math.round(r.proximity * 100)}%: ${r.uiFiles} UI files counted`);
     if (r.risk === 'high' && bucket === 'first') {
       bucket = 'next';
       reasons.push('capped to next: high-risk features are not pilot candidates');
     }
-    const { uiFiles, ...rest } = r; // eslint-disable-line no-unused-vars
+    const { uiFiles, bigFiles, ...rest } = r; // eslint-disable-line no-unused-vars
     return { ...rest, score, bucket, reasons };
   });
   features.sort((a, b) => BUCKET_ORDER[a.bucket] - BUCKET_ORDER[b.bucket] || b.score - a.score || byText(a.name, b.name));

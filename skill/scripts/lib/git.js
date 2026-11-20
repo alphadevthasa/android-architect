@@ -120,11 +120,11 @@ export function ignoredPaths(root, relPaths) {
 }
 
 /**
- * Commits per file path (relative to root, POSIX) over the last `sinceMonths` months, from one `git log` call.
- * Advisory data, not a security filter: returns null (never throws) when git is missing, root is not a repo,
- * there are no commits, the clone is shallow with fewer than 2 commits, or git fails for any reason.
+ * Files touched by each commit of the last `sinceMonths` months, as [{ files: string[] }] (paths relative to root,
+ * POSIX), from one `git log` call. Advisory data, not a security filter: returns null (never throws) when git is
+ * missing, root is not a repo, there are no commits, the clone is shallow with fewer than 2 commits, or git fails.
  */
-export function churnByPath(root, { sinceMonths = 6 } = {}) {
+export function churnByCommit(root, { sinceMonths = 6 } = {}) {
   try {
     if (headCommit(root) === null) return null;
     const count = Number.parseInt(git(root, ['rev-list', '--count', 'HEAD']) ?? '', 10);
@@ -133,15 +133,15 @@ export function churnByPath(root, { sinceMonths = 6 } = {}) {
     const months = Number.isInteger(sinceMonths) && sinceMonths > 0 ? sinceMonths : 6;
     const out = execFileSync(
       'git',
-      ['log', '--relative', '--no-renames', `--since=${months}.months`, '--name-only', '-z', '--pretty=format:'],
+      ['log', '--relative', '--no-renames', `--since=${months}.months`, '--name-only', '-z', '--pretty=format:%x01'],
       { cwd: root, env: gitEnv(), stdio: ['ignore', 'pipe', 'ignore'], encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
     );
-    const counts = {};
-    for (const p of out.split('\0')) {
-      const rel = p.replace(/^\n+/, '');
-      if (rel !== '') counts[rel] = (counts[rel] ?? 0) + 1;
+    const commits = [];
+    for (const chunk of out.split('\x01').slice(1)) {
+      const files = [...new Set(chunk.replace(/^\n/, '').split('\0').filter((f) => f !== ''))];
+      commits.push({ files });
     }
-    return counts;
+    return commits;
   } catch {
     return null;
   }

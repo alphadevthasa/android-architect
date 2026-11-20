@@ -8,7 +8,7 @@ import { loadCatalogWithOverrides } from './lib/overrides.js';
 import { loadScoring } from './lib/catalog.js';
 import { detectStack } from './lib/detect.js';
 import { buildFeatureMap } from './lib/features.js';
-import { churnByPath } from './lib/git.js';
+import { churnByCommit } from './lib/git.js';
 import { renderFeatureMap } from './lib/knowledge.js';
 import { redact, redactJson } from './lib/redact.js';
 
@@ -58,9 +58,9 @@ export function main(argv) {
   try {
     const catalog = loadCatalogWithOverrides(undefined, root).catalog;
     const profile = detectStack(root, catalog);
-    map = buildFeatureMap(root, { profile, scoring: loadScoring(), churn: churnByPath(root) });
+    map = buildFeatureMap(root, { profile, scoring: loadScoring(), churn: churnByCommit(root) });
   } catch (e) {
-    fail(1, e.message);
+    fail(1, redact(String(e.message)).text);
   }
   const text = opts.format === 'md' ? redact(renderFeatureMap(map)).text : JSON.stringify(redactJson(map), null, 2) + '\n';
   if (opts.out) fs.writeFileSync(path.resolve(opts.out), text);

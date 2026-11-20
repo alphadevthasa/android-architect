@@ -8,7 +8,8 @@ import { fileURLToPath } from 'node:url';
 import { loadCatalog, loadScoring } from '../skill/scripts/lib/catalog.js';
 import { detectStack } from '../skill/scripts/lib/detect.js';
 import { buildFeatureMap } from '../skill/scripts/lib/features.js';
-import { churnByPath } from '../skill/scripts/lib/git.js';
+import { churnByCommit } from '../skill/scripts/lib/git.js';
+import { writeAiDir } from '../skill/scripts/lib/aidir.js';
 import { renderKnowledge, generatedHeader } from '../skill/scripts/lib/knowledge.js';
 import { discoverModules } from '../skill/scripts/lib/modules.js';
 import { listFiles } from '../skill/scripts/lib/walk.js';
@@ -86,10 +87,10 @@ test('churn from git history, and null without it', () => {
   fs.cpSync(fx('feature-app'), dir, { recursive: true });
   const none = map(dir);
   assert.equal(none.churnAvailable, false);
-  assert.equal(churnByPath(dir), null); // not a repo
+  assert.equal(churnByCommit(dir), null); // not a repo
   git(dir, 'init');
-  assert.equal(churnByPath(dir), null); // no commits
-  assert.equal(map(dir, { churn: churnByPath(dir) }).features.length, 4);
+  assert.equal(churnByCommit(dir), null); // no commits
+  assert.equal(map(dir, { churn: churnByCommit(dir) }).features.length, 4);
   // Only the touched files are tracked, so each commit adds exactly one change to one feature file.
   const touch = (rel, i) => {
     fs.appendFileSync(path.join(dir, rel), `// change ${i}\n`);
@@ -99,8 +100,9 @@ test('churn from git history, and null without it', () => {
   const profileFile = 'feature/profile/src/main/kotlin/com/example/featureapp/feature/profile/ProfileScreen.kt';
   for (let i = 1; i <= 5; i++) touch(profileFile, i);
   touch('feature/legacy-reports/src/main/kotlin/com/example/featureapp/feature/reports/ReportsActivity.kt', 1);
-  const churn = churnByPath(dir);
-  assert.equal(churn[profileFile], 5);
+  const churn = churnByCommit(dir);
+  assert.equal(churn.length, 6);
+  assert.equal(churn.filter((c) => c.files.includes(profileFile)).length, 5);
   const m = map(dir, { churn });
   assert.equal(m.churnAvailable, true);
   assert.equal(by(m, 'profile').churn, 5);
@@ -119,8 +121,8 @@ test('churn is null (not a throw) for a shallow clone with one commit', () => {
   git(src, 'commit', '-am', 'two');
   const clone = path.join(tmp(), 'clone');
   execFileSync('git', ['clone', '--depth', '1', '--quiet', 'file://' + src, clone], { stdio: 'ignore' });
-  assert.equal(churnByPath(clone), null);
-  assert.deepEqual(churnByPath(src), { 'a.txt': 2 });
+  assert.equal(churnByCommit(clone), null);
+  assert.deepEqual(churnByCommit(src), [{ files: ['a.txt'] }, { files: ['a.txt'] }]);
 });
 
 test('legacy-java-mvp has no feature structure: fallback, never empty', () => {
@@ -215,4 +217,99 @@ test('CLI: exit 0 on feature-app, json and md, exit 2 on a plain dir, 1 on usage
   assert.equal(run(dir), 2);
   assert.equal(run(), 1);
   assert.equal(run(fx('feature-app'), '--format', 'xml'), 1);
+});
+
+// Scratch project: settings + one module per feature name, files given as { module: { relFile: content } }.
+function scratch(featureFiles) {
+  const dir = tmp('aa-scratch-');
+  const mods = Object.keys(featureFiles);
+  fs.writeFileSync(path.join(dir, 'settings.gradle.kts'), `include(${mods.map((m) => `":feature:${m}"`).join(', ')})\n`);
+  for (const [m, files] of Object.entries(featureFiles)) {
+    fs.mkdirSync(path.join(dir, 'feature', m), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'feature', m, 'build.gradle.kts'), 'plugins { id("com.android.library") }\n');
+    for (const [rel, text] of Object.entries(files)) {
+      const abs = path.join(dir, 'feature', m, rel);
+      fs.mkdirSync(path.dirname(abs), { recursive: true });
+      fs.writeFileSync(abs, text);
+    }
+  }
+  return dir;
+}
+
+test('hostile directory names cannot forge Markdown headings or break the table', () => {
+  const evil = 'evil\n# FORGED\n\n| x';
+  const dir = tmp('aa-evil-');
+  fs.writeFileSync(path.join(dir, 'settings.gradle.kts'), 'include(":app")\n');
+  fs.mkdirSync(path.join(dir, 'app'));
+  fs.writeFileSync(path.join(dir, 'app/build.gradle.kts'), 'plugins { id("com.android.application") }\n');
+  const pkg = path.join(dir, 'app/src/main/kotlin/com/x/features', evil);
+  fs.mkdirSync(pkg, { recursive: true });
+  fs.writeFileSync(path.join(pkg, 'A.kt'), 'package com.x\n\nclass A\n');
+  const m = map(dir);
+  assert.match(m.features[0].name, /^[A-Za-z0-9_.-]{1,60}$/);
+  assert.equal(m.features[0].id, m.features[0].name);
+  const profile = detectStack(dir, catalog);
+  const md = renderKnowledge(profile, [], catalog, { date: 'd', commit: 'c', catalogVersion: '1' }, m)['knowledge/feature-map.md'];
+  const cliMd = execFileSync(process.execPath, [cli, dir, '--format', 'md'], { encoding: 'utf8' });
+  for (const text of [md, cliMd]) {
+    assert.ok(!text.split('\n').some((l) => l.startsWith('# FORGED')));
+    for (const l of text.split('\n').filter((l) => l.startsWith('|'))) assert.equal(l.split(/(?<!\\)\|/).length, 12, l);
+  }
+  const json = JSON.parse(execFileSync(process.execPath, [cli, dir], { encoding: 'utf8' }));
+  assert.match(json.features[0].name, /^[A-Za-z0-9_.-]+$/);
+});
+
+test('files over 1 MB get an estimated LOC and a reason', () => {
+  const dir = scratch({
+    big: { 'src/main/kotlin/com/x/Big.kt': 'package com.x\n' + '// padding line\n'.repeat(2 * 1024 * 1024 / 16) },
+    small: { 'src/main/kotlin/com/x/S.kt': 'package com.x\n\nclass S\n' },
+  });
+  const m = map(dir);
+  const big = by(m, 'big');
+  assert.ok(big.loc >= 50000);
+  assert.notEqual(big.bucket, 'first');
+  assert.equal(big.bucket, 'last');
+  assert.ok(big.reasons.includes('1 files too large to scan (LOC estimated)'));
+  assert.ok(!by(m, 'small').reasons.some((r) => r.includes('too large')));
+});
+
+test('churn counts distinct commits and ignores bulk commits', () => {
+  const aFiles = {};
+  for (let i = 0; i < 30; i++) aFiles[`src/main/kotlin/com/x/A${i}.kt`] = `package com.x\n\nclass A${i}\n`;
+  const bFiles = { 'src/main/kotlin/com/x/B.kt': 'package com.x\n\nclass B\n' };
+  const cFiles = {};
+  for (let i = 0; i < 30; i++) cFiles[`src/main/kotlin/com/x/C${i}.kt`] = `package com.x\n\nclass C${i}\n`;
+  const dir = scratch({ a: aFiles, b: bFiles, c: cFiles });
+  git(dir, 'init');
+  const edit = (rels, tag) => {
+    for (const r of rels) fs.appendFileSync(path.join(dir, r), `// ${tag}\n`);
+    git(dir, 'add', ...rels);
+    git(dir, 'commit', '-m', tag);
+  };
+  const files = (mod, n) => Array.from({ length: n }, (_, i) => `feature/${mod}/src/main/kotlin/com/x/${mod.toUpperCase()}${i}.kt`);
+  edit(files('a', 30), 'format-pass'); // 30 files: not bulk, counts once
+  edit(['feature/a/src/main/kotlin/com/x/A0.kt'], 'a1');
+  for (let i = 0; i < 4; i++) edit(['feature/b/src/main/kotlin/com/x/B.kt'], `b${i}`);
+  edit([...files('a', 30), ...files('c', 30)], 'bulk-60'); // ignored: 60 files
+  const commits = churnByCommit(dir);
+  const m = map(dir, { churn: commits });
+  const a = by(m, 'a');
+  const b = by(m, 'b');
+  assert.equal(a.churn, 2); // the format pass and a1; the 60-file commit is ignored
+  assert.equal(b.churn, 4);
+  assert.equal(by(m, 'c').churn, 0);
+  assert.ok(b.churn > a.churn);
+});
+
+test('a broken scoring.json does not abort writeAiDir and is noted in feature-map.md', () => {
+  const work = tmp('aa-broken-');
+  const project = path.join(work, 'proj');
+  fs.cpSync(fx('feature-app'), project, { recursive: true });
+  const catDir = path.join(work, 'catalog');
+  fs.cpSync(path.join(root, 'skill/catalog'), catDir, { recursive: true });
+  fs.writeFileSync(path.join(catDir, 'scoring.json'), '{ not json');
+  writeAiDir(project, { now: new Date('2026-11-20T00:00:00Z'), toolVersion: '9.9.9', catalogDir: catDir });
+  const md = fs.readFileSync(path.join(project, '.ai/knowledge/feature-map.md'), 'utf8');
+  assert.match(md, /feature map not computed: scoring\.json:/);
+  assert.ok(!md.includes('TODO'));
 });

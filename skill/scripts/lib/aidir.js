@@ -8,7 +8,7 @@ import { candidatePaths } from './candidates.js';
 import { discoverModules } from './modules.js';
 import { listFiles } from './walk.js';
 import { buildIndex } from './indexer.js';
-import { headCommit, gitDir, topLevel, addToExclude, changedSince, churnByPath } from './git.js';
+import { headCommit, gitDir, topLevel, addToExclude, changedSince, churnByCommit } from './git.js';
 import { loadScoring } from './catalog.js';
 import { buildFeatureMap } from './features.js';
 import { sha256File, hashTree, regularFiles } from './hash.js';
@@ -212,7 +212,13 @@ export function writeAiDir(
   const modules = discoverModules(root, files);
   // One feature-map computation per run, shared by the knowledge files.
   const scoringDir = fs.existsSync(path.join(catalogDir, 'scoring.json')) ? catalogDir : undefined;
-  const featureMap = buildFeatureMap(root, { profile, scoring: loadScoring(scoringDir), churn: churnByPath(root) });
+  // Advisory: a broken scoring.json or a failure here must not abort the run.
+  let featureMap;
+  try {
+    featureMap = buildFeatureMap(root, { profile, scoring: loadScoring(scoringDir), churn: churnByCommit(root) });
+  } catch (e) {
+    featureMap = { error: String(e?.message ?? e) };
+  }
   const date = now.toISOString().slice(0, 10);
   const mode = local ? 'local' : 'committed';
   const meta = { date, commit, catalogVersion: catalog.catalogVersion };
