@@ -268,3 +268,78 @@ test('item 5: bare --workspace on a confirmed hub with every sibling listed writ
   const more = JSON.parse(init(['.', '--workspace']).stdout);
   assert.deepEqual(more.proposed, ['../lib-core', '../lib-extra']);
 });
+
+// Ruling 15: workspace members inherit the hub's catalog overrides (and pins).
+const SCRIPTS = path.resolve('skill/scripts');
+const NO_NET = path.resolve('test/helpers/no-network.mjs');
+const script = (name, args) => spawnSync(process.execPath, ['--import', NO_NET, path.join(SCRIPTS, name), ...args], { encoding: 'utf8' });
+const hubOverride = (name, body) => {
+  const dir = path.join(hub, '.ai', 'catalog-overrides');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, name), typeof body === 'string' ? body : JSON.stringify(body));
+};
+const COMPANY = {
+  schemaVersion: 1,
+  entries: [{
+    dimension: 'networking',
+    entry: { id: 'company-http', name: 'Company HTTP', era: 2, status: 'current', successors: [], detect: { content: [{ contains: 'class HttpClient' }] } },
+  }],
+};
+
+test('a hub catalog override reaches the members: init, refresh, scan, candidates and recommend-check --root', () => {
+  hubOverride('company.json', COMPANY);
+  let r = init(['.', '--workspace', '../lib-core']);
+  assert.equal(r.status, 0, r.stderr);
+  const arch = () => fs.readFileSync(path.join(lib, '.ai/knowledge/architecture-current.md'), 'utf8');
+  assert.match(arch(), /Company HTTP \(company-http\)/);
+  assert.deepEqual(json(path.join(lib, '.ai/manifest.json')).overrides, ['../hub-app/.ai/catalog-overrides/company.json']);
+  assert.deepEqual(json(path.join(lib, '.ai/manifest.json')).overrideAdded, ['networking.company-http']);
+
+  r = script('refresh.js', [lib]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(arch(), /Company HTTP \(company-http\)/);
+  assert.deepEqual(JSON.parse(r.stdout).overrideFiles, ['../hub-app/.ai/catalog-overrides/company.json']);
+
+  r = script('scan.js', [lib]);
+  assert.equal(r.status, 0, r.stderr);
+  const profile = JSON.parse(r.stdout);
+  assert.ok(profile.dimensions.networking.entries.some((e) => e.id === 'company-http'));
+  r = script('candidates.js', [lib]);
+  assert.equal(r.status, 0, r.stderr);
+
+  const profileFile = path.join(tmp, 'profile.json');
+  fs.writeFileSync(profileFile, JSON.stringify(profile));
+  const recsFile = path.join(tmp, 'recs.json');
+  const base = JSON.parse(fs.readFileSync(path.resolve('skill/catalog/catalog.json'), 'utf8')).catalogVersion;
+  fs.writeFileSync(recsFile, JSON.stringify({
+    schemaVersion: 1, catalogVersion: `${base}+overrides`, generatedAt: '2026-11-20',
+    dimensions: [{ dimension: 'networking', current: ['company-http'], target: 'company-http', label: 'later', rationale: 'r' }], steps: [],
+  }));
+  r = script('recommend-check.js', [recsFile, '--profile', profileFile, '--root', lib]);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  r = script('recommend-check.js', [recsFile, '--profile', profileFile]);
+  assert.equal(r.status, 1, 'without --root the override-only entry is unknown');
+});
+
+test('a member whose hub is missing gets a clear, path-prefixed error', () => {
+  assert.equal(init(['.', '--workspace', '../lib-core']).status, 0);
+  fs.rmSync(hub, { recursive: true, force: true });
+  for (const r of [script('scan.js', [lib]), script('refresh.js', [lib])]) {
+    assert.equal(r.status, 1, r.stdout);
+    assert.match(r.stderr, /\.\.\/hub-app\/\.ai\/catalog-overrides: workspace hub not found/);
+  }
+});
+
+test('override errors in a workspace name the repo-relative override file', () => {
+  hubOverride('bad.json', '{ not json');
+  let r = init(['.', '--workspace', '../lib-core']);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /hub-app\/\.ai\/catalog-overrides\/bad\.json: is not valid JSON/);
+  assert.equal(fs.existsSync(path.join(lib, '.ai')), false);
+  fs.rmSync(path.join(hub, '.ai'), { recursive: true });
+  assert.equal(init(['.', '--workspace', '../lib-core']).status, 0);
+  hubOverride('bad.json', '{ not json');
+  r = script('refresh.js', [lib]);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /\.\.\/hub-app\/\.ai\/catalog-overrides\/bad\.json: is not valid JSON/);
+});

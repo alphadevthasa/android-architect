@@ -153,6 +153,7 @@ test('a missing old vendored catalog yields empty status diffs and a note', () =
 });
 
 test('refresh keeps the member workspace role and local mode from the manifest', () => {
+  fs.mkdirSync(path.join(tmp, 'hub')); // members load the hub's catalog overrides, so the hub must exist
   writeAiDir(root, { now: NOW, toolVersion: '1.0.0', workspace: { role: 'member', hub: '../hub' } });
   const report = refresh();
   assert.equal(report.recommendations, null);

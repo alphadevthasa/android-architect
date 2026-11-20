@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { CatalogError, loadCatalog, validateEntry, SUPPORTED_SCHEMA_VERSION } from './catalog.js';
 import { globToRegExp } from './glob.js';
+import { readManifest } from './manifest.js';
 
 export const OVERRIDES_DIR = 'catalog-overrides';
 export const MAX_FILES = 20;
@@ -257,13 +258,62 @@ export function applyOverrides(catalog, overrides) {
 export const baseVersion = (catalog) => catalog.baseCatalogVersion ?? catalog.catalogVersion;
 
 /**
- * Load the base catalog and, unless `overrides` is false, merge <root>/.ai/catalog-overrides when it exists.
- * Returns { catalog, base, files } (files: the override file names applied; empty when none).
+ * Where the overrides of `root` live, as { dir, label, filePrefix }. A workspace member (manifest.workspace.role
+ * "member", or the given `workspace`) inherits the hub's <hub>/.ai/catalog-overrides; a missing hub directory throws.
+ * `label` prefixes error messages (null: the bare file name), `filePrefix` the reported file names (null: bare names).
+ * `workspace` undefined means "read it from <root>/.ai/manifest.json"; null means standalone.
  */
-export function loadCatalogWithOverrides(catalogDir, root, { overrides = true } = {}) {
+export function overrideSource(root, workspace) {
+  if (workspace === undefined) {
+    try {
+      workspace = readManifest(path.join(root, '.ai'))?.workspace ?? null;
+    } catch {
+      workspace = null; // an unreadable manifest is reported by the commands that need it
+    }
+  }
+  const own = path.join(root, '.ai', OVERRIDES_DIR);
+  if (workspace?.role === 'member' && typeof workspace.hub === 'string') {
+    const label = `${workspace.hub}/.ai/${OVERRIDES_DIR}`;
+    const hubAbs = path.resolve(root, workspace.hub);
+    let found = false;
+    try {
+      found = fs.statSync(hubAbs).isDirectory();
+    } catch {
+      found = false;
+    }
+    if (!found) {
+      throw new CatalogError([
+        `${label}: workspace hub not found (this member's .ai/manifest.json points at ${workspace.hub}); restore the hub repo there or run init again from the hub`,
+      ]);
+    }
+    return { dir: path.join(hubAbs, '.ai', OVERRIDES_DIR), label, filePrefix: label };
+  }
+  if (workspace?.role === 'hub') return { dir: own, label: `${path.basename(path.resolve(root))}/.ai/${OVERRIDES_DIR}`, filePrefix: null };
+  return { dir: own, label: null, filePrefix: null };
+}
+
+/** Rewrites "<name>: ..." and "catalog-overrides: ..." messages as "<label>/<name>: ..." and "<label>: ...". */
+function relabel(err, label) {
+  if (!label || !(err instanceof CatalogError)) return err;
+  return new CatalogError(err.errors.map((e) => (e.startsWith(`${OVERRIDES_DIR}:`) ? label + e.slice(OVERRIDES_DIR.length) : `${label}/${e}`)));
+}
+
+/**
+ * Load the base catalog and, unless `overrides` is false, merge the project's catalog overrides when they exist: its own
+ * .ai/catalog-overrides, or the hub's for a workspace member (see overrideSource; `workspace` as there).
+ * Returns { catalog, base, files } (files: the override file names applied, hub-relative paths for a member; empty when none).
+ */
+export function loadCatalogWithOverrides(catalogDir, root, { overrides = true, workspace } = {}) {
   const base = catalogDir === undefined ? loadCatalog() : loadCatalog(catalogDir);
-  const dir = path.join(root, '.ai', OVERRIDES_DIR);
-  if (!overrides || !fs.existsSync(dir)) return { catalog: base, base, files: [] };
-  const loaded = loadOverrides(dir, base);
-  return { catalog: applyOverrides(base, loaded), base, files: loaded.files };
+  if (!overrides) return { catalog: base, base, files: [] };
+  const { dir, label, filePrefix } = overrideSource(root, workspace);
+  if (!fs.existsSync(dir)) return { catalog: base, base, files: [] };
+  let loaded;
+  try {
+    loaded = loadOverrides(dir, base);
+  } catch (err) {
+    throw relabel(err, label);
+  }
+  const files = filePrefix ? loaded.files.map((f) => `${filePrefix}/${f}`) : loaded.files;
+  return { catalog: applyOverrides(base, loaded), base, files };
 }

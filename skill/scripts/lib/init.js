@@ -41,7 +41,7 @@ const refuseSwitch = (where, setup, what) =>
 /** Validate every workspace repo before anything is written. Relative paths resolve against the hub. */
 function planWorkspace(root, { local, workspace, catalogDir }) {
   const hub = fs.realpathSync(root);
-  preflight(root, { local, catalogDir });
+  preflight(root, { local, catalogDir, workspace: { role: 'hub', hub: '.' } });
   const confirmed = workspace.length > 0;
   const given = confirmed ? workspace : siblingRepos(hub);
   if (!given.length) throw new Error('no sibling Gradle repos found; pass repo paths to --workspace');
@@ -58,8 +58,9 @@ function planWorkspace(root, { local, workspace, catalogDir }) {
     if (inside(hub, abs) || inside(abs, hub)) throw new Error(`workspace path must be outside the hub and must not contain it: ${p}`);
     if (members.some((m) => m.abs === abs)) throw new Error(`workspace path listed twice: ${p}`);
     if (path.basename(abs) === path.basename(hub) || members.some((m) => m.name === path.basename(abs))) throw new Error(`workspace repos need distinct names: ${path.basename(abs)}`);
+    const hubRel = path.relative(abs, hub).split(path.sep).join('/');
     if (confirmed) {
-      preflight(abs, { local, catalogDir });
+      preflight(abs, { local, catalogDir, workspace: { role: 'member', hub: hubRel } });
       const setup = existingSetup(abs);
       if (setup && (setup.role !== 'member' || setup.mode !== (local ? 'local' : 'committed'))) {
         throw refuseSwitch(p, setup, `making it a ${local ? 'local' : 'committed'} workspace member`);
@@ -80,7 +81,7 @@ function planWorkspace(root, { local, workspace, catalogDir }) {
     members.push({
       abs,
       name: path.basename(abs),
-      hubRel: path.relative(abs, hub).split(path.sep).join('/'),
+      hubRel,
     });
   }
   return { members, repos: linkWorkspace(hub, members.map((m) => m.abs), { confirmed }) };

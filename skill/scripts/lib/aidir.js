@@ -120,13 +120,14 @@ function makeGuard(root, realRoot) {
 
 /**
  * Checks run before any write: --local needs a repo; .ai (and anything in it) and the pointer files must not be symlinks;
- * .ai/catalog-overrides (when present) must be valid against the catalog in `catalogDir` (default: this skill's); the
+ * the catalog overrides (when present: .ai/catalog-overrides, or the hub's for a workspace member; `workspace` as in
+ * overrideSource, undefined = from the manifest) must be valid against the catalog in `catalogDir` (default: this skill's); the
  * git-ignore check must work (it fails closed, so a git error throws here, before anything is written).
  * writeAiDir runs this itself; workspace mode runs it for every repo first.
  * Returns { catalog, base, files, listed }: the merged catalog (base + overrides), the base catalog, the override file
  * names and the project files (git-ignored ones dropped).
  */
-export function preflight(root, { local = false, catalogDir = path.join(DEFAULT_SKILL_DIR, 'catalog') } = {}) {
+export function preflight(root, { local = false, catalogDir = path.join(DEFAULT_SKILL_DIR, 'catalog'), workspace } = {}) {
   const realRoot = fs.realpathSync(root);
   const aiDir = path.join(root, '.ai');
   if (local && !gitDir(root)) throw new Error('--local needs a git repository');
@@ -134,7 +135,7 @@ export function preflight(root, { local = false, catalogDir = path.join(DEFAULT_
   guard('.ai');
   if (fs.existsSync(aiDir)) regularFiles(aiDir);
   for (const f of ['AGENTS.md', 'CLAUDE.md', 'CLAUDE.local.md']) guard(f);
-  const loaded = loadCatalogWithOverrides(catalogDir, root);
+  const loaded = loadCatalogWithOverrides(catalogDir, root, { workspace });
   return { ...loaded, listed: listFiles(root, { gitignore: true }) };
 }
 
@@ -180,7 +181,7 @@ export function writeAiDir(
   const putRedacted = (rel, text) => putAi(rel, redact(text).text);
 
   // Overrides are validated here, before the first write; the result is reused for detection below.
-  const loaded = prepared?.loaded ?? preflight(root, { local, catalogDir });
+  const loaded = prepared?.loaded ?? preflight(root, { local, catalogDir, workspace });
 
   // Vendor sources are read into memory before the first write, and must not live inside .ai.
   const vendorSources = collectVendorSources(skillDir, catalogDir, { aiDir });

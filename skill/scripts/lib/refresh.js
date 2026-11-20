@@ -197,7 +197,7 @@ export function refreshAiDir(root, { now = new Date(), catalogDir, skillDir = DE
   const local = manifest.mode === 'local';
   const workspace = manifest.workspace ?? null;
   const isMember = workspace?.role === 'member';
-  const loaded = preflight(root, { local, catalogDir });
+  const loaded = preflight(root, { local, catalogDir, workspace });
   migrateLayout(aiDir, manifest.schemaVersion, now);
 
   const notes = [];

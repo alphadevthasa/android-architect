@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Usage: node skill/scripts/recommend-check.js <recommendations.json> --profile <profile.json> [--adr-dir <dir>] [--root <dir>]
-// --root: the project root; when <root>/.ai/catalog-overrides exists the check runs against base + overrides.
+// --root: the project root; when <root>/.ai/catalog-overrides exists (for a workspace member: the hub's) the check runs
+// against base + overrides.
 // Prints { ok, violations, warnings } as JSON (warnings: rejected ADRs with unknown catalog ids). Exit 1 when not ok, 0 when ok, 2 on unreadable input.
 import fs from 'node:fs';
 import path from 'node:path';
