@@ -13,6 +13,7 @@ const MAX_ARG = 500;
 const MAX_ARGV = 50;
 const MAX_COMMANDS = 20;
 const MAX_ENV = 50;
+const MAX_LIST = 20;
 const MAX_BRANCH_PREFIX = 100;
 const MAX_PROTECTED = 20;
 const HARD_MAX = Object.freeze({ maxIterations: 200, maxTotalTokens: 20_000_000, maxTurnsPerStep: 200, maxWallClockMinutes: 24 * 60 });
@@ -24,7 +25,7 @@ const DENIED_EXES = ['curl', 'wget', 'ssh', 'scp', 'nc', 'ncat', 'telnet', 'ftp'
 
 export const DEFAULT_RUN_CONFIG = Object.freeze({
   schemaVersion: 1,
-  agent: Object.freeze({ kind: 'claude', command: Object.freeze(['claude']) }),
+  agent: Object.freeze({ kind: 'claude', command: Object.freeze(['claude']), requireArgs: Object.freeze([]), passEnv: Object.freeze([]) }),
   budgets: Object.freeze({ maxIterations: 10, maxTotalTokens: 400000, maxTurnsPerStep: 20, maxWallClockMinutes: 120 }),
   verification: Object.freeze({ commands: Object.freeze([Object.freeze(['./gradlew', 'assembleDebug', 'testDebugUnitTest', 'lint'])]), timeoutSeconds: 1800 }),
   branchPrefix: 'android-architect/run',
@@ -122,11 +123,24 @@ function argvProblems(argv, where, root, kind) {
   return out;
 }
 
-const deniedEnvName = (k) => {
-  const u = k.toUpperCase();
-  return u === 'PATH' || u === 'HOME' || u === 'NODE_OPTIONS' || u.startsWith('LD_') || u.startsWith('DYLD_') || u.startsWith('GIT_') || u.startsWith('SSH_') || u.endsWith('_PROXY');
+// Names an agent process must never receive from a (PR-controlled) config or via passEnv: PATH and HOME are the
+// runner's own; loaders and option injectors (LD_*, DYLD_*, NODE_*, JAVA/GRADLE options, shell startup files, language
+// path variables) run code or redirect it; GIT_*, SSH_*, proxies, *_BASE_URL, *_API_URL and *_ENDPOINT redirect network
+// traffic (and with it any secret passed in); CLAUDE_* and CODEX_* redirect the agent's own configuration.
+const DENIED_ENV_EXACT = [
+  'PATH', 'HOME', 'NODE_OPTIONS', 'NODE_PATH', 'NODE_EXTRA_CA_CERTS', 'JAVA_TOOL_OPTIONS', '_JAVA_OPTIONS', 'JDK_JAVA_OPTIONS', 'JAVA_HOME',
+  'GRADLE_OPTS', 'GRADLE_USER_HOME', 'BASH_ENV', 'ENV', 'SHELL', 'SHELLOPTS', 'BASHOPTS', 'PROMPT_COMMAND', 'PS4', 'IFS', 'TMPDIR',
+  'PYTHONPATH', 'PYTHONHOME', 'PYTHONSTARTUP', 'RUBYOPT', 'RUBYLIB', 'PERL5OPT', 'PERL5LIB', 'SSL_CERT_FILE', 'SSL_CERT_DIR',
+  'REQUESTS_CA_BUNDLE', 'CURL_CA_BUNDLE', 'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'USER', 'LOGNAME',
+];
+const DENIED_ENV_PREFIX = ['LD_', 'DYLD_', 'GIT_', 'SSH_', 'CLAUDE_', 'CODEX_', 'NODE_', 'NPM_', 'GRADLE_', 'JAVA_', 'ANDROID_'];
+const DENIED_ENV_SUFFIX = ['_PROXY', '_BASE_URL', '_API_URL', '_ENDPOINT', '_URL', '_HOST'];
+/** True for an environment variable name the agent adapter refuses in agent.env and agent.passEnv. */
+export const deniedEnvName = (k) => {
+  const u = String(k).toUpperCase();
+  return DENIED_ENV_EXACT.includes(u) || DENIED_ENV_PREFIX.some((p) => u.startsWith(p)) || DENIED_ENV_SUFFIX.some((x) => u.endsWith(x));
 };
-const validEnvName = (k) => {
+export const validEnvName = (k) => {
   if (k.length === 0 || k.length > 64) return false;
   for (let i = 0; i < k.length; i++) {
     const c = k.charCodeAt(i);
@@ -134,6 +148,36 @@ const validEnvName = (k) => {
   }
   return true;
 };
+
+// agent.requireArgs: strings that must each appear as an element of the agent argv (a team's restricted-profile flag).
+const REQUIRE_ARG_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._:=/-';
+function requireArgProblem(v) {
+  if (typeof v !== 'string' || v.length === 0 || v.length > MAX_ARG) return `must be a non-empty string of at most ${MAX_ARG} characters`;
+  for (const ch of v) if (!REQUIRE_ARG_CHARS.includes(ch)) return 'may only contain letters, digits and ". _ : = / -"';
+  return isAbsolute(v) || hasDotDot(v) ? 'must not be an absolute path or contain ".."' : null;
+}
+// agent.passEnv: NAMES of variables copied from the user's own environment into the agent process (values never live here).
+function passEnvProblem(v) {
+  if (typeof v !== 'string' || v.length === 0 || v.length > 64 || !/^[A-Z][A-Z0-9_]*$/.test(v)) return 'must be a name such as ANTHROPIC_API_KEY (A-Z, 0-9 and "_", starting with a letter)';
+  return deniedEnvName(v) ? 'is a reserved name (loader, option, proxy, base-URL and agent-config variables are not passed on)' : null;
+}
+function listOf(value, where, problemOf, bad) {
+  if (!Array.isArray(value)) {
+    bad(`${where} must be an array of strings`);
+    return [];
+  }
+  if (value.length > MAX_LIST) {
+    bad(`${where} has more than ${MAX_LIST} entries`);
+    return [];
+  }
+  const out = [];
+  value.forEach((v, i) => {
+    const p = problemOf(v);
+    if (p) bad(`${where}[${i}] ${p}`);
+    else if (!out.includes(v)) out.push(v);
+  });
+  return out;
+}
 
 function branchNameProblem(v) {
   if (typeof v !== 'string' || v.length === 0) return 'must be a non-empty string';
@@ -154,7 +198,7 @@ export function validateRunConfig(value, root) {
   const d = DEFAULT_RUN_CONFIG;
   const config = {
     schemaVersion: 1,
-    agent: { kind: d.agent.kind, command: [...d.agent.command] },
+    agent: { kind: d.agent.kind, command: [...d.agent.command], requireArgs: [], passEnv: [] },
     budgets: { ...d.budgets },
     verification: { commands: d.verification.commands.map((c) => [...c]), timeoutSeconds: d.verification.timeoutSeconds },
     branchPrefix: d.branchPrefix,
@@ -165,7 +209,7 @@ export function validateRunConfig(value, root) {
     const a = value.agent;
     if (!isObj(a)) bad('agent must be an object');
     else {
-      checkKeys(a, ['kind', 'command', 'env'], 'agent', bad);
+      checkKeys(a, ['kind', 'command', 'env', 'requireArgs', 'passEnv'], 'agent', bad);
       if (!KINDS.includes(a.kind)) bad(`agent.kind must be one of ${KINDS.join(', ')}`);
       else {
         config.agent.kind = a.kind;
@@ -186,7 +230,7 @@ export function validateRunConfig(value, root) {
           const env = {};
           for (const k of keys.slice(0, MAX_ENV)) {
             const v = a.env[k];
-            if (validEnvName(k) && deniedEnvName(k)) bad(`agent.env.${k} is not allowed (PATH, HOME, LD_*, DYLD_*, NODE_OPTIONS, GIT_*, SSH_* and *_PROXY are reserved)`);
+            if (validEnvName(k) && deniedEnvName(k)) bad(`agent.env.${k} is not allowed (reserved: PATH, HOME, loader and option variables such as LD_*, DYLD_*, NODE_*, JAVA_*, GRADLE_*, GIT_*, SSH_*, CLAUDE_*, CODEX_*, and proxy, *_URL and *_HOST variables)`);
             else if (!validEnvName(k)) bad(`agent.env key ${JSON.stringify(k.slice(0, 40))} must be A-Z, 0-9 and "_" only`);
             else if (typeof v !== 'string' || v.length > MAX_ARG || hasControl(v)) bad(`agent.env.${k} must be a printable string of at most ${MAX_ARG} characters`);
             else env[k] = v;
@@ -194,6 +238,8 @@ export function validateRunConfig(value, root) {
           config.agent.env = env;
         }
       }
+      if (Object.hasOwn(a, 'requireArgs')) config.agent.requireArgs = listOf(a.requireArgs, 'agent.requireArgs', requireArgProblem, bad);
+      if (Object.hasOwn(a, 'passEnv')) config.agent.passEnv = listOf(a.passEnv, 'agent.passEnv', passEnvProblem, bad);
     }
   }
 

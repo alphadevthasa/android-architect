@@ -47,21 +47,27 @@ function dropOpenBlock(text) {
   return lines.slice(i).join('\n');
 }
 
-export { Tail, cleanTail }; // test seam
+export { Tail, cleanTail }; // shared with the agent adapter (and tests)
 
-/** Keeps the last TAIL_BYTES bytes of everything fed to it; memory never exceeds TAIL_BYTES plus one chunk (<= 64 KB). */
+/** Keeps the last `size` bytes (default TAIL_BYTES) of everything fed to it; memory never exceeds `size` plus one chunk (<= 64 KB). */
 class Tail {
-  constructor() {
+  constructor(size = TAIL_BYTES) {
+    this.size = size;
     this.buf = Buffer.alloc(0);
     this.truncated = false;
   }
 
   push(chunk) {
-    const all = this.buf.length === 0 ? chunk : Buffer.concat([this.buf, chunk]);
-    if (all.length > TAIL_BYTES) {
+    if (chunk.length >= this.size) {
       this.truncated = true;
-      this.buf = Buffer.from(all.subarray(all.length - TAIL_BYTES));
-    } else this.buf = Buffer.from(all);
+      this.buf = Buffer.from(chunk.subarray(chunk.length - this.size)); // copy: do not pin the (larger) chunk
+      return;
+    }
+    const all = this.buf.length === 0 ? chunk : Buffer.concat([this.buf, chunk]);
+    if (all.length > this.size) {
+      this.truncated = true;
+      this.buf = all.subarray(all.length - this.size); // a view of the (bounded) concatenation, no second copy
+    } else this.buf = all.length === 0 || all === chunk ? Buffer.from(all) : all;
   }
 
   /** Text of the tail with the cut start dropped (a half line or half token could hold the end of a secret). */
@@ -185,41 +191,41 @@ function installCleanup() {
   }
 }
 
-function runOne(root, argv, timeoutMs) {
+/**
+ * Shared spawn helper (verification commands and the agent adapter): runs `argv` from an argv array without a shell, in
+ * `root`, with exactly `env`, no stdin, in its own process group. stdout and stderr go into one bounded Tail of
+ * `tailBytes`; `onStdout(chunk)` sees stdout chunks as they arrive (the caller must keep that bounded). The whole group
+ * is terminated (SIGTERM, then SIGKILL) after every exit and when `timeoutMs` passes. Never rejects. Resolves
+ * { started, exitCode, signal, timedOut, text } where `text` is the cleaned, redacted tail (cleanTail).
+ */
+export function spawnCaptured(root, argv, { env, timeoutMs, tailBytes = TAIL_BYTES, onStdout } = {}) {
   return new Promise((resolve) => {
-    const tail = new Tail();
+    const tail = new Tail(tailBytes);
     let timedOut = false;
     let settled = false;
     let child;
     let termTimer = null;
-    const finish = (exitCode, signal, note) => {
+    const finish = (started, exitCode, signal) => {
       if (settled) return;
       settled = true;
       clearTimeout(termTimer);
       if (child?.pid) live.delete(child.pid);
-      const shown = note ? `${note}\n` : '';
-      const text = cleanTail(shown + tail.text());
-      const ended = timedOut ? 'timeout' : signal ? `signal ${signal}` : `exit ${exitCode}`;
-      resolve({
-        argv: argv.map((a) => redact(String(a)).text),
-        exitCode,
-        signal: signal ?? null,
-        timedOut,
-        tail: text.slice(-TAIL_BYTES),
-        signature: exitCode === 0 && !timedOut ? '' : signatureOf(text, ended),
-      });
+      resolve({ started, exitCode, signal: signal ?? null, timedOut, text: cleanTail(tail.text()) });
     };
     installCleanup();
     try {
-      child = spawn(argv[0], argv.slice(1), { cwd: root, shell: false, env: childEnv(), stdio: ['ignore', 'pipe', 'pipe'], detached: true });
+      child = spawn(argv[0], argv.slice(1), { cwd: root, shell: false, env, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
     } catch {
-      finish(null, null, 'the command could not be started');
+      finish(false, null, null);
       return;
     }
-    child.on('error', () => finish(null, null, 'the command could not be started'));
+    child.on('error', () => finish(false, null, null));
     if (!child.pid) return;
     live.add(child.pid);
-    child.stdout.on('data', (c) => tail.push(c));
+    child.stdout.on('data', (c) => {
+      tail.push(c);
+      if (onStdout) onStdout(c);
+    });
     child.stderr.on('data', (c) => tail.push(c));
     child.on('exit', async (code, signal) => {
       // Whatever the leader started (a backgrounded grandchild) dies with it: the whole group, after every exit.
@@ -227,13 +233,27 @@ function runOne(root, argv, timeoutMs) {
       await Promise.race([new Promise((r) => child.once('close', r)), sleep(CLOSE_GRACE_MS)]);
       child.stdout.destroy();
       child.stderr.destroy();
-      finish(code, signal);
+      finish(true, code, signal);
     });
     termTimer = setTimeout(() => {
       timedOut = true;
       terminateGroup(child.pid);
     }, timeoutMs);
   });
+}
+
+async function runOne(root, argv, timeoutMs) {
+  const r = await spawnCaptured(root, argv, { env: childEnv(), timeoutMs });
+  const text = cleanTail(r.started ? r.text : `the command could not be started\n${r.text}`);
+  const ended = r.timedOut ? 'timeout' : r.signal ? `signal ${r.signal}` : `exit ${r.exitCode}`;
+  return {
+    argv: argv.map((a) => redact(String(a)).text),
+    exitCode: r.exitCode,
+    signal: r.signal,
+    timedOut: r.timedOut,
+    tail: text.slice(-TAIL_BYTES),
+    signature: r.exitCode === 0 && !r.timedOut ? '' : signatureOf(text, ended),
+  };
 }
 
 /**

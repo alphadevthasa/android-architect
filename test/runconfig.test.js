@@ -138,7 +138,7 @@ test('a symlinked .ai folder is refused', () => {
 test('custom agent: project-relative path or bare name only', () => {
   const ok = withConfig(cfg({ agent: { kind: 'custom', command: ['./tools/agent.sh', '--flag'], env: { MODE: 'fast' } } }));
   const c = loadRunConfig(ok);
-  assert.deepEqual(c.agent, { kind: 'custom', command: ['./tools/agent.sh', '--flag'], env: { MODE: 'fast' } });
+  assert.deepEqual(c.agent, { kind: 'custom', command: ['./tools/agent.sh', '--flag'], requireArgs: [], passEnv: [], env: { MODE: 'fast' } });
   assert.equal(loadRunConfig(withConfig(cfg({ agent: { kind: 'custom', command: ['myagent'] } }))).agent.command[0], 'myagent');
   rejects(cfg({ agent: { kind: 'custom', command: ['/opt/agent'] } }), /relative to the project root/);
   rejects(cfg({ agent: { kind: 'custom', command: ['tools/../../agent'] } }), /relative to the project root/);

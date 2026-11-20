@@ -4,7 +4,9 @@
     "kind": "claude",
     "command": [
       "claude"
-    ]
+    ],
+    "requireArgs": [],
+    "passEnv": []
   },
   "budgets": {
     "maxIterations": 10,
