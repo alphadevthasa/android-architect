@@ -27,14 +27,6 @@ const USER_TEMPLATES = [
   'migration/roadmap.md',
   'catalog-overrides/README.md',
 ];
-// Generated knowledge files (rewritten on every run; the instruction-injection scan skips them).
-export const GENERATED_KNOWLEDGE = [
-  'knowledge/stack-profile.md',
-  'knowledge/architecture-current.md',
-  'knowledge/module-map.md',
-  'knowledge/dependencies.md',
-  'knowledge/feature-map.md',
-];
 const USER_OPTIONAL = ['recommendations.json', 'repos.json'];
 // Paths whose changes do not make .ai stale: .ai itself and the pointer files init writes.
 const OWN_PATHS = ['.ai', 'AGENTS.md', 'CLAUDE.md', 'CLAUDE.local.md'];

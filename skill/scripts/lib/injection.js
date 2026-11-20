@@ -2,7 +2,6 @@
 // Patterns are linear-time on purpose (no nested quantifiers, every wildcard span bounded): .ai content is user-controlled.
 import fs from 'node:fs';
 import path from 'node:path';
-import { GENERATED_KNOWLEDGE } from './aidir.js';
 
 const NOUN = String.raw`\.env|token|secret|api key|credential|password|private key|keystore|contents of`;
 const SINK = String.raw`(?<![^ ])(?:-d |--data|-f |-x post)|\| ?(?:curl|sh)\b`;
@@ -118,7 +117,7 @@ function mdFiles(aiDir, sub, recursive) {
     for (const e of entries) {
       const r = `${rel}/${e.name}`;
       if (e.isDirectory() && recursive) walk(path.join(abs, e.name), r);
-      else if (e.isFile() && e.name.endsWith('.md')) out.push(r);
+      else if ((e.isFile() || e.isSymbolicLink()) && e.name.endsWith('.md')) out.push(r);
     }
   };
   walk(path.join(aiDir, sub), sub);
@@ -134,14 +133,17 @@ function jsonFiles(aiDir, sub) {
 }
 
 /**
- * Scan the files of .ai that a person or agent may have edited: knowledge, migration and workflow Markdown,
- * catalog-overrides/*.json, recommendations.json and repos.json. Generated knowledge files are skipped. Returns sorted [{ file, line, rule }]
- * with file relative to root (".ai/...").
+ * Scan the files of .ai that a person or agent may have edited, or that a pull request may change: README.md,
+ * refresh-report.md, knowledge (generated files included), migration and workflow Markdown, catalog-overrides/*.json,
+ * recommendations.json and repos.json. A symlink among them is a finding (rule "symlink", line 1) and is not followed.
+ * Returns sorted [{ file, line, rule }] with file relative to root (".ai/...").
  */
 export function scanAiDir(root) {
   const aiDir = path.join(root, '.ai');
   const files = [
-    ...mdFiles(aiDir, 'knowledge', true).filter((f) => !GENERATED_KNOWLEDGE.includes(f)),
+    'README.md',
+    'refresh-report.md',
+    ...mdFiles(aiDir, 'knowledge', true),
     ...mdFiles(aiDir, 'migration', true),
     ...mdFiles(aiDir, 'workflows', false),
     ...jsonFiles(aiDir, 'catalog-overrides'),
@@ -153,7 +155,12 @@ export function scanAiDir(root) {
     let text;
     try {
       const abs = path.join(aiDir, rel);
-      if (!fs.lstatSync(abs).isFile()) continue;
+      const st = fs.lstatSync(abs);
+      if (st.isSymbolicLink()) {
+        out.push({ file: `.ai/${rel}`, line: 1, rule: 'symlink' });
+        continue;
+      }
+      if (!st.isFile()) continue;
       text = fs.readFileSync(abs, 'utf8');
     } catch {
       continue;
