@@ -43,8 +43,8 @@ One safe ordering applies: (1) the migration is one-way per file, with a single 
 
 - Single-writer rule: there must be exactly one DataStore instance per file in a process. Creating a second one for the same file throws an `IllegalStateException`; declare it with the property delegate at top level, not inside a class that is constructed repeatedly.
 - Dual-write does not work with the built-in migration: it clears migrated keys from the old file, so the old file can no longer serve as a fallback. Choose Mode B if a rollback window is needed.
-- Reading the old file directly after a Mode A migration returns nothing, because the migration clears migrated keys; remove all direct readers first.
-- A custom migration without a marker re-runs and overwrites newer DataStore values on every start.
+- Reading the old file directly after a Mode A migration returns nothing, because the migration clears migrated keys (and `SharedPreferencesMigration.cleanUp` deletes the file once it is empty); remove all direct readers first.
+- A custom migration without a marker re-runs and overwrites newer DataStore values on every start. With the marker (Mode B), values written to the old file during a rollback are lost when rolling forward again, because the marker already exists and the migration does not run again.
 - `SharedPreferencesMigration` migrates types it knows; `Set<String>` and `Float` map to `stringSetPreferencesKey` and `floatPreferencesKey`, and keys must be declared with the matching type or the value is not found.
 - Blocking reads with `runBlocking` on the main thread negate the benefit and can cause ANRs; load startup values once, asynchronously, and cache.
 - Backup and restore: restoring an old `shared_prefs` file after migration can bring back stale values; check backup rules.

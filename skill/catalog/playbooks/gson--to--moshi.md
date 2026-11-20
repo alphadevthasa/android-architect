@@ -57,7 +57,7 @@ The project is moving to Kotlin Multiplatform: Moshi is JVM-only, so go to kotli
 
 ## Security checklist
 
-- Unsafe deserialization settings are not carried over: a Gson `RuntimeTypeAdapterFactory`, a custom `JsonDeserializer` that calls `Class.forName`, or type-info fields that name the class to instantiate must not be ported. Moshi polymorphism uses a fixed allow list of subtypes with an explicit label key, and unknown labels fail closed.
+- Unsafe deserialization settings are not carried over: a custom `JsonDeserializer` that calls `Class.forName`, or type-info fields in the payload that name the class to instantiate, must not be ported. Gson's `RuntimeTypeAdapterFactory` is a registered allow list like Moshi's `PolymorphicJsonAdapterFactory`, so port it as one: a fixed list of subtypes with an explicit label key, where unknown labels fail closed.
 - Reflection-based allow lists: any Gson setup that resolves a class by name from the payload is replaced by an explicit allow list of known subtypes, and unknown labels fail closed.
 - Untrusted JSON size limit: responses and request bodies get a size limit at the HTTP layer or by reading through a bounded source before parsing, and deeply nested input is rejected.
 - Parsing errors are logged without payload content, and error responses are not echoed to users.

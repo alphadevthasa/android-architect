@@ -83,16 +83,18 @@ test('playbooks pass the injection scanner with zero findings', () => {
   }
 });
 
-// Generic fragments of private or employer names that must never appear in public playbooks.
-const PRIVATE_FRAGMENTS = ['private-name-one', 'private-host-one', 'private-host-two'];
+// Optional denylist of private or employer names, supplied by the maintainer's environment (comma-separated,
+// case-insensitive). No names are stored in the repository; the check is skipped when the variable is unset.
+const PRIVATE_NAMES = (process.env.ANDROID_ARCHITECT_PRIVATE_NAMES ?? '')
+  .split(',').map((n) => n.trim().toLowerCase()).filter((n) => n !== '');
 
-test('no private names and no secret shapes in any playbook', () => {
+test('no secret shapes in any playbook, and no private names when a denylist is configured', () => {
   for (const f of fs.readdirSync(DIR).filter((n) => n.endsWith('.md'))) {
     const text = fs.readFileSync(path.join(DIR, f), 'utf8');
     assert.equal(redact(text).text, text, `${f}: redact() changed the text`);
     assert.deepEqual(redact(text).hits, [], `${f}: secret shape found`);
     const lower = text.toLowerCase();
-    for (const frag of PRIVATE_FRAGMENTS) assert.ok(!lower.includes(frag), `${f}: contains "${frag}"`);
+    for (const name of PRIVATE_NAMES) assert.ok(!lower.includes(name), `${f}: contains a denylisted name`);
   }
 });
 
@@ -113,4 +115,17 @@ test('irreversible playbooks state the safe ordering: backup, single writer, no 
 test('sqldelight is a KMP-gated catalog target', () => {
   const e = catalog.entry('persistence', 'sqldelight');
   assert.deepEqual(e.prerequisites, [{ dimension: 'language', anyOf: ['kmp'] }]);
+});
+
+test('object-database copies switch every read and write at the marker; sqldelight keeps the rollback flag to the last step', () => {
+  for (const id of ['greendao--to--room', 'ormlite--to--room', 'realm--to--room']) {
+    const steps = byId.get(id).sections.Steps;
+    assert.match(steps, /all at once/, id);
+    assert.match(steps, /read-only/, id);
+    assert.match(steps, /write gate/, id);
+  }
+  const sd = byId.get('room--to--sqldelight');
+  assert.match(sd.sections.Steps, /keep the rollback flag/);
+  assert.match(sd.sections.Steps, /10\. In the last step[^\n]*the flag/);
+  assert.match(sd.sections.Rollback, /Step 10, the very last step/);
 });

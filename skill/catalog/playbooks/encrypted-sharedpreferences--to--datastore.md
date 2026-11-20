@@ -36,7 +36,7 @@ One safe ordering applies: (1) the migration is one-way per file with a single w
 4. Implement the seam on DataStore with that layer, and keep the EncryptedSharedPreferences implementation in the code side by side behind a flag that selects one store per file. Never write the same value to both stores.
 5. Write a custom one-time `DataMigration`: read each value from EncryptedSharedPreferences, write it through the encrypting DataStore, record a "migrated" marker inside the DataStore, return `false` from `shouldMigrate` once it exists, and leave the old file untouched in `cleanUp`. The built-in `SharedPreferencesMigration` expects a plain file and cannot read the encrypted one.
 6. Do the per-unit cutover: move one encrypted file or one settings area at a time, with every reader and writer of that file switching in the same release.
-7. After verification and a full release cycle, delete the old implementation: the EncryptedSharedPreferences code, the old file (`Context.deleteSharedPreferences(name)`) and the flag. Remove the old master key alias and the security-crypto dependency only after every file and `EncryptedFile` that used that alias is migrated and deleted (see Security checklist).
+7. After verification and a full release cycle, delete the old implementation: the EncryptedSharedPreferences code, the old file (`Context.deleteSharedPreferences(name)`) and the flag, plus the leftover Tink keyset preferences file (`__androidx_security_crypto_encrypted_prefs__`) that the old library created. Remove the old master key alias and the security-crypto dependency only after every file and `EncryptedFile` that used that alias is migrated and deleted (see Security checklist).
 
 ## Pitfalls
 
@@ -52,7 +52,7 @@ One safe ordering applies: (1) the migration is one-way per file with a single w
 
 - Round-trip test: write a value through the encrypting layer, read the raw file bytes, and assert the plaintext is absent.
 - Migration test: seed an EncryptedSharedPreferences file with values of each type, run the migration, assert values arrive and the marker is set only at the end.
-- Failure test: corrupt the ciphertext or remove the key, and assert the app recovers with defaults.
+- Failure test: corrupt the ciphertext or remove the key, and assert that non-credential values fall back to defaults and that credentials and tokens force re-authentication instead of a default.
 - Contract tests on the seam against both implementations during the side-by-side phase.
 - Upgrade test from an installed old build on a device or emulator.
 
