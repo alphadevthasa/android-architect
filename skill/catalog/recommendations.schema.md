@@ -78,3 +78,20 @@ An entry may list known-vulnerable dependency versions. Every field is required:
 - `scan.js` reports matches in `profile.security.vulnerable`; dependencies whose version cannot be resolved are listed in `profile.security.unresolvedChecks` instead of being treated as safe.
 - One finding row per build file per dependency (modules and the root build file, including `buildscript` classpath).
 - Dynamic or unusable versions (`latest.release`, `2.+`, `[2.8,3.0)`, leftover `$`) go to `unresolvedChecks`; alias/bundle dependencies whose coordinates cannot be resolved go to `profile.security.unresolvedAliases` (`{ alias, file, line }`).
+
+## Migration plan format (`migration-plan.js`)
+
+`node skill/scripts/migration-plan.js <root> --recs <file> [--profile <file>] [--adr-dir <dir>] [--format json|md] [--out <file>]` validates the recommendations like `recommend-check.js` (exit 1 with the violations when they fail; it never plans from unvalidated input), then prints a deterministic plan. It only reads the project; `--out` must be outside it. ADRs are read from `--adr-dir`, else from `<root>/.ai/knowledge/adr` when that folder exists.
+
+```json
+{ "schemaVersion": 1, "steps": [ PlanStep ], "tracks": { "features": ["id"], "data": ["id"], "enabling": ["id"] }, "notes": ["text"] }
+```
+
+`PlanStep`:
+- `id`: stable, `[a-z0-9:_.-]+`. Expansions are `<recsStepId>:<featureId>`; enabling steps are `safety-net:<featureId>` and `extract:design-system`.
+- `title`, `track` (`enabling`, `data` or `feature`), `dimension`, `from` (or `null`), `to`, optional `feature` and `playbook` (playbook id).
+- `dependsOn`: ids of earlier steps. The plan is acyclic and every id exists (`checkPlan` verifies it and the CLI refuses a plan that fails).
+- `tags`: `irreversible` (cannot be undone once released; take a backup first) and `decision` (needs a human decision before the step starts). Tags from the recommendation step and from the matched playbook are kept; features with `risk: high` add `decision` to all their steps.
+- `verification`: what is expected to pass. `rollback`: how to back out. `evidence`: short strings such as `feature-map: login bucket first, score 71` or `playbook: <id> (verified: false)`.
+
+Tracks: `enabling` holds safety nets and the design-system extraction; `data` holds persistence, key-value, networking and serialization steps with a matching playbook (one global step each, not per feature); `features` holds per-feature steps and global steps of expanded dimensions. `notes` carries `leave as is: <feature>` for `last` features, missing-playbook notes and `later`/`dont` dimensions. See `references/migration-patterns.md` for the expansion rules.
