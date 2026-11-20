@@ -19,6 +19,7 @@ const MIN_BOILERPLATE = 3;
 const SHARED_NAMES = new Set(['designsystem', 'design-system', 'ui', 'common', 'core-ui', 'shared']);
 const TOKEN_FILE = /^(colors?|theme|dimens?|spacing|tokens?|palette)\.kt$/i;
 const NOT_COMPONENT_CALLS = new Set(['Color', 'TextStyle', 'Offset', 'Size', 'RoundedCornerShape', 'PaddingValues']);
+const DECLARATION = /(^|[^A-Za-z0-9_$])(class|object|interface|fun)(?![A-Za-z0-9_$])/;
 const NOT_METHODS = new Set(['if', 'for', 'while', 'switch', 'catch', 'synchronized', 'else', 'return', 'new', 'try', 'do']);
 
 const byText = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
@@ -241,7 +242,17 @@ function findFunctions(code, skel, lineOf, java) {
     if (end === -1) return;
     const lead = skel.slice(Math.max(0, funIdx - 200), funIdx);
     const cut = Math.max(lead.lastIndexOf('}'), lead.lastIndexOf(';'));
-    const window = lead.slice(cut + 1);
+    // The annotation window starts after the last declaration line, so `class H(val c: @Composable () -> Unit)` cannot leak.
+    const rest = lead.slice(cut + 1).split('\n');
+    const current = rest.pop();
+    let from = 0;
+    for (let k = rest.length - 1; k >= 0; k--) {
+      if (DECLARATION.test(rest[k])) {
+        from = k + 1;
+        break;
+      }
+    }
+    const window = rest.slice(from).join('\n') + '\n' + current;
     const lineStart = lineStartNear(skel, funIdx);
     out.push({
       name: skel.slice(nameStart, nameEnd),
@@ -297,6 +308,8 @@ function findFunctions(code, skel, lineOf, java) {
 function parseLayout(text) {
   const n = text.length;
   const sig = [];
+  let elements = 0; // <include> and <merge> are not counted: they add no structure of their own
+  let depth = 0;
   let colors = 0;
   let dp = 0;
   let i = 0;
@@ -309,13 +322,15 @@ function parseLayout(text) {
       continue;
     }
     if (text[lt + 1] === '?' || text[lt + 1] === '!' || text[lt + 1] === '/') {
+      if (text[lt + 1] === '/') depth = Math.max(0, depth - 1);
       const e = text.indexOf('>', lt + 1);
       i = e === -1 ? n : e + 1;
       continue;
     }
     let j = lt + 1;
     while (j < n && !isSpace(text[j]) && text[j] !== '>' && text[j] !== '/') j++;
-    const element = [text.slice(lt + 1, j)];
+    const element = [String(depth), text.slice(lt + 1, j)];
+    const tag = element[1];
     for (;;) {
       while (j < n && isSpace(text[j])) j++;
       if (j >= n || text[j] === '>' || text[j] === '/') break;
@@ -332,16 +347,20 @@ function parseLayout(text) {
           const value = e === -1 ? text.slice(j + 1) : text.slice(j + 1, e);
           j = e === -1 ? n : e + 1;
           if (value[0] === '#' && (value.length === 7 || value.length === 9) && [...value.slice(1)].every(isHex)) colors++;
+          else if (value[0] === '#' && (value.length === 4 || value.length === 5) && [...value.slice(1)].every(isHex)) colors++;
           else if (value.endsWith('dp') && value !== '0dp' && value.length > 2 && [...value.slice(0, -2)].every((c) => isDigit(c) || c === '.')) dp++;
         }
       }
       if (name !== 'android:id' && !name.startsWith('xmlns') && !name.startsWith('tools:') && name !== '') element.push(name);
     }
     sig.push(element.join(' '));
+    if (tag !== 'include' && tag !== 'merge') elements++;
+    const selfClosing = text[j] === '/';
     while (j < n && text[j] !== '>') j++;
+    if (!selfClosing) depth++;
     i = j + 1;
   }
-  return { sig, colors, dp };
+  return { sig, elements, colors, dp };
 }
 
 /** Count `Color(0x`, `#RRGGBB` / `#AARRGGBB` and `<digits>.dp` in masked Kotlin code. */
@@ -353,7 +372,7 @@ function composeTokens(code) {
   for (let i = code.indexOf('#'); i !== -1; i = code.indexOf('#', i + 1)) {
     let j = i + 1;
     while (isHex(code[j])) j++;
-    if ((j - i - 1 === 6 || j - i - 1 === 8) && !isIdent(code[j])) colors++;
+    if ([3, 4, 6, 8].includes(j - i - 1) && !isIdent(code[j])) colors++;
   }
   for (let i = code.indexOf('.dp'); i !== -1; i = code.indexOf('.dp', i + 1)) {
     if (isDigit(code[i - 1]) && !isIdent(code[i + 3])) dp++;
@@ -445,10 +464,10 @@ const modulePathName = (p) => String(p).replace(/[^A-Za-z0-9_.:-]/g, '-');
  * Detect duplicated and competing building blocks. Reads only git-visible project files (listFiles skips secret files);
  * files over 1 MB are not read: they are counted in `tooLarge` and left out of every check. Every pass is linear and capped.
  *
- * Returns { duplicates, baseClasses, boilerplate, tokens, sharedModules, duplicationScore, tooLarge }. `files` and `modules`
- * may be passed by a caller that already has them.
+ * Returns { duplicates, baseClasses, boilerplate, tokens, sharedModules, duplicationScore, tooLarge }. `profile` is accepted
+ * for symmetry with the other detectors (not needed); `files` and `modules` may be passed by a caller that already has them.
  */
-export function detectReuse(root, { files = null, modules = null } = {}) {
+export function detectReuse(root, { profile = null, files = null, modules = null } = {}) { // eslint-disable-line no-unused-vars
   files = files ?? listFiles(root, { gitignore: true });
   modules = modules ?? discoverModules(root, files);
 
@@ -488,7 +507,7 @@ export function detectReuse(root, { files = null, modules = null } = {}) {
       const l = parseLayout(text);
       tokens.hardcodedColors += l.colors;
       tokens.hardcodedDp += l.dp;
-      if (l.sig.length >= MIN_LAYOUT_ELEMENTS) layouts.push({ file: rel, key: lk, hash: sha(l.sig.join('\n')), count: l.sig.length });
+      if (l.elements >= MIN_LAYOUT_ELEMENTS) layouts.push({ file: rel, key: lk, hash: sha(l.sig.join('\n')), count: l.elements });
     } else {
       const { code, skel } = mask(text);
       const lineOf = lineIndex(text);

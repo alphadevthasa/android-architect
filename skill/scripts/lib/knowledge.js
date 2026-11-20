@@ -242,37 +242,73 @@ export function renderComponentsBlock(reuse) {
 }
 
 /**
- * Put `block` into the text of components.md and return { text, note }. Only the block changes; every other byte is kept.
- *   - exactly one begin line and one end line, in order: that span is replaced;
- *   - no markers: the block is appended;
- *   - anything else (a lone or duplicated marker): a pair that ends the file is replaced (it is the block a previous run
- *     appended), else a fresh block is appended. Nothing is ever deleted, and `note` says the markers are malformed.
- * Markers count only on a line of their own, so a name or sentence mentioning one does not.
+ * Marker lines outside fenced code blocks: { begins, ends, open } with line indexes; `open` is true when a fence is still
+ * open at the end. A marker counts only when the whole line is the marker at column 0 (one trailing \r allowed), so
+ * indented code, fenced examples and prose that quotes a marker are never mistaken for it.
  */
-export function applyComponentsBlock(existing, block) {
-  const lines = existing.split('\n');
+function findMarkers(lines) {
   const begins = [];
   const ends = [];
-  lines.forEach((l, i) => {
-    const t = l.trim();
-    if (t === COMPONENTS_BEGIN) begins.push(i);
-    else if (t === COMPONENTS_END) ends.push(i);
-  });
-  const splice = (b, e) => ({ text: [...lines.slice(0, b), ...block.split('\n'), ...lines.slice(e + 1)].join('\n'), note: null });
-  if (begins.length === 1 && ends.length === 1 && begins[0] < ends[0]) return splice(begins[0], ends[0]);
-  if (begins.length === 0 && ends.length === 0) return { text: appended(existing, block), note: null };
-  const note = 'knowledge/components.md has malformed android-architect markers (expected one begin line and one end line); your text was left untouched and the generated block is kept at the end of the file';
+  let fence = null;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].endsWith('\r') ? lines[i].slice(0, -1) : lines[i];
+    let k = 0;
+    while (k < 3 && line[k] === ' ') k++;
+    const c = line[k];
+    if (c === '`' || c === '~') {
+      let n = 0;
+      while (line[k + n] === c) n++;
+      if (n >= 3) {
+        if (fence === null) {
+          fence = { c, n };
+          continue;
+        }
+        if (fence.c === c && n >= fence.n && line.slice(k + n).trim() === '') {
+          fence = null;
+          continue;
+        }
+      }
+    }
+    if (fence !== null) continue;
+    if (line === COMPONENTS_BEGIN) begins.push(i);
+    else if (line === COMPONENTS_END) ends.push(i);
+  }
+  return { begins, ends, fence };
+}
+
+/**
+ * Put `block` into the text of components.md and return { text, note }. Only the block changes; every other byte is kept.
+ *   - exactly one begin and one end marker line, in order: that span is replaced;
+ *   - no markers: the block is appended;
+ *   - anything else (lone, duplicated or reordered markers): the last begin/end pair is replaced only when it ends the
+ *     file (it is the block a previous run appended), else a fresh block is appended. Nothing is ever deleted, and `note`
+ *     says the markers are malformed. An unclosed code fence at the end of the file is closed before the appended block.
+ * The block is written with the file's dominant line ending.
+ */
+export function applyComponentsBlock(existing, block) {
+  const crlf = (existing.match(/\r\n/g) ?? []).length > (existing.match(/(^|[^\r])\n/g) ?? []).length;
+  const eol = crlf ? '\r\n' : '\n';
+  const blockLines = block.split('\n');
+  const lines = existing.split('\n');
+  const { begins, ends, fence } = findMarkers(lines);
+  const splice = (b, e) => {
+    const mid = blockLines.map((l, k) => (crlf && (k < blockLines.length - 1 || e < lines.length - 1) ? l + '\r' : l));
+    return [...lines.slice(0, b), ...mid, ...lines.slice(e + 1)].join('\n');
+  };
+  const append = () => {
+    let text = existing;
+    if (fence !== null) text += (text.endsWith('\n') ? '' : eol) + fence.c.repeat(fence.n) + eol;
+    const sep = text === '' ? '' : text.endsWith('\n') ? eol : eol + eol;
+    return `${text}${sep}${blockLines.join(eol)}${eol}`;
+  };
+  if (begins.length === 1 && ends.length === 1 && begins[0] < ends[0]) return { text: splice(begins[0], ends[0]), note: null };
+  if (begins.length === 0 && ends.length === 0) return { text: append(), note: null };
+  const note = 'knowledge/components.md has malformed android-architect markers (expected one begin line and one end line, outside code fences); your text was left untouched and the generated block is kept at the end of the file';
   const b = begins[begins.length - 1];
   const e = ends[ends.length - 1];
   const tail = b !== undefined && e !== undefined && b < e && lines.slice(e + 1).every((l) => l.trim() === '');
-  const inner = tail && begins.length > 0 && !begins.some((x) => x > b && x < e) && !ends.some((x) => x > b && x < e);
-  if (inner) return { text: splice(b, e).text, note };
-  return { text: appended(existing, block), note };
-}
-
-function appended(existing, block) {
-  const sep = existing === '' ? '' : existing.endsWith('\n') ? '\n' : '\n\n';
-  return `${existing}${sep}${block}\n`;
+  const clean = tail && !begins.some((x) => x > b && x < e) && !ends.some((x) => x > b && x < e);
+  return { text: clean ? splice(b, e) : append(), note };
 }
 
 /** components.md text: `existingText` with the generated block replaced (or appended). Idempotent. */

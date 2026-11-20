@@ -225,7 +225,7 @@ export function writeAiDir(
   let reuse = null;
   if (!isMember) {
     try {
-      reuse = detectReuse(root, { files, modules });
+      reuse = detectReuse(root, { profile, files, modules });
     } catch (e) {
       reuse = { error: String(e?.message ?? e) };
     }
@@ -306,11 +306,18 @@ export function writeAiDir(
   if (!isMember) {
     const abs = path.join(aiDir, COMPONENTS);
     const exists = fs.existsSync(abs);
-    const existing = exists ? fs.readFileSync(abs, 'utf8') : readTemplate(COMPONENTS, templatesDir);
-    const { text, note } = applyComponentsBlock(existing, redact(renderComponentsBlock(reuse)).text);
-    if (note) notes.push(note);
-    if (!exists || text !== existing) putAi(COMPONENTS, text);
-    else kept.add(`.ai/${COMPONENTS}`);
+    const raw = exists ? fs.readFileSync(abs) : null;
+    const existing = exists ? raw.toString('utf8') : readTemplate(COMPONENTS, templatesDir);
+    if (exists && !Buffer.from(existing, 'utf8').equals(raw)) {
+      // Not valid UTF-8: rewriting would corrupt the user's bytes, so the file is left alone.
+      notes.push('knowledge/components.md is not valid UTF-8: left untouched, the generated block was not updated');
+      kept.add(`.ai/${COMPONENTS}`);
+    } else {
+      const { text, note } = applyComponentsBlock(existing, redact(renderComponentsBlock(reuse)).text);
+      if (note) notes.push(note);
+      if (!exists || text !== existing) putAi(COMPONENTS, text);
+      else kept.add(`.ai/${COMPONENTS}`);
+    }
   }
   const adrDir = path.join(aiDir, 'knowledge', 'adr');
   if (!isMember && fs.existsSync(adrDir)) {

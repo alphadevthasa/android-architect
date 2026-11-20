@@ -337,3 +337,125 @@ test('references/reuse.md is English documentation, scans clean and covers the s
     assert.ok(text.includes(needle), needle);
   }
 });
+
+test('markers: only whole column-0 lines outside code fences count', () => {
+  const block = renderComponentsBlock(detectReuse(fx('reuse-app')));
+  const B = COMPONENTS_BEGIN;
+  const E = COMPONENTS_END;
+  const apply = (t) => applyComponentsBlock(t, block);
+
+  // Fenced-only pair: user text inside the fence is kept, a fresh block is appended, no note.
+  const fenced = `# Doc\n\n\`\`\`md\n${B}\nmy own text\n${E}\n\`\`\`\n`;
+  let r = apply(fenced);
+  assert.equal(r.note, null);
+  assert.ok(r.text.startsWith(fenced) && r.text.includes('my own text'));
+  assert.equal(apply(r.text).text, r.text, 'idempotent, no growth');
+  assert.equal(apply(r.text).note, null, 'no repeated note');
+
+  // Tilde fences and longer fences.
+  const tilde = `~~~\n${B}\nkeep\n${E}\n~~~\n`;
+  assert.ok(apply(tilde).text.startsWith(tilde));
+  const longer = `\`\`\`\`\n\`\`\`\n${B}\nkeep\n${E}\n\`\`\`\`\n`;
+  assert.ok(apply(longer).text.startsWith(longer));
+
+  // Indented-only pair is not a marker.
+  const indented = `Example:\n\n    ${B}\n    keep this\n    ${E}\n`;
+  r = apply(indented);
+  assert.ok(r.text.startsWith(indented) && r.note === null);
+
+  // Fenced pair plus a real pair: only the real pair is replaced.
+  const both = `\`\`\`\n${B}\nexample\n${E}\n\`\`\`\n\n${B}\nstale\n${E}\ntail\n`;
+  r = apply(both);
+  assert.equal(r.note, null);
+  assert.ok(r.text.startsWith(`\`\`\`\n${B}\nexample\n${E}\n\`\`\`\n\n`));
+  assert.ok(!r.text.includes('stale') && r.text.endsWith('\ntail\n'));
+
+  // Markers quoted in prose (not a whole line) are ignored.
+  const prose = `Use ${B} and ${E} to mark the block.\n`;
+  r = apply(prose);
+  assert.ok(r.text.startsWith(prose) && r.note === null);
+  assert.equal(apply(r.text).text, r.text);
+
+  // An unclosed fence is closed before the appended block, so a re-run finds the block.
+  const open = '```\nunfinished example\n';
+  r = apply(open);
+  assert.ok(r.text.startsWith(open));
+  assert.equal(apply(r.text).text, r.text);
+  assert.equal(r.text.split(B).length, 2);
+});
+
+test('CRLF files get a CRLF block, a BOM is kept, invalid UTF-8 is left alone', () => {
+  const reuse = detectReuse(fx('reuse-app'));
+  const crlf = `﻿# Mine\r\n\r\nline\r\n`;
+  const out = renderComponents(reuse, crlf);
+  assert.ok(out.startsWith(crlf));
+  assert.ok(!/(^|[^\r])\n/.test(out), 'every line ending is CRLF');
+  assert.equal(renderComponents(reuse, out), out);
+  const replaced = renderComponents(reuse, out.replace('Duplication: medium', 'Duplication: stale'));
+  assert.equal(replaced, out);
+
+  const proj = copyFixture('reuse-app');
+  writeAiDir(proj, { now: NOW, toolVersion: '9.9.9' });
+  const file = path.join(proj, '.ai/knowledge/components.md');
+  const bytes = Buffer.concat([Buffer.from('# Mine\n'), Buffer.from([0xff, 0xfe, 0x41]), Buffer.from('\n')]);
+  fs.writeFileSync(file, bytes);
+  const r = writeAiDir(proj, { now: NOW, toolVersion: '9.9.9' });
+  assert.ok(fs.readFileSync(file).equals(bytes), 'bytes untouched');
+  assert.ok(r.kept.includes('.ai/knowledge/components.md'));
+  assert.match(r.notes.join('\n'), /not valid UTF-8/);
+});
+
+test('layout signatures include nesting; include/merge do not count; short colors are counted', () => {
+  const d = tmp();
+  write(d, 'settings.gradle', "include ':app'\n");
+  const res = 'app/src/main/res/layout';
+  write(d, `${res}/flat.xml`, '<FrameLayout><LinearLayout/><TextView/><Button/></FrameLayout>');
+  write(d, `${res}/nested.xml`, '<FrameLayout><LinearLayout><TextView android:text="b"><Button/></TextView></LinearLayout></FrameLayout>');
+  assert.deepEqual(detectReuse(d).duplicates, []);
+  write(d, `${res}/nested2.xml`, '<FrameLayout android:id="@+id/x"><LinearLayout><TextView android:text="a"><Button/></TextView></LinearLayout></FrameLayout>');
+  assert.deepEqual(files(detectReuse(d).duplicates[0]), [`${res}/nested.xml`, `${res}/nested2.xml`]);
+  const e = tmp();
+  write(e, 'settings.gradle', "include ':app'\n");
+  const three = '<FrameLayout><include layout="@layout/a"/><merge/><TextView android:textColor="#fff"/><Button android:background="#8f00"/></FrameLayout>';
+  write(e, `${res}/i1.xml`, three);
+  write(e, `${res}/i2.xml`, three);
+  const r = detectReuse(e);
+  assert.deepEqual(r.duplicates, [], 'only 3 real elements');
+  assert.equal(r.tokens.hardcodedColors, 4);
+  write(e, 'app/src/main/kotlin/C.kt', 'import androidx.compose.ui.graphics.Color\nval a = "#abc"\nval b = Color(0xFF000000)\n');
+  assert.equal(detectReuse(e).tokens.hardcodedColors, 6);
+});
+
+test('a @Composable in a class declaration does not mark the next plain function', () => {
+  const d = tmp();
+  write(d, 'settings.gradle', "include ':app'\n");
+  const util = 'fun fmt(a: Int): Int {\n    val b = a + 1\n    val c = b + 1\n    val d = c + 1\n    return d\n}\n';
+  const head = 'package p\nclass H(val content: @Composable () -> Unit)\n\n';
+  write(d, 'app/src/main/kotlin/p/A.kt', head + util);
+  write(d, 'app/src/main/kotlin/p/B.kt', head + util);
+  const r = detectReuse(d);
+  assert.deepEqual(r.duplicates.map((x) => x.kind), ['util']);
+});
+
+test('secret-looking names in emitted text are redacted in components.md', () => {
+  const proj = copyFixture('reuse-app');
+  const secret = 'AKIAIOSFODNN7EXAMPLE';
+  const k = 'app/src/main/kotlin/com/example/reuse';
+  const util = () => `package p\nfun ${secret}(a: Int): Int {\n    val b = a + 1\n    val c = b + 1\n    val d = c + 1\n    return d\n}\n`;
+  write(proj, `${k}/S1.kt`, util());
+  write(proj, `${k}/S2.kt`, util());
+  const comp = (n) => `package p\n@Composable\nfun ${n}(x: ${secret}) {\n    Card {\n        Text()\n        Icon()\n    }\n}\n`;
+  write(proj, `${k}/P1.kt`, comp('PA'));
+  write(proj, `${k}/P2.kt`, comp('PB'));
+  const reuse = detectReuse(proj);
+  assert.ok(reuse.duplicates.some((x) => x.kind === 'util' && x.signature.includes(secret)), 'util name is emitted');
+  assert.ok(reuse.duplicates.some((x) => x.kind === 'composable' && x.signature.includes(secret)), 'param type is emitted');
+  writeAiDir(proj, { now: NOW, toolVersion: '9.9.9' });
+  const text = fs.readFileSync(path.join(proj, '.ai/knowledge/components.md'), 'utf8');
+  assert.ok(!text.includes(secret));
+  assert.ok(text.includes('[REDACTED:aws-access-key]'));
+});
+
+test('detectReuse accepts a profile option', () => {
+  assert.equal(detectReuse(fx('reuse-app'), { profile: {} }).duplicationScore, 'medium');
+});
