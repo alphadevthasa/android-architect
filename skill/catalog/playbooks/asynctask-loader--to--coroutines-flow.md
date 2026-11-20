@@ -28,7 +28,7 @@ Dead code that is scheduled for deletion; or a screen about to be rewritten anyw
 
 ## Steps
 
-No persisted data changes in this migration, so it is reversible per unit.
+Moving screen-scoped work to coroutines changes no persisted data, so that part is reversible per unit. Moving work that must outlive the screen to WorkManager (step 5) does add persisted state: enqueued work is stored by WorkManager, so the Worker class and its name must stay in rollback builds (see Rollback).
 
 1. Inventory the tasks and loaders. For each, record: where it starts, whether it must survive rotation, whether it must survive leaving the screen, how it reports progress, and how its result reaches the UI.
 2. Define the seam: a repository or use-case interface with `suspend` functions (one-shot work) or `Flow` (loader-style observation of data), with no `AsyncTask`, `Loader` or `Callback` types in signatures. Inject the dispatcher so tests can replace it.
@@ -44,7 +44,7 @@ No persisted data changes in this migration, so it is reversible per unit.
 - `AsyncTask` ran tasks serially on a shared executor by default; coroutines run in parallel. Code that relied on that ordering (two tasks updating the same file or counter) needs a `Mutex` or a single-thread dispatcher.
 - A screen-scoped coroutine is cancelled when the ViewModel is cleared or the lifecycle ends; an `AsyncTask` often kept running. Decide on purpose whether the work should be cancelled.
 - Do not use `GlobalScope`; it recreates the leak problem. Use an injected application-level scope only for work that really is process-wide.
-- Exceptions: `AsyncTask` crashed the app on an uncaught exception in `doInBackground`; in a `launch` the exception goes to the scope handler. Catch and map errors where the result is produced, and rethrow `CancellationException`.
+- Exceptions: `AsyncTask` crashed the app on an uncaught exception in `doInBackground`; in a `launch` inside `viewModelScope` without a `CoroutineExceptionHandler` the exception still crashes the app, so it is not swallowed by default; handle it where the result is produced. Catch and map errors where the result is produced, and rethrow `CancellationException`.
 - Loader callbacks were delivered on the main thread and tied to the Activity lifecycle; a collected Flow must be started with `repeatOnLifecycle`, or it keeps collecting while the UI is stopped.
 - Progress updates (`publishProgress`) become a `Flow` of progress states or a `StateFlow`; do not update views from `Dispatchers.IO`.
 
@@ -65,4 +65,4 @@ No persisted data changes in this migration, so it is reversible per unit.
 
 ## Rollback
 
-Per unit: switch the flag back to the AsyncTask or Loader implementation, which stays in the code until the last unit has shipped. No persisted state is changed. Once the old classes are deleted in step 7, restore them from version control if needed.
+Per unit: switch the flag back to the AsyncTask or Loader implementation, which stays in the code until the last unit has shipped. Screen-scoped conversions change no persisted state. For work moved to WorkManager, work already enqueued is persisted: keep the Worker class (same fully qualified name) in every rollback build, or cancel the unique work before the rollback ships, otherwise the old build finds work whose class it does not have. Once the old classes are deleted in step 7, restore them from version control if needed.

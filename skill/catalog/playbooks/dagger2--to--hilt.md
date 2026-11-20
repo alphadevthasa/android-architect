@@ -10,7 +10,7 @@ asOf: 2026-11-20
 verified: false
 ---
 
-Moves a hand-written Dagger 2 setup (components, subcomponents, modules) to Hilt, which is built on Dagger and generates the Android components. Written from memory of https://developer.android.com/training/dependency-injection/hilt-android and the Dagger to Hilt migration guide at https://developer.android.com/training/dependency-injection/hilt-migration; check the current documentation before relying on a detail.
+Moves a hand-written Dagger 2 setup (components, subcomponents, modules) to Hilt, which is built on Dagger and generates the Android components. A project that only uses `dagger-android` (the `AndroidInjector` library) is a different catalog entry and does not match this playbook. Written from memory of https://developer.android.com/training/dependency-injection/hilt-android and the Dagger to Hilt migration guide at https://developer.android.com/training/dependency-injection/hilt-migration; check the current documentation before relying on a detail.
 
 ## When it is worth it
 
@@ -29,19 +29,20 @@ The graph relies on custom component hierarchies that do not map to the Hilt com
 
 ## Steps
 
-No persisted data changes in this migration, so it is reversible per unit.
+No persisted data changes in this migration, so it is reversible per unit. One safe ordering applies throughout: every stateful binding has exactly one owner at any time, and the old component is deleted only in the last step.
 
-1. Draw the existing graph and map it to Hilt: the application component to `SingletonComponent` (`@Singleton`), activity components to `ActivityComponent` (`@ActivityScoped`), fragment subcomponents to `FragmentComponent` (`@FragmentScoped`), ViewModel to `ViewModelComponent` and `@HiltViewModel` (`@ViewModelScoped`), and others per the component table in the documentation.
+1. Draw the existing graph and map it to Hilt: the application component to `SingletonComponent` (`@Singleton`), activity components to `ActivityComponent` (`@ActivityScoped`), fragment subcomponents to `FragmentComponent` (`@FragmentScoped`), ViewModel to `ViewModelComponent` and `@HiltViewModel` (`@ViewModelScoped`), and others per the component table in the documentation. Mark every binding as stateful (token store, session cache, `OkHttpClient` with its connection pool and authenticator, Room database, refresh `Mutex`, cipher or key holders) or stateless (a mapper, a formatter).
 2. Define the seam: interfaces for the collaborators that features use, with constructor injection, so classes do not reference the Dagger component or the Hilt entry points directly. Convert field and `component.inject(this)` calls to constructor injection where possible first, in plain Dagger.
-3. Add the Hilt dependencies and plugin alongside Dagger, and annotate the `Application` class with `@HiltAndroidApp`. Existing Dagger components can run side by side with the Hilt graph during migration; bridge a Hilt binding into an old component by exposing it through an `@EntryPoint` interface installed in `SingletonComponent`, and read it with `EntryPointAccessors.fromApplication`. Check the migration guide for the supported coexistence pattern for your setup.
-4. Move modules: add `@InstallIn(SomeComponent::class)` to each `@Module`, choosing the component whose scope equals the old component's. Delete the old component interface only for the unit being cut over.
-5. Run the old Dagger component and the Hilt graph side by side for a unit behind a flag where feasible: the same interface binding is provided by both, and only one is used by the screen at a time.
-6. Do the per-unit cutover: move one Activity, Fragment or ViewModel at a time with `@AndroidEntryPoint` or `@HiltViewModel`, and remove its `inject()` call and subcomponent. Classes that Hilt does not create (a `ContentProvider`, a `WorkManager` worker without `@HiltWorker`, a custom `View`, a third-party callback) use an `@EntryPoint` with `EntryPointAccessors`, not static access to the component.
-7. Delete the old components, subcomponents, `AndroidInjector` plumbing, factory classes, the flag and the Dagger-only test components after the last unit has shipped and soaked.
+3. Add the Hilt dependencies and plugin alongside Dagger, and annotate the `Application` class with `@HiltAndroidApp`. Decide the owner of each stateful binding: it is created by exactly one graph. Normally Hilt owns it and the legacy component receives it through an `@EntryPoint` interface installed in `SingletonComponent` (read with `EntryPointAccessors.fromApplication`) or through a component dependency; the reverse (the legacy component owns it and a Hilt `@Provides` method returns the same instance) is acceptable while the legacy component is still the creator. Providing a stateful binding from both graphs would create two instances (two token stores, two connection pools, two database connections on one file, two refresh locks), so it is not allowed. Providing the same binding from both graphs is allowed only for stateless bindings. Check the migration guide for the supported coexistence pattern for your setup.
+4. Add `@InstallIn(SomeComponent::class)` to the modules of the unit being moved, choosing the component whose scope equals the old component's. Keep the old module and component interface in place; they are kept until the last step.
+5. Run the old Dagger component and the Hilt graph side by side for a unit behind a flag where feasible: stateless bindings may exist in both, stateful ones come from the single owner, and a screen uses one graph at a time.
+6. Do the per-unit cutover: move one Activity, Fragment or ViewModel at a time with `@AndroidEntryPoint` or `@HiltViewModel`, and stop calling its `inject()` and subcomponent. Classes that Hilt does not create (a `ContentProvider`, a `WorkManager` worker without `@HiltWorker`, a custom `View`, a third-party callback) use an `@EntryPoint` with `EntryPointAccessors`, not static access to the component. Let each unit soak before the next.
+7. Delete the old components, subcomponents, `AndroidInjector` plumbing, factory classes, entry-point bridges that only served the legacy component, the flag and the Dagger-only test components after the last unit has shipped and soaked. This is the first point at which any of them is deleted.
 
 ## Pitfalls
 
 - A Fragment annotated with `@AndroidEntryPoint` must be attached to an Activity that is also an entry point, so convert the host Activity before (or with) its Fragments; a missed one fails at runtime.
+- Two graphs give every stateful `@Singleton` two instances: duplicated token stores or sessions, two HTTP clients with separate authenticators, two writers on one Room database file. Follow the single-owner rule in Steps 3 and 5.
 - Scope mismatches: a binding with a narrower scope than its consumer fails at compile time, but a binding that gets installed in a wider component than before compiles and runs, so check the scope of every moved module (see the checklist).
 - `@BindsInstance` and component factories with runtime arguments (a user id, a session) have no direct Hilt equivalent: use `@AssistedInject` for objects built with runtime values, or a custom component through `@DefineComponent`.
 - Components or classes created outside Hilt's control (a service in a separate process, a library callback, a `ContentProvider` that runs before `Application.onCreate`) cannot rely on field injection; check the documentation for these cases and use an `@EntryPoint` where it applies.
@@ -52,6 +53,7 @@ No persisted data changes in this migration, so it is reversible per unit.
 ## Tests
 
 - A graph test that builds the Hilt graph (a `@HiltAndroidTest` that injects the main entry points) so a missing binding is caught in CI.
+- Single-owner test: the stateful binding obtained through the legacy component and through Hilt is the same instance (assert identity).
 - Per unit: the screen works with the Hilt injection and the old tests pass with `@TestInstallIn` replacements.
 - A scope test: the same instance is returned within a scope and a different instance after the scope ends (for example a session object after logout).
 - Instrumented smoke test for each `@EntryPoint` use (a worker or provider obtains its dependency).
@@ -66,4 +68,4 @@ No persisted data changes in this migration, so it is reversible per unit.
 
 ## Rollback
 
-Per unit: switch back to the old Dagger component for that unit, which stays in the code until the last unit has shipped. While both exist, bindings are defined in both, so keep modules in sync. After step 7 deletes the old components, restore them from version control. No persisted state is involved.
+Per unit: switch back to the old Dagger component for that unit. The old component, its modules and its interfaces stay in the code until the last unit has shipped and soaked (step 7), so rollback needs no restoration. While both exist, keep stateless bindings in sync and keep the single owner of each stateful binding unchanged (do not hand ownership back and forth). After step 7 deletes the old components, restore them from version control. No persisted state is involved.

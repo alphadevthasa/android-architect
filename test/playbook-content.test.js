@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { loadCatalog } from '../skill/scripts/lib/catalog.js';
-import { loadPlaybooks, validatePlaybooks } from '../skill/scripts/lib/playbooks.js';
+import { loadPlaybooks, validatePlaybooks, applyPlaybook } from '../skill/scripts/lib/playbooks.js';
 import { scanInstructions } from '../skill/scripts/lib/injection.js';
 import { redact } from '../skill/scripts/lib/redact.js';
 
@@ -25,6 +25,7 @@ const EXPECT = {
   'gson--to--kotlinx-serialization': ['allow list', 'size limit'],
   'room--to--sqldelight': ['driver', 'encryption'],
   'rxjava3--to--coroutines-flow': ['error handler', 'token', 'thread'],
+  'rxjava2--to--coroutines-flow': ['error handler', 'token', 'undeliverable'],
   'asynctask-loader--to--coroutines-flow': ['workmanager', 'service', 'upload'],
   'coroutines-livedata--to--coroutines-flow': ['retain', 'log'],
   'dagger2--to--hilt': ['scope', 'credential'],
@@ -139,11 +140,11 @@ test('object-database copies switch every read and write at the marker; sqldelig
   assert.match(sd.sections.Rollback, /never use `fallbackToDestructiveMigration`/i);
 });
 
-const BATCH_B = ['rxjava3--to--coroutines-flow', 'asynctask-loader--to--coroutines-flow', 'coroutines-livedata--to--coroutines-flow',
+const BATCH_B = ['rxjava3--to--coroutines-flow', 'rxjava2--to--coroutines-flow', 'asynctask-loader--to--coroutines-flow', 'coroutines-livedata--to--coroutines-flow',
   'dagger2--to--hilt', 'koin--to--hilt', 'xml-layouts--to--compose', 'jetpack-nav-xml--to--nav-compose-typesafe'];
 
 test('async, DI, UI and navigation playbooks: ids, dimension, flags and checklist size', () => {
-  const dims = { 'rxjava3--to--coroutines-flow': 'async', 'asynctask-loader--to--coroutines-flow': 'async',
+  const dims = { 'rxjava3--to--coroutines-flow': 'async', 'rxjava2--to--coroutines-flow': 'async', 'asynctask-loader--to--coroutines-flow': 'async',
     'coroutines-livedata--to--coroutines-flow': 'async', 'dagger2--to--hilt': 'di', 'koin--to--hilt': 'di',
     'xml-layouts--to--compose': 'ui', 'jetpack-nav-xml--to--nav-compose-typesafe': 'navigation' };
   for (const id of BATCH_B) {
@@ -157,9 +158,9 @@ test('async, DI, UI and navigation playbooks: ids, dimension, flags and checklis
   }
 });
 
-test('Koin to Hilt: worthIf empty and When not to explains staying on Koin', () => {
+test('Koin to Hilt: worthIf absent:kmp and When not to explains staying on Koin', () => {
   const p = byId.get('koin--to--hilt');
-  assert.deepEqual(p.worthIf, []);
+  assert.deepEqual(p.worthIf, ['absent:kmp']);
   assert.match(p.sections['When not to'], /Koin/);
   assert.match(p.sections['When not to'], /stay/i);
 });
@@ -168,7 +169,15 @@ test('batch B specifics', () => {
   const rx = byId.get('rxjava3--to--coroutines-flow');
   assert.match(rx.sections.Steps, /kotlinx-coroutines-rx3/);
   const rxText = fs.readFileSync(path.join(DIR, 'rxjava3--to--coroutines-flow.md'), 'utf8');
-  assert.match(rxText, /RxJava 2[^\n]*kotlinx-coroutines-rx2/);
+  assert.doesNotMatch(rxText, /RxJava 2 projects follow the same steps/);
+  assert.match(rxText, /RxJava 2 playbook/);
+  assert.match(rxText, /UndeliverableException/);
+  assert.match(rxText, /RxJava remains[^\n]*runtime dependency tree/);
+  const rx2 = fs.readFileSync(path.join(DIR, 'rxjava2--to--coroutines-flow.md'), 'utf8');
+  assert.match(rx2, /kotlinx-coroutines-rx2/);
+  assert.match(rx2, /RxJava 3 playbook/);
+  assert.match(rx2, /UndeliverableException/);
+  assert.match(byId.get('rxjava2--to--coroutines-flow').sections['Security checklist'], /runtime dependency tree/);
   assert.match(byId.get('asynctask-loader--to--coroutines-flow').sections.Steps, /lifecycleScope|viewModelScope/);
   const lv = byId.get('coroutines-livedata--to--coroutines-flow');
   assert.match(lv.sections.Steps, /repeatOnLifecycle/);
@@ -180,19 +189,49 @@ test('batch B specifics', () => {
   assert.match(ui.sections.Steps, /ComposeView/);
   assert.match(ui.sections.Steps, /AndroidView/);
   assert.match(ui.sections['Security checklist'], /FLAG_SECURE/);
+  assert.match(ui.sections['Security checklist'], /securePolicy/);
+  assert.match(ui.sections['Security checklist'], /SecureOn/);
   const nav = byId.get('jetpack-nav-xml--to--nav-compose-typesafe');
   assert.match(nav.sections['Security checklist'], /exported/);
   assert.match(nav.sections.Steps, /kotlinx\.serialization/);
 });
 
-test('batch B ordering: seam first, side by side before per-unit cutover, delete last', () => {
+// Splits the numbered steps of a Steps section into one string per step.
+const numberedSteps = (steps) => steps.split(/^(?=\d+\. )/m).filter((x) => /^\d+\. /.test(x));
+const DELETES = /\b(delet|remov)\w*/i;
+
+test('batch B ordering: seam first, side by side before per-unit cutover, deletion of the old implementation only after it', () => {
   for (const id of BATCH_B) {
     const steps = byId.get(id).sections.Steps;
     const at = (re) => steps.search(re);
     assert.ok(at(/seam/i) >= 0 && at(/side by side/i) > at(/seam/i), `${id}: seam then side by side`);
     assert.ok(at(/cutover/i) > at(/side by side/i), `${id}: cutover after side by side`);
-    assert.ok(steps.toLowerCase().lastIndexOf('delete') > at(/cutover/i), `${id}: delete after cutover`);
+    const list = numberedSteps(steps);
+    const cut = list.findIndex((x) => /cutover/i.test(x));
+    assert.ok(cut >= 0, `${id}: no cutover step`);
+    const firstDelete = list.findIndex((x) => DELETES.test(x));
+    assert.ok(firstDelete >= cut, `${id}: step ${firstDelete + 1} deletes or removes before the cutover step ${cut + 1}`);
+    assert.ok(/\bdelet/i.test(list[list.length - 1]), `${id}: the final step deletes the old implementation`);
+    assert.ok(list.length - 1 > cut, `${id}: deletion step is after the cutover step`);
   }
   assert.match(byId.get('rxjava3--to--coroutines-flow').sections.Steps, /persist/i);
   assert.match(byId.get('coroutines-livedata--to--coroutines-flow').sections.Steps, /persist|SavedStateHandle/);
+});
+
+test('Dagger and Koin: single owner for stateful bindings, old graph kept until the last step', () => {
+  for (const id of ['dagger2--to--hilt', 'koin--to--hilt']) {
+    const steps = byId.get(id).sections.Steps;
+    assert.match(steps, /exactly one owner|one owner/i, id);
+    assert.match(steps, /two instances/i, id);
+    assert.match(byId.get(id).sections.Rollback, /until the last unit has shipped/, id);
+  }
+});
+
+test('Koin to Hilt: worth is false when kmp is present and true without it', () => {
+  const koin = byId.get('koin--to--hilt');
+  const mk = (extra) => ({ modules: [{ path: ':', dir: '' }], dimensions: { di: { entries: [{ id: 'koin', share: 1, units: 1, evidence: [] }] }, ...extra } });
+  const kmp = applyPlaybook(koin, mk({ kmp: { entries: [{ id: 'kmp', share: null, units: 0, evidence: [] }] } }), catalog, { matches: [] });
+  assert.equal(kmp.worth.ok, false);
+  assert.equal(applyPlaybook(koin, mk({}), catalog, { matches: [] }).worth.ok, true);
+  assert.match(catalog.entry('di', 'koin').notes, /lateral/i);
 });

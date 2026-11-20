@@ -46,8 +46,8 @@ No persisted data changes in this migration if `SavedStateHandle` keys and types
 - Collecting in `lifecycleScope.launch { flow.collect { } }` without `repeatOnLifecycle` keeps collecting while the UI is stopped (and in the background); this is the most common mistake in conversions.
 - With `WhileSubscribed(5_000)` the upstream stops when no collector remains, and restarts later; do not put side effects with ordering needs in a shared upstream.
 - A fragment must collect in `viewLifecycleOwner`, not the fragment's own lifecycle, or it collects twice after the view is recreated.
-- Events through `Channel` can be dropped if no collector is active and the buffer is full; test rotation and background transitions.
-- `SavedStateHandle`: switch to its Flow accessor only if keys and types stay the same, else users lose restored state after process death.
+- Events through a `Channel` are buffered while no collector is active; they are lost only with `trySend` on a full buffer (or a drop overflow strategy) or when the collector is cancelled before it handled the event. Collect events on `Dispatchers.Main.immediate`, and test rotation and background transitions.
+- `SavedStateHandle`: switch to its Flow accessor only if keys and types stay the same (note that `getStateFlow` requires an initial value, whereas `getLiveData` can hold `null`), else users lose restored state after process death.
 
 ## Tests
 

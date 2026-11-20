@@ -34,7 +34,7 @@ No persisted data changes in this migration, so it is reversible per unit. The b
 1. Inventory the graphs and write down for each destination its argument types and deep links.
 2. Define the seam: a small navigation interface or callback set per feature (for example `onOpenDetail(id)`), so screens and ViewModels do not call the `NavController` or the generated Safe Args directions directly. Pass identifiers, not large objects.
 3. Define the route types with kotlinx.serialization: each destination becomes a `@Serializable` object (no arguments) or data class (arguments), with the same argument types and defaults as the XML destination. Custom argument types need a `NavType`; prefer primitive identifiers, check the documentation.
-4. Run both navigation systems side by side during migration: a Navigation Compose `NavHost` hosted inside a Fragment (or an Activity) next to the XML graph, with the seam deciding which one handles a given navigation event behind a flag. Moving the whole app at once is not needed.
+4. Run both navigation systems side by side during migration: a Navigation Compose `NavHost` hosted inside a Fragment (or an Activity) next to the XML graph, with the seam deciding which one handles a given navigation event behind a flag. Read the flag once per task (when the host Activity is first created) and keep the chosen value in saved state, so a restored back stack is always restored by the system that saved it; a flag change applies only to a fresh task. Flipping it across saved state makes the restore fail (destination not found) or drop the stack. Moving the whole app at once is not needed.
 5. Do the per-unit cutover: move one feature graph (a nested graph and its destinations) at a time. Register destinations with `composable<Route>`, navigate with `navController.navigate(Route(...))`, read arguments with `backStackEntry.toRoute<Route>()` (or the ViewModel's `SavedStateHandle.toRoute`, check the documentation), and move deep links to `deepLinks = listOf(navDeepLink<Route>(basePath = ...))` for that destination.
 6. Recreate behavior: `popUpTo` and `launchSingleTop` options, nested graphs (`navigation<Route>`), start destinations, result passing, and the up and back behavior of each former action.
 7. When the last graph has moved, make the Activity host the `NavHost` directly, and delete the XML graph files, the `NavHostFragment`, the Safe Args plugin and generated classes, the hosting Fragments, the flag and the navigation-fragment dependencies.
@@ -42,6 +42,7 @@ No persisted data changes in this migration, so it is reversible per unit. The b
 ## Pitfalls
 
 - Deep links: the XML `<deepLink>` and the manifest `<nav-graph>` element generated intent filters; with Compose they must be declared explicitly in the manifest and registered in the `NavHost`, or external links stop working. Test every link.
+- Back handling: a `NavHost` nested in a Fragment that is itself a destination of the XML graph creates two back-press handlers (the Fragment navigation and the Compose navigation); define which one consumes back, and test it.
 - Back stack: Compose navigation builds a synthetic back stack for deep links from the graph structure; compare the back behavior of each external entry point with the old one.
 - Arguments: types, nullability and defaults must match; changing a route class later changes the URL pattern for deep links. A destination restored after process death re-creates its arguments from the serialized route, so every route field must be serializable.
 - Do not pass large or sensitive objects through routes; arguments end up in the back stack state and saved state. Pass an id and load from a repository.
@@ -55,6 +56,7 @@ No persisted data changes in this migration, so it is reversible per unit. The b
 - Deep link tests: an intent with each URI opens the right destination with the right back stack; invalid, missing or malformed arguments do not crash and land on a safe destination.
 - Back stack tests: up and back from each destination match the old behavior.
 - Process-death test: navigating deep into a graph, killing the process and returning restores the destination and its arguments.
+- Process-death plus flag-flip test: save state under the XML system, kill the process, flip the flag, and assert the restore still uses the XML system (and the reverse); a new task uses the new value.
 - Side-by-side test: the same navigation event reaches the same destination in both systems.
 
 ## Security checklist
@@ -67,4 +69,4 @@ No persisted data changes in this migration, so it is reversible per unit. The b
 
 ## Rollback
 
-Per feature graph: switch the flag back to the XML graph, which stays in the code (graph files, Safe Args, hosting Fragments, manifest filters) until the last graph has shipped and soaked. Keep the old manifest intent filters until the deletion step, and keep both entry points consistent while both exist. After step 7 deletes the XML graphs, restore them from version control.
+Per feature graph: switch the flag back to the XML graph for new tasks (running tasks keep the system that saved their state), which stays in the code (graph files, Safe Args, hosting Fragments, manifest filters) until the last graph has shipped and soaked. Keep the old manifest intent filters until the deletion step, and keep both entry points consistent while both exist. After step 7 deletes the XML graphs, restore them from version control.

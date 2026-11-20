@@ -97,6 +97,7 @@
       "status": "current",
       "since": "2017",
       "successors": ["hilt"],
+      "notes": "Moving from Koin to Hilt is a lateral move: staying on Koin is the default, and Koin is the better fit for Kotlin Multiplatform.",
       "detect": {
         "gradle": [
           {
