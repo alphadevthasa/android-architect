@@ -64,14 +64,13 @@ test('SKILL.md has the six required sections in order', () => {
   }
 });
 
-test('Not yet available lists every later command', () => {
+test('Not yet available lists only run', () => {
   const body = readSkill();
   const section = body.slice(body.indexOf('## Not yet available'));
-  for (const cmd of ['prioritize', 'migration-plan', 'data-migration', 'lib-update', 'review', 'fitness', 'run']) {
-    assert.match(section, new RegExp('`' + cmd + '`'), `missing ${cmd}`);
-  }
-  const listed = section.slice(0, section.indexOf('When asked for one'));
-  for (const cmd of ['setup', 'refresh']) assert.doesNotMatch(listed, new RegExp('`' + cmd + '`'), `${cmd} is available`);
+  const listed = section.slice(0, section.indexOf('When asked for'));
+  assert.match(listed, /`run`/);
+  const names = [...listed.matchAll(/`([^`]+)`/g)].map((m) => m[1]);
+  assert.deepEqual(names, ['run']);
 });
 
 test('every script named in SKILL.md exists', () => {
@@ -230,7 +229,8 @@ test('Final review: README roadmap, update example and the npx skill note', () =
   const catalog = JSON.parse(fs.readFileSync(new URL('../skill/catalog/catalog.json', import.meta.url), 'utf8'));
   assert.match(readme, /Done:[^\n]*M3[^\n]*gitignore-aware indexing/);
   const update = readme.split('\n').find((l) => l.includes('`update` reinstalls'));
-  assert.ok(update.includes(`(catalog ${catalog.catalogVersion})`) && /-> \d+\.\d+\.\d+ \(catalog /.test(update), update);
+  const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+  assert.ok(update.includes(`-> ${pkg.version} (catalog ${catalog.catalogVersion})`), update);
   assert.match(readme, /`init` and `refresh` use the skill bundled in the npx package[^\n]*run `update` first/);
 });
 
@@ -249,13 +249,18 @@ test('M3: README documents redaction, doctor --root and the roadmap', () => {
   assert.ok(readme.includes('[REDACTED:'));
   assert.ok(readme.includes('doctor --root'));
   assert.match(readme, /Done:[^\n]*M3/);
-  assert.match(readme, /- M4:[^\n]*security-first `lib-update`[^\n]*security checklists/);
+  assert.match(readme, /Done:[^\n]*M4/);
+  assert.match(readme, /- M5:[^\n]*`run` loop/);
 });
 
-test('M3: package.json version is 0.3.0 and the changelog covers it', () => {
+test('M4: package.json version is 0.4.0 and the changelog covers it', () => {
   const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
-  assert.equal(pkg.version, '0.3.0');
+  assert.equal(pkg.version, '0.4.0');
   const log = fs.readFileSync(new URL('../CHANGELOG.md', import.meta.url), 'utf8');
+  assert.match(log, /## \[0\.4\.0\] - Unreleased\n\n### Tool\n\n- /);
+  const section = log.slice(log.indexOf('## [0.4.0]'), log.indexOf('## [0.3.0]'));
+  assert.match(section, /unverified/);
+  assert.match(section, /### Catalog/);
   assert.match(log, /## \[0\.3\.0\] - Unreleased\n\n### Tool\n\n- /);
 });
 
@@ -270,4 +275,59 @@ test('SKILL ground rule 5 lists every secret file pattern and SKILL names every 
     assert.ok(mentions.some((n) => re.test(n)), `ground rule 5 does not mention ${re}`);
   }
   for (const { kind } of SECRET_RULES) assert.ok(text.includes(`\`${kind}\``), `SKILL.md misses redaction kind ${kind}`);
+});
+
+test('M4: SKILL.md has a heading per new command and names its script', () => {
+  const text = readSkill();
+  const scriptOf = { prioritize: 'features.js', 'migration-plan': 'migration-plan.js', 'data-migration': 'playbook.js', 'lib-update': 'lib-update.js', fitness: 'fitness.js', review: 'fitness.js' };
+  for (const [cmd, script] of Object.entries(scriptOf)) {
+    assert.ok(text.includes(`## Command: ${cmd}\n`), `missing ## Command: ${cmd}`);
+    const section = text.slice(text.indexOf(`## Command: ${cmd}\n`)).split('\n## ')[0];
+    assert.ok(section.includes(script), `${cmd} must name ${script}`);
+  }
+  assert.ok(text.includes('reuse.js'));
+  const scripts = fs.readdirSync(path.join(skillDir, 'scripts')).filter((f) => f.endsWith('.js'));
+  const rule4 = /4\. \*\*Read only[^\n]*/.exec(text)[0];
+  for (const s of ['features.js', 'reuse.js', 'playbook.js', 'lib-update.js', 'fitness.js', 'migration-plan.js']) {
+    assert.ok(scripts.includes(s), s);
+    assert.ok(rule4.includes(s), `rule 4 must mention ${s}`);
+  }
+  assert.match(rule4, /fitness\.js[^\n]*\.ai\/fitness\//);
+});
+
+test('M4: every playbook id SKILL.md and README mention exists in the shipped playbooks', () => {
+  const dir = path.join(skillDir, 'catalog', 'playbooks');
+  const ids = fs.readdirSync(dir).filter((f) => f.endsWith('.md') && !f.startsWith('_') && f !== 'README.md').map((f) => f.replace(/\.md$/, ''));
+  assert.ok(ids.length >= 18);
+  const readme = fs.readFileSync(new URL('../README.md', import.meta.url), 'utf8');
+  for (const [name, text] of [['SKILL.md', readSkill()], ['README.md', readme]]) {
+    for (const m of text.matchAll(/`([a-z0-9]+(?:-[a-z0-9]+)*--to--[a-z0-9]+(?:-[a-z0-9]+)*)`/g)) assert.ok(ids.includes(m[1]), `${name} mentions unknown playbook ${m[1]}`);
+  }
+  for (const id of ids) assert.ok(readme.includes(`\`${id}\``), `README must list playbook ${id}`);
+});
+
+test('M4: SKILL.md does not document test-only options and states the verified:false rules', () => {
+  const text = readSkill();
+  assert.doesNotMatch(text, /--today|--versions-dir/);
+  const section = (c) => text.slice(text.indexOf(`## Command: ${c}\n`)).split('\n## ')[0];
+  assert.match(section('data-migration'), /verified: false/);
+  assert.match(section('data-migration'), /200/);
+  assert.match(section('data-migration'), /buildFiles/);
+  assert.match(section('data-migration'), /applicable: false/);
+  assert.match(section('lib-update'), /cannotUpdate/);
+  assert.match(section('lib-update'), /verify/);
+  assert.match(section('lib-update'), /unverified/);
+  assert.match(section('fitness'), /8\.11/);
+  assert.match(section('fitness'), /accepted/);
+  assert.match(section('migration-plan'), /\.ai\/migration\/roadmap\.md/);
+  assert.match(section('review'), /git diff/);
+  assert.match(section('review'), /--check/);
+});
+
+test('M4: README mentions each command and the roadmap, CHANGELOG notes unverified data', () => {
+  const readme = fs.readFileSync(new URL('../README.md', import.meta.url), 'utf8');
+  assert.match(readme, /## Planning a migration/);
+  for (const c of ['prioritize', 'migration-plan', 'data-migration', 'lib-update', 'fitness', 'review']) assert.ok(readme.includes(`\`${c}\``), c);
+  assert.match(readme, /unverified/);
+  assert.match(readme, /No telemetry/);
 });

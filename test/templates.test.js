@@ -32,6 +32,19 @@ test('plan, implement, review rules', () => {
   assert.ok(/components\.md/.test(read('workflows/02-plan.md')));
   assert.ok(/one roadmap step per pull request/i.test(read('workflows/03-implement.md')));
   assert.ok(/rubrics/.test(read('workflows/04-review.md')));
+  assert.ok(/feature-map\.md/.test(read('workflows/02-plan.md')) && /roadmap/.test(read('workflows/02-plan.md')));
+  const impl = read('workflows/03-implement.md');
+  assert.ok(impl.includes('./gradlew architectureFitness') && /\.ai\/fitness\//.test(impl));
+  const review = read('workflows/04-review.md');
+  assert.ok(/fitness/.test(review) && /components\.md/.test(review) && /accepted ADRs/.test(review));
+});
+
+test('workflows only run vendored scripts that check themselves', () => {
+  for (const f of ['01-read-context', '02-plan', '03-implement', '04-review']) {
+    for (const m of read(`workflows/${f}.md`).matchAll(/node \.ai\/tools\/scripts\/([\w.-]+\.js)/g)) {
+      assert.ok(['index.js', 'ai-status.js'].includes(m[1]), `${f} runs ${m[1]}`);
+    }
+  }
 });
 
 test('README template placeholders are the six known names', () => {

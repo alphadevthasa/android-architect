@@ -143,3 +143,29 @@ Not migrating to <target> for now. <who decided, when>
 ## Consequences
 <what stays as is, what it costs, what would change the decision>
 ```
+
+### Migration plan
+
+```markdown
+# Migration plan: <project>
+
+## Order
+1. Enabling: <design-system extraction, safety-net tests per feature>.
+2. Pilot feature: <name> (bucket first, score <n>). Why: <reasons from features.js>.
+3. Data track: <playbook id>, applicable <true|false>, worth <ok|not ok>. <irreversible or decision tags>.
+
+## Steps
+| id | track | depends on | tags | verification | rollback |
+| --- | --- | --- | --- | --- | --- |
+
+## Left alone for now
+<features in bucket last, dimensions labeled dont, with the reason>
+
+## Needs your decision
+<every step tagged decision or irreversible, one line each>
+
+## Unverified
+Playbooks and library versions are written from memory (`verified: false`): check the official documentation before each step.
+```
+
+Save to `.ai/migration/roadmap.md` only after the user agrees.

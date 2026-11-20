@@ -57,3 +57,7 @@ The guardrail (`recommend-check.js`) enforces the legal parts of this: successor
 
 A rejected recommendation is a decision, not a gap. Record it as an ADR with `status: rejected`, its `dimension`, `target`, `reason` and machine-checkable `reopenIf` conditions (`present:<entryId>` or `absent:<entryId>`). `recommend-check.js --adr-dir <root>/.ai/knowledge/adr` then rejects a `must` or `should` target (or a step `to`) that a rejected ADR blocks (R7-rejected) until a condition holds. Propose the alternative or ask whether to reopen; never route around the ADR. `refresh` reports reopened rejections.
 
+
+## After recommend: planning
+
+A validated recommendation is the input for the planning commands. `prioritize` ranks features by evidence, `migration-plan` expands the validated steps per feature with safety nets first, `data-migration` applies a playbook to the data layer, `lib-update` orders dependency updates with security fixes first, and `fitness` turns accepted ADRs into build checks. Playbook and version data are written from memory and marked unverified: say so every time you rely on them.
