@@ -34,14 +34,15 @@ test('plan, implement, review rules', () => {
   assert.ok(/rubrics/.test(read('workflows/04-review.md')));
   assert.ok(/feature-map\.md/.test(read('workflows/02-plan.md')) && /roadmap/.test(read('workflows/02-plan.md')));
   const impl = read('workflows/03-implement.md');
-  assert.ok(impl.includes('./gradlew architectureFitness') && /\.ai\/fitness\//.test(impl));
+  assert.ok(impl.includes('./gradlew architectureFitness') && /architecture-fitness\.gradle\.kts/.test(impl));
+  assert.ok(/architecture-fitness\.gradle\.kts/.test(read('workflows/04-review.md')));
   const review = read('workflows/04-review.md');
   assert.ok(/fitness/.test(review) && /components\.md/.test(review) && /accepted ADRs/.test(review));
 });
 
 test('workflows only run vendored scripts that check themselves', () => {
   for (const f of ['01-read-context', '02-plan', '03-implement', '04-review']) {
-    for (const m of read(`workflows/${f}.md`).matchAll(/node \.ai\/tools\/scripts\/([\w.-]+\.js)/g)) {
+    for (const m of read(`workflows/${f}.md`).matchAll(/\.ai\/tools\/scripts\/([\w.-]+)/g)) {
       assert.ok(['index.js', 'ai-status.js'].includes(m[1]), `${f} runs ${m[1]}`);
     }
   }

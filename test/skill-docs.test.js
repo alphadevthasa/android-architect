@@ -288,17 +288,16 @@ test('M4: SKILL.md has a heading per new command and names its script', () => {
   assert.ok(text.includes('reuse.js'));
   const scripts = fs.readdirSync(path.join(skillDir, 'scripts')).filter((f) => f.endsWith('.js'));
   const rule4 = /4\. \*\*Read only[^\n]*/.exec(text)[0];
-  for (const s of ['features.js', 'reuse.js', 'playbook.js', 'lib-update.js', 'fitness.js', 'migration-plan.js']) {
-    assert.ok(scripts.includes(s), s);
-    assert.ok(rule4.includes(s), `rule 4 must mention ${s}`);
-  }
+  for (const s of scripts) assert.ok(rule4.includes(s), `rule 4 must mention ${s}`);
+  assert.ok(scripts.includes('fitness.js'));
   assert.match(rule4, /fitness\.js[^\n]*\.ai\/fitness\//);
 });
 
 test('M4: every playbook id SKILL.md and README mention exists in the shipped playbooks', () => {
   const dir = path.join(skillDir, 'catalog', 'playbooks');
   const ids = fs.readdirSync(dir).filter((f) => f.endsWith('.md') && !f.startsWith('_') && f !== 'README.md').map((f) => f.replace(/\.md$/, ''));
-  assert.ok(ids.length >= 18);
+  const shipped = fs.readdirSync(dir).filter((f) => f.endsWith('.md')).filter((f) => !f.startsWith('_') && f !== 'README.md');
+  assert.equal(ids.length, shipped.length);
   const readme = fs.readFileSync(new URL('../README.md', import.meta.url), 'utf8');
   for (const [name, text] of [['SKILL.md', readSkill()], ['README.md', readme]]) {
     for (const m of text.matchAll(/`([a-z0-9]+(?:-[a-z0-9]+)*--to--[a-z0-9]+(?:-[a-z0-9]+)*)`/g)) assert.ok(ids.includes(m[1]), `${name} mentions unknown playbook ${m[1]}`);
@@ -330,4 +329,18 @@ test('M4: README mentions each command and the roadmap, CHANGELOG notes unverifi
   for (const c of ['prioritize', 'migration-plan', 'data-migration', 'lib-update', 'fitness', 'review']) assert.ok(readme.includes(`\`${c}\``), c);
   assert.match(readme, /unverified/);
   assert.match(readme, /No telemetry/);
+});
+
+test('M4: fitness docs match what generateFitness writes with and without rules', async () => {
+  const { generateFitness, parseFitnessRules } = await import('../skill/scripts/lib/fitness.js');
+  const none = Object.keys(generateFitness([], [])).sort();
+  assert.deepEqual(none, ['README.md', 'verify-commands.json']);
+  const { rules } = parseFitnessRules([{ status: 'accepted', file: 'a.md', fitness: ['module-no-dep: :a -> :b'] }]);
+  const some = Object.keys(generateFitness(rules, [{ path: ':a', dir: 'a' }, { path: ':b', dir: 'b' }]));
+  assert.ok(some.includes('architecture-fitness.gradle.kts') && some.includes('ArchitectureFitnessTest.kt'));
+  const text = readSkill();
+  const sec = text.slice(text.indexOf('## Command: fitness\n')).split('\n## ')[0];
+  assert.match(sec, /`verify-commands\.json` and `README\.md` always/);
+  assert.match(sec, /`architecture-fitness\.gradle\.kts` only when at least one `module-no-dep` rule exists/);
+  assert.match(sec, /`ArchitectureFitnessTest\.kt` only when at least one rule exists/);
 });

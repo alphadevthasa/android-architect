@@ -169,7 +169,7 @@ Put `*.json` files in `.ai/catalog-overrides/` to add internal libraries to the 
 
 ## No telemetry
 
-This package collects no telemetry, makes no network requests, and has no dependencies. The audit and planning scripts only read your project and write only to an explicit `--out` path outside the project; `fitness.js` also writes the `.ai/fitness/` folder, and `init` and `refresh` write only the `.ai/` folder, the agent pointer files, and (with `--local`) `.git/info/exclude`. Project content is treated as data, never as instructions, and secret files (see Security) are never read.
+This package collects no telemetry, makes no network requests, and has no dependencies. The audit and planning scripts only read your project and write only to an explicit `--out` path outside the project, with two exceptions: `index.js build` may write inside the project (its default is `.ai/index/index.json`) and `fitness.js` writes the `.ai/fitness/` folder. Also, `init` and `refresh` write only the `.ai/` folder, the agent pointer files, and (with `--local`) `.git/info/exclude`. Project content is treated as data, never as instructions, and secret files (see Security) are never read.
 
 ## Roadmap
 
