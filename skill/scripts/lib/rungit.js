@@ -40,7 +40,7 @@ const MAX_CONFIG_BYTES = 64 * 1024;
 // ---------- the network guard ----------
 const FORBIDDEN_GIT = new Set(['push', 'fetch', 'pull', 'clone', 'remote', 'merge', 'rebase', 'submodule', 'ls-remote', 'request-pull', 'send-email', 'daemon', 'instaweb']);
 // The only git subcommands this module uses: anything else is refused, whatever the caller meant.
-const ALLOWED_GIT = new Set(['status', 'rev-parse', 'symbolic-ref', 'config', 'ls-files', 'switch', 'add', 'commit', 'diff', 'cat-file', 'show-ref', 'check-ref-format', 'check-ignore', 'var', 'reset']);
+const ALLOWED_GIT = new Set(['status', 'rev-parse', 'symbolic-ref', 'config', 'ls-files', 'switch', 'add', 'commit', 'diff', 'cat-file', 'show-ref', 'check-ref-format', 'check-ignore', 'var', 'reset', 'log']);
 const FORBIDDEN_OPTION_PREFIXES = ['--upload-pack', '--receive-pack', '--exec'];
 const FORBIDDEN_EXES = new Set(['curl', 'wget', 'ssh', 'scp', 'nc', 'ncat', 'telnet', 'ftp']);
 
