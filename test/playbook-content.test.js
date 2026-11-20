@@ -24,6 +24,13 @@ const EXPECT = {
   'gson--to--moshi': ['allow list', 'size limit'],
   'gson--to--kotlinx-serialization': ['allow list', 'size limit'],
   'room--to--sqldelight': ['driver', 'encryption'],
+  'rxjava3--to--coroutines-flow': ['error handler', 'token', 'thread'],
+  'asynctask-loader--to--coroutines-flow': ['workmanager', 'service', 'upload'],
+  'coroutines-livedata--to--coroutines-flow': ['retain', 'log'],
+  'dagger2--to--hilt': ['scope', 'credential'],
+  'koin--to--hilt': ['scope', 'credential'],
+  'xml-layouts--to--compose': ['flag_secure', 'webview', 'accessibility', 'password'],
+  'jetpack-nav-xml--to--nav-compose-typesafe': ['exported', 'intent filter', 'validat'],
 };
 
 test('shipped playbooks load and validate against the shipped catalog', () => {
@@ -130,4 +137,62 @@ test('object-database copies switch every read and write at the marker; sqldelig
   assert.match(sd.sections.Steps, /10\. Step 10 deletes dead code only/);
   assert.match(sd.sections.Rollback, /three windows/i);
   assert.match(sd.sections.Rollback, /never use `fallbackToDestructiveMigration`/i);
+});
+
+const BATCH_B = ['rxjava3--to--coroutines-flow', 'asynctask-loader--to--coroutines-flow', 'coroutines-livedata--to--coroutines-flow',
+  'dagger2--to--hilt', 'koin--to--hilt', 'xml-layouts--to--compose', 'jetpack-nav-xml--to--nav-compose-typesafe'];
+
+test('async, DI, UI and navigation playbooks: ids, dimension, flags and checklist size', () => {
+  const dims = { 'rxjava3--to--coroutines-flow': 'async', 'asynctask-loader--to--coroutines-flow': 'async',
+    'coroutines-livedata--to--coroutines-flow': 'async', 'dagger2--to--hilt': 'di', 'koin--to--hilt': 'di',
+    'xml-layouts--to--compose': 'ui', 'jetpack-nav-xml--to--nav-compose-typesafe': 'navigation' };
+  for (const id of BATCH_B) {
+    const p = byId.get(id);
+    assert.ok(p, `missing ${id}`);
+    assert.equal(p.dimension, dims[id]);
+    assert.equal(p.irreversible, false, id);
+    assert.equal(p.asOf, '2026-11-20');
+    assert.ok(p.securityChecklist.length >= 2, id);
+    assert.ok(p.sections.Steps.toLowerCase().includes('delete'), `${id}: no delete-last step`);
+  }
+});
+
+test('Koin to Hilt: worthIf empty and When not to explains staying on Koin', () => {
+  const p = byId.get('koin--to--hilt');
+  assert.deepEqual(p.worthIf, []);
+  assert.match(p.sections['When not to'], /Koin/);
+  assert.match(p.sections['When not to'], /stay/i);
+});
+
+test('batch B specifics', () => {
+  const rx = byId.get('rxjava3--to--coroutines-flow');
+  assert.match(rx.sections.Steps, /kotlinx-coroutines-rx3/);
+  const rxText = fs.readFileSync(path.join(DIR, 'rxjava3--to--coroutines-flow.md'), 'utf8');
+  assert.match(rxText, /RxJava 2[^\n]*kotlinx-coroutines-rx2/);
+  assert.match(byId.get('asynctask-loader--to--coroutines-flow').sections.Steps, /lifecycleScope|viewModelScope/);
+  const lv = byId.get('coroutines-livedata--to--coroutines-flow');
+  assert.match(lv.sections.Steps, /repeatOnLifecycle/);
+  assert.match(lv.sections.Steps, /collectAsStateWithLifecycle|StateFlow/);
+  const dg = byId.get('dagger2--to--hilt');
+  assert.match(dg.sections.Steps, /@EntryPoint/);
+  assert.match(dg.sections.Steps, /@InstallIn/);
+  const ui = byId.get('xml-layouts--to--compose');
+  assert.match(ui.sections.Steps, /ComposeView/);
+  assert.match(ui.sections.Steps, /AndroidView/);
+  assert.match(ui.sections['Security checklist'], /FLAG_SECURE/);
+  const nav = byId.get('jetpack-nav-xml--to--nav-compose-typesafe');
+  assert.match(nav.sections['Security checklist'], /exported/);
+  assert.match(nav.sections.Steps, /kotlinx\.serialization/);
+});
+
+test('batch B ordering: seam first, side by side before per-unit cutover, delete last', () => {
+  for (const id of BATCH_B) {
+    const steps = byId.get(id).sections.Steps;
+    const at = (re) => steps.search(re);
+    assert.ok(at(/seam/i) >= 0 && at(/side by side/i) > at(/seam/i), `${id}: seam then side by side`);
+    assert.ok(at(/cutover/i) > at(/side by side/i), `${id}: cutover after side by side`);
+    assert.ok(steps.toLowerCase().lastIndexOf('delete') > at(/cutover/i), `${id}: delete after cutover`);
+  }
+  assert.match(byId.get('rxjava3--to--coroutines-flow').sections.Steps, /persist/i);
+  assert.match(byId.get('coroutines-livedata--to--coroutines-flow').sections.Steps, /persist|SavedStateHandle/);
 });

@@ -96,7 +96,7 @@
       "era": 4,
       "status": "current",
       "since": "2017",
-      "successors": [],
+      "successors": ["hilt"],
       "detect": {
         "gradle": [
           {
