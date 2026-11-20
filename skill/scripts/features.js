@@ -10,6 +10,7 @@ import { detectStack } from './lib/detect.js';
 import { buildFeatureMap } from './lib/features.js';
 import { churnByCommit } from './lib/git.js';
 import { renderFeatureMap } from './lib/knowledge.js';
+import { safeOutPath, writeOut } from './lib/outpath.js';
 import { redact, redactJson } from './lib/redact.js';
 
 const USAGE = 'usage: node features.js <projectRoot> [--format json|md] [--out <file>]';
@@ -63,8 +64,13 @@ export function main(argv) {
     fail(1, redact(String(e.message)).text);
   }
   const text = opts.format === 'md' ? redact(renderFeatureMap(map)).text : JSON.stringify(redactJson(map), null, 2) + '\n';
-  if (opts.out) fs.writeFileSync(path.resolve(opts.out), text);
-  else process.stdout.write(text);
+  if (opts.out) {
+    try {
+      writeOut(safeOutPath(opts.out, root), text);
+    } catch (e) {
+      fail(1, e.message);
+    }
+  } else process.stdout.write(text);
 }
 
 const isMain = () => {

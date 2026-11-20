@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { loadCatalog, loadScoring } from '../skill/scripts/lib/catalog.js';
 import { detectStack } from '../skill/scripts/lib/detect.js';
@@ -12,6 +12,7 @@ import { detectReuse } from '../skill/scripts/lib/reuse.js';
 import { loadPlaybooks, playbooksDir } from '../skill/scripts/lib/playbooks.js';
 import { checkRecommendations } from '../skill/scripts/lib/guardrail.js';
 import { buildPlan, checkPlan, renderRoadmap, EXPAND_DIMENSIONS } from '../skill/scripts/lib/migplan.js';
+import { safeOutPath, writeOut } from '../skill/scripts/lib/outpath.js';
 import { scanInstructions } from '../skill/scripts/lib/injection.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -49,7 +50,7 @@ test('fixture buckets are as the plan expects', () => {
 test('safety nets for first features; migration steps depend on them; high risk gets decision', () => {
   const p = plan(FA, [step('ui1', 'ui', 'xml-layouts', 'compose')]);
   assert.deepEqual(checkPlan(p), []);
-  for (const f of feats.filter((x) => x.bucket === 'first')) {
+  for (const f of feats.filter((x) => x.bucket !== 'last')) {
     const sn = p.steps.find((s) => s.id === `safety-net:${f.id.toLowerCase()}`);
     assert.ok(sn, f.id);
     assert.equal(sn.track, 'enabling');
@@ -62,7 +63,10 @@ test('safety nets for first features; migration steps depend on them; high risk 
     const f = feats.find((x) => x.id === s.feature);
     if (f.risk === 'high') assert.ok(s.tags.includes('decision'), s.id);
   }
-  assert.ok(p.steps.some((s) => s.feature === 'login' && s.tags.includes('decision')) || bucketOf('login') === 'last');
+  assert.notEqual(bucketOf('login'), 'last');
+  const login = p.steps.filter((s) => s.track === 'feature' && s.feature === 'login');
+  assert.ok(login.length > 0);
+  for (const s of login) assert.ok(s.tags.includes('decision') && s.dependsOn.includes('safety-net:login'));
 });
 
 test('last features have no steps and a leave-as-is note', () => {
@@ -105,6 +109,8 @@ test('duplication: extract:design-system precedes UI feature steps', () => {
   }
   const none = plan(FA, [step('ui1', 'ui', 'xml-layouts', 'compose')], { duplicationScore: 'low' });
   assert.ok(!none.steps.some((s) => s.id === 'extract:design-system'));
+  const dataOnly = plan(FA, [step('p1', 'persistence', 'sqliteopenhelper', 'room')], { duplicationScore: 'high' });
+  assert.ok(!dataOnly.steps.some((s) => s.id === 'extract:design-system'));
 });
 
 test('ids sanitized, expansions depend on same-feature prerequisites, deterministic and acyclic', () => {
@@ -173,7 +179,7 @@ test('renderRoadmap: header, one row per step, all todo, tags shown', () => {
   const p = plan(FA, [step('p1', 'persistence', 'sqliteopenhelper', 'room')]);
   const md = renderRoadmap(p);
   assert.ok(md.startsWith('| Step | Description | Status |\n| --- | --- | --- |\n'));
-  const rows = md.trim().split('\n').slice(2);
+  const rows = md.split('\n\n')[0].trim().split('\n').slice(2);
   assert.equal(rows.length, p.steps.length);
   for (const r of rows) assert.ok(r.endsWith('| todo |'));
   assert.ok(md.includes('[irreversible]') && md.includes('[decision]'));
@@ -238,3 +244,129 @@ test('CLI: exit codes for usage, non-gradle dir, unreadable recs, --out inside p
   assert.equal(run([FA, '--recs', writeRecs([]), '--out', out]).status, 0);
   assert.ok(fs.existsSync(out));
 });
+
+// ---- fix round 1
+const synthetic = (n, bucketOfI = (i) => (i % 3 === 0 ? 'first' : i % 3 === 1 ? 'next' : 'last')) => ({
+  features: Array.from({ length: n }, (_, i) => ({ id: `feat-${i}`, name: `feat-${i}`, bucket: bucketOfI(i), score: 50 + (i % 40), risk: i % 7 === 0 ? 'high' : 'low', paths: [`m/f${i}`] })),
+});
+
+test('2000 features: warning notes survive, leave-as-is is one summary line, plan bounded and acyclic', () => {
+  const profile = profileOf(FA);
+  const recs = recsOf([
+    step('s1', 'ui', 'xml-layouts', 'compose'),
+    step('s2', 'language', 'java', 'java8-desugar'),
+    step('s3', 'persistence', 'sqliteopenhelper', 'room', { dependsOn: ['s1'], tags: ['decision'] }),
+  ], [{ dimension: 'di', current: [], target: 'hilt', label: 'later', rationale: 'later please' }]);
+  const t0 = Date.now();
+  const p = buildPlan({ recs, features: synthetic(2000), reuse: { duplicationScore: 'high' }, playbooks, profile, catalog });
+  assert.ok(Date.now() - t0 < 5000);
+  assert.deepEqual(checkPlan(p), []);
+  assert.ok(p.notes.some((n) => n.startsWith('no playbook')));
+  assert.ok(p.notes.some((n) => n.startsWith('later: di')));
+  assert.equal(p.notes.filter((n) => n.startsWith('leave as is')).length, 11);
+  assert.ok(p.notes.some((n) => /^leave as is: and \d+ more features$/.test(n)));
+  assert.ok(p.notes.some((n) => n.includes('more features not planned')));
+  const again = buildPlan({ recs, features: synthetic(2000), reuse: { duplicationScore: 'high' }, playbooks, profile, catalog });
+  assert.deepEqual(p, again);
+  const data = p.steps.find((s) => s.id === 's3');
+  assert.ok(data.tags.includes('decision') && data.tags.includes('irreversible'));
+  const expanded = p.steps.filter((s) => s.id.startsWith('s1:'));
+  assert.equal(expanded.length, 40);
+  for (const s of expanded) assert.ok(s.dependsOn.includes(`safety-net:${s.feature}`));
+});
+
+test('tag union on expansion: source tags kept on every feature step', () => {
+  const p = plan(FA, [step('u', 'ui', 'xml-layouts', 'compose', { tags: ['irreversible'] })]);
+  const ex = p.steps.filter((s) => s.id.startsWith('u:'));
+  assert.ok(ex.length > 1);
+  for (const s of ex) assert.ok(s.tags.includes('irreversible'));
+});
+
+test('renderRoadmap lists notes and marks steps without a playbook', () => {
+  const p = plan(FA, [step('p1', 'language', 'java', 'java8-desugar')]);
+  const md = renderRoadmap(p);
+  assert.ok(md.includes('[no playbook]'));
+  assert.ok(md.includes('\n## Notes\n'));
+  const hostile = { ...p, notes: ['x\n# forged'] };
+  assert.ok(!renderRoadmap(hostile).split('\n').some((l) => l.startsWith('# forged')));
+});
+
+test('ids never become redaction markers', async () => {
+  const { renameUnsafeIds } = await import('../skill/scripts/lib/migplan.js');
+  const { redact } = await import('../skill/scripts/lib/redact.js');
+  const profile = profileOf(FA);
+  const secret = `ghp_${'a1B2'.repeat(9)}`;
+  const features = { features: [{ id: secret, name: secret, bucket: 'first', score: 80, risk: 'low', paths: [] }] };
+  const p = buildPlan({ recs: recsOf([step('u', 'ui', 'xml-layouts', 'compose')]), features, reuse: {}, playbooks, profile, catalog });
+  const r = renameUnsafeIds(p, (s) => redact(s).text);
+  for (const s of r.steps) assert.equal(redact(s.id).text, s.id);
+  assert.deepEqual(checkPlan(r), []);
+});
+
+test('CLI: ADR rejection refuses with a violation', () => {
+  const adr = tmp();
+  fs.writeFileSync(path.join(adr, '0001-no-compose.md'), '---\nid: "0001"\ntitle: No Compose\nstatus: rejected\ndate: 2026-11-19\ndimension: ui\ntarget: compose\nreopenIf:\nreason: "We stay on views for now."\n---\n\nbody\n');
+  const recs = writeRecs([step('ui1', 'ui', 'xml-layouts', 'compose')]);
+  const r = run([FA, '--recs', recs, '--adr-dir', adr]);
+  assert.equal(r.status, 1);
+  assert.ok(JSON.parse(r.stdout).violations.some((v) => v.rule === 'R7-rejected'));
+});
+
+// ---- --out guard
+const mkout = () => {
+  const outside = tmp();
+  const proj = tmp();
+  fs.writeFileSync(path.join(proj, 'target.txt'), 'keep');
+  return { outside, proj };
+};
+
+test('safeOutPath: links, directories, hardlinks, inside-project and normal paths', () => {
+  const { outside, proj } = mkout();
+  fs.symlinkSync(path.join(proj, 'target.txt'), path.join(outside, 'link.json'));
+  assert.throws(() => safeOutPath(path.join(outside, 'link.json'), proj), /symbolic link/);
+  fs.symlinkSync(proj, path.join(outside, 'dirlink'));
+  assert.throws(() => safeOutPath(path.join(outside, 'dirlink', 'x.json'), proj), /outside the project/);
+  fs.linkSync(path.join(proj, 'target.txt'), path.join(outside, 'hard.json'));
+  assert.throws(() => safeOutPath(path.join(outside, 'hard.json'), proj), /hard-linked/);
+  fs.mkdirSync(path.join(outside, 'adir'));
+  assert.throws(() => safeOutPath(path.join(outside, 'adir'), proj), /directory/);
+  assert.throws(() => safeOutPath(path.join(proj, 'new.json'), proj), /outside the project/);
+  assert.equal(safeOutPath(path.join(proj, 'new.json'), proj, { allowInside: true }), path.join(proj, 'new.json'));
+  assert.throws(() => safeOutPath(path.join(outside, 'nodir', 'x.json'), proj), /does not exist/);
+  const ok = safeOutPath(path.join(outside, 'plan.json'), proj);
+  writeOut(ok, 'one');
+  writeOut(ok, 'two');
+  assert.equal(fs.readFileSync(ok, 'utf8'), 'two');
+  assert.equal(fs.readFileSync(path.join(proj, 'target.txt'), 'utf8'), 'keep');
+});
+
+for (const [name, script, extra] of [
+  ['migration-plan', 'migration-plan.js', () => ['--recs', writeRecs([])]],
+  ['features', 'features.js', () => []],
+  ['lib-update', 'lib-update.js', () => []],
+  ['scan', 'scan.js', () => []],
+]) {
+  test(`${name} --out refuses link escapes into the project and directories`, () => {
+    const proj = tmp();
+    fs.cpSync(FA, proj, { recursive: true });
+    fs.writeFileSync(path.join(proj, 'target.txt'), 'keep');
+    const outside = tmp();
+    fs.symlinkSync(path.join(proj, 'target.txt'), path.join(outside, 'link.json'));
+    fs.symlinkSync(proj, path.join(outside, 'dirlink'));
+    fs.linkSync(path.join(proj, 'target.txt'), path.join(outside, 'hard.json'));
+    fs.mkdirSync(path.join(outside, 'adir'));
+    const call = (out) => spawnSync(process.execPath, [path.join(root, 'skill/scripts', script), proj, ...extra(), '--out', out], { encoding: 'utf8' });
+    for (const bad of ['link.json', path.join('dirlink', 'x.json'), 'hard.json', 'adir']) {
+      const r = call(path.join(outside, bad));
+      assert.equal(r.status, 1, `${name} ${bad}: ${r.stderr}`);
+      assert.ok(!r.stderr.includes(outside), 'no raw absolute paths');
+    }
+    assert.equal(call(path.join(proj, 'inside.json')).status, 1);
+    assert.ok(!fs.existsSync(path.join(proj, 'inside.json')));
+    assert.equal(fs.readFileSync(path.join(proj, 'target.txt'), 'utf8'), 'keep');
+    const good = path.join(outside, 'ok.json');
+    const r = call(good);
+    assert.equal(r.status, 0, r.stderr);
+    assert.ok(fs.statSync(good).size > 0);
+  });
+}

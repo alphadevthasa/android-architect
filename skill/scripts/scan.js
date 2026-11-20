@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadCatalogWithOverrides } from './lib/overrides.js';
 import { detectStack } from './lib/detect.js';
+import { safeOutPath, writeOut } from './lib/outpath.js';
 import { renderProfileMarkdown } from './lib/report.js';
 
 const USAGE = 'usage: node scan.js <projectRoot> [--format json|md] [--out <file>] [--no-overrides]';
@@ -59,8 +60,13 @@ export function main(argv) {
     fail(1, e.message);
   }
   const text = opts.format === 'md' ? renderProfileMarkdown(profile, catalog) : JSON.stringify(profile, null, 2) + '\n';
-  if (opts.out) fs.writeFileSync(path.resolve(opts.out), text);
-  else process.stdout.write(text);
+  if (opts.out) {
+    try {
+      writeOut(safeOutPath(opts.out, root), text);
+    } catch (e) {
+      fail(1, e.message);
+    }
+  } else process.stdout.write(text);
 }
 
 const isMain = () => {

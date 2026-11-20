@@ -49,7 +49,7 @@ function parseArgs(argv) {
   return opts;
 }
 
-function build(opts, { loadCatalog, headCommit, buildIndex }) {
+function build(opts, { loadCatalog, headCommit, buildIndex, safeOutPath, writeOut }) {
   const root = path.resolve(opts.positional);
   let isDir = false;
   try {
@@ -71,9 +71,22 @@ function build(opts, { loadCatalog, headCommit, buildIndex }) {
   } catch (e) {
     fail(1, e.message);
   }
-  const out = path.resolve(opts.out ?? path.join(root, '.ai', 'index', 'index.json'));
-  fs.mkdirSync(path.dirname(out), { recursive: true });
-  fs.writeFileSync(out, JSON.stringify(index) + '\n');
+  // The default lives in .ai/index. An explicit --out may also point inside the project (documented behavior), but it still
+  // must not be a link, a directory or a hard-linked file.
+  let out;
+  if (opts.out === null) {
+    out = path.resolve(path.join(root, '.ai', 'index', 'index.json'));
+    fs.mkdirSync(path.dirname(out), { recursive: true });
+    fs.writeFileSync(out, JSON.stringify(index) + '\n');
+  } else {
+    try {
+      fs.mkdirSync(path.dirname(path.resolve(opts.out)), { recursive: true });
+      out = safeOutPath(opts.out, root, { allowInside: true });
+      writeOut(out, JSON.stringify(index) + '\n');
+    } catch (e) {
+      fail(1, e.message);
+    }
+  }
   process.stdout.write(JSON.stringify({ out, docs: index.docs.length, commit }) + '\n');
 }
 
@@ -98,7 +111,8 @@ export async function main(argv) {
     const { loadCatalog } = await import('./lib/catalog.js');
     const { headCommit } = await import('./lib/git.js');
     const { buildIndex } = await import('./lib/indexer.js');
-    build(opts, { loadCatalog, headCommit, buildIndex });
+    const { safeOutPath, writeOut } = await import('./lib/outpath.js');
+    build(opts, { loadCatalog, headCommit, buildIndex, safeOutPath, writeOut });
   } else {
     const { queryIndex } = await import('./lib/indexer.js');
     query(opts, { queryIndex });

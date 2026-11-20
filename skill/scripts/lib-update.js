@@ -10,6 +10,7 @@ import { loadVersions } from './lib/catalog.js';
 import { collectBuildUnits } from './lib/detect.js';
 import { planLibraryUpdates, renderLibraryUpdates } from './lib/libupdate.js';
 import { oneLine } from './lib/overrides.js';
+import { safeOutPath, writeOut } from './lib/outpath.js';
 import { redact, redactJson } from './lib/redact.js';
 
 const USAGE = 'usage: node lib-update.js <projectRoot> [--scope <module-path>] [--format json|md] [--out <file>]';
@@ -44,18 +45,12 @@ function parseArgs(argv) {
   return opts;
 }
 
-/** Fail unless `out` resolves to a place outside the project (symlinks in its directory are resolved). */
 function checkOut(out, root) {
-  const abs = path.resolve(out);
-  let dir;
   try {
-    dir = fs.realpathSync(path.dirname(abs));
-  } catch {
-    fail(1, '--out directory does not exist');
+    return safeOutPath(out, root);
+  } catch (e) {
+    return fail(1, e.message);
   }
-  const rel = path.relative(fs.realpathSync(root), path.join(dir, path.basename(abs)));
-  if (rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))) fail(1, '--out must be outside the project');
-  return abs;
 }
 
 export function main(argv) {
@@ -87,7 +82,13 @@ export function main(argv) {
     fail(1, redact(String(e.message)).text);
   }
   const text = opts.format === 'md' ? redact(renderLibraryUpdates(plan)).text : JSON.stringify(redactJson(plan), null, 2) + '\n';
-  if (outPath !== null) fs.writeFileSync(outPath, text);
+  if (outPath !== null) {
+    try {
+      writeOut(outPath, text);
+    } catch (e) {
+      fail(1, e.message);
+    }
+  }
   else process.stdout.write(text);
 }
 

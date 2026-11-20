@@ -14,7 +14,8 @@ import { detectReuse } from './lib/reuse.js';
 import { loadPlaybooks, validatePlaybooks, playbooksDir } from './lib/playbooks.js';
 import { checkRecommendations } from './lib/guardrail.js';
 import { loadAdrs } from './lib/adr.js';
-import { buildPlan, checkPlan, renderRoadmap } from './lib/migplan.js';
+import { buildPlan, checkPlan, renderRoadmap, renameUnsafeIds } from './lib/migplan.js';
+import { safeOutPath, writeOut } from './lib/outpath.js';
 import { redact, redactJson } from './lib/redact.js';
 
 const USAGE = 'usage: node migration-plan.js <root> --recs <file> [--profile <file>] [--adr-dir <dir>] [--format json|md] [--out <file>]';
@@ -44,18 +45,12 @@ function parseArgs(argv) {
   return opts;
 }
 
-/** Fail unless `out` resolves to a place outside the project (symlinks in its directory are resolved). */
 function checkOut(out, root) {
-  const abs = path.resolve(out);
-  let dir;
   try {
-    dir = fs.realpathSync(path.dirname(abs));
-  } catch {
-    fail(1, '--out directory does not exist');
+    return safeOutPath(out, root);
+  } catch (e) {
+    return fail(1, e.message);
   }
-  const rel = path.relative(fs.realpathSync(root), path.join(dir, path.basename(abs)));
-  if (rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))) fail(1, '--out must be outside the project');
-  return abs;
 }
 
 function readJson(file, what) {
@@ -102,7 +97,7 @@ export function main(argv) {
     const playbooks = loadPlaybooks(fileURLToPath(playbooksDir));
     const errs = validatePlaybooks(playbooks, loadCatalog());
     if (errs.length > 0) throw new Error(errs.slice(0, 5).join('; '));
-    const features = buildFeatureMap(root, { profile: detectStack(root, catalog), scoring: loadScoring(), churn: churnByCommit(root) });
+    const features = buildFeatureMap(root, { profile, scoring: loadScoring(), churn: churnByCommit(root) });
     plan = buildPlan({ recs, features, reuse: detectReuse(root), playbooks, profile, catalog });
     const problems = checkPlan(plan);
     if (problems.length > 0) throw new Error(`plan integrity check failed: ${problems.slice(0, 5).join('; ')}`);
@@ -110,8 +105,18 @@ export function main(argv) {
     if (e instanceof CatalogError || e instanceof Error) fail(1, redact(String(e.message)).text);
     throw e;
   }
-  const text = opts.format === 'md' ? redact(renderRoadmap(plan)).text : JSON.stringify(redactJson(plan), null, 2) + '\n';
-  if (outPath !== null) fs.writeFileSync(outPath, text);
+  plan = renameUnsafeIds(plan, (s) => redact(s).text);
+  const redacted = redactJson(plan);
+  const after = checkPlan(redacted);
+  if (after.length > 0) fail(1, `plan integrity check failed after redaction: ${redact(after.slice(0, 3).join('; ')).text}`);
+  const text = opts.format === 'md' ? redact(renderRoadmap(plan)).text : JSON.stringify(redacted, null, 2) + '\n';
+  if (outPath !== null) {
+    try {
+      writeOut(outPath, text);
+    } catch (e) {
+      fail(1, e.message);
+    }
+  }
   else process.stdout.write(text);
 }
 

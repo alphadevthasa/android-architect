@@ -11,7 +11,7 @@ export const DATA_DIMENSIONS = ['persistence', 'keyvalue', 'networking', 'serial
 export const MAX_FEATURES = 40;
 export const MAX_RECS_STEPS = 100;
 export const MAX_PLAN_STEPS = 1000;
-export const MAX_NOTES = 100;
+export const MAX_LEAVE_NOTES = 10;
 const MAX_EVIDENCE_PATHS = 3;
 const MAX_DEPS_SHOWN = 8;
 const ID_RE = /^[a-z0-9:_.-]+$/;
@@ -38,6 +38,7 @@ export function buildPlan({ recs, features, reuse, playbooks, profile, catalog }
   const recSteps = Array.isArray(recs?.steps) ? recs.steps : [];
   if (recSteps.length > MAX_RECS_STEPS) throw new Error(`too many recommendation steps (${recSteps.length}, max ${MAX_RECS_STEPS})`);
   const notes = [];
+  const leaveNotes = [];
   const note = (n) => notes.push(clean(n, 300));
 
   // Features: first, then next (map order is already bucket then score); last get a note.
@@ -48,7 +49,7 @@ export function buildPlan({ recs, features, reuse, playbooks, profile, catalog }
   for (const f of all) {
     const name = clean(f?.name ?? f?.id ?? 'unit', 60);
     if (f?.bucket === 'last') {
-      note(`leave as is: ${name}`);
+      leaveNotes.push(`leave as is: ${name}`);
       continue;
     }
     if (f?.bucket !== 'first' && f?.bucket !== 'next') continue;
@@ -63,10 +64,9 @@ export function buildPlan({ recs, features, reuse, playbooks, profile, catalog }
     });
   }
   if (skipped > 0) note(`... and ${skipped} more features not planned (cap ${MAX_FEATURES}); plan them in a later round`);
-  const nextCount = planned.filter((f) => f.bucket === 'next').length;
-  if (nextCount > 0) note('next-bucket features get no safety-net step in this plan; add characterization and screenshot tests before migrating them');
 
-  const dupHigh = reuse?.duplicationScore === 'medium' || reuse?.duplicationScore === 'high';
+  const uiSteps = recSteps.some((s) => s?.dimension === 'ui' || s?.dimension === 'presentation');
+  const dupHigh = uiSteps && (reuse?.duplicationScore === 'medium' || reuse?.duplicationScore === 'high');
   const steps = [];
   const usedIds = new Set();
   const push = (s) => {
@@ -76,7 +76,7 @@ export function buildPlan({ recs, features, reuse, playbooks, profile, catalog }
 
   // Enabling: design-system extraction, then safety nets (filled in after we know which features have steps).
   const expandedSomewhere = recSteps.some((s) => EXPAND_DIMENSIONS.includes(s?.dimension)) && planned.length > 0;
-  const needsNet = new Set(expandedSomewhere ? planned.filter((f) => f.bucket === 'first').map((f) => f.id) : []);
+  const needsNet = new Set(expandedSomewhere ? planned.map((f) => f.id) : []);
   if (dupHigh) {
     usedIds.add('extract:design-system');
     push({
@@ -160,7 +160,7 @@ export function buildPlan({ recs, features, reuse, playbooks, profile, catalog }
         const id = uniqueId(usedIds, `${base}:${f.id}`);
         m.set(f.id, id);
         const deps = mapDeps(f.id);
-        if (dupHigh && raw.dimension === 'ui') deps.push('extract:design-system');
+        if (dupHigh && (raw.dimension === 'ui' || raw.dimension === 'presentation')) deps.push('extract:design-system');
         if (needsNet.has(f.id)) deps.push(`safety-net:${f.id}`);
         const t = new Set(tags);
         if (f.risk === 'high') t.add('decision');
@@ -190,8 +190,8 @@ export function buildPlan({ recs, features, reuse, playbooks, profile, catalog }
 
   const tracks = { features: [], data: [], enabling: [] };
   for (const s of steps) tracks[s.track === 'feature' ? 'features' : s.track].push(s.id);
-  const shown = notes.slice(0, MAX_NOTES);
-  if (notes.length > MAX_NOTES) shown.push(`... and ${notes.length - MAX_NOTES} more notes`);
+  const shown = [...notes, ...leaveNotes.slice(0, MAX_LEAVE_NOTES)];
+  if (leaveNotes.length > MAX_LEAVE_NOTES) shown.push(`leave as is: and ${leaveNotes.length - MAX_LEAVE_NOTES} more features`);
   const plan = { schemaVersion: 1, steps, tracks, notes: shown };
   const problems = checkPlan(plan);
   if (problems.length > 0) throw new Error(`plan integrity check failed: ${problems.slice(0, 5).join('; ')}`);
@@ -230,7 +230,7 @@ export function checkPlan(plan) {
     if (s.id.startsWith('safety-net:')) {
       for (const d of s.dependsOn) if (byId.get(d) && byId.get(d).track !== 'enabling') bad(`${s.id}: a safety net may not depend on migration step ${d}`);
     }
-    if (s.track === 'feature' && s.feature !== undefined && byId.has(`safety-net:${s.feature}`) && !s.dependsOn.includes(`safety-net:${s.feature}`)) {
+    if (s.track === 'feature' && s.feature !== undefined && !s.dependsOn.includes(`safety-net:${s.feature}`)) {
       bad(`${s.id}: must depend on safety-net:${s.feature}`);
     }
   }
@@ -268,8 +268,39 @@ export function renderRoadmap(plan) {
     const more = s.dependsOn.length > MAX_DEPS_SHOWN ? ` and ${s.dependsOn.length - MAX_DEPS_SHOWN} more` : '';
     const parts = [mdText(s.title)];
     if (tags) parts.push(tags);
+    if (s.playbook === undefined && !s.id.startsWith('safety-net:') && !s.id.startsWith('extract:')) parts.push('[no playbook]');
     if (deps.length > 0) parts.push(`(after: ${deps.join(', ')}${more})`);
     rows.push(`| \`${mdText(s.id).replace(/\\/g, '')}\` | ${parts.join(' ')} | todo |`);
   }
+  const notes = (Array.isArray(plan.notes) ? plan.notes : []).map((n) => `- ${mdText(n)}`);
+  if (notes.length > 0) rows.push('', '## Notes', '', ...notes);
   return rows.join('\n') + '\n';
+}
+
+/**
+ * Replace ids that redaction would rewrite (a feature or step name shaped like a secret) by neutral placeholders, in ids,
+ * dependsOn, feature and tracks, so ids never turn into [REDACTED...] text. `redactText` is (s) => redacted string.
+ */
+export function renameUnsafeIds(plan, redactText) {
+  const unsafe = (s) => redactText(s) !== s;
+  const features = [...new Set(plan.steps.map((s) => s.feature).filter((f) => typeof f === 'string' && unsafe(f)))];
+  const swap = (str) => {
+    let out = str;
+    features.forEach((f, i) => { out = out.split(f).join(`unit-redacted-${i + 1}`); });
+    return out;
+  };
+  const ids = new Map();
+  let n = 0;
+  for (const s of plan.steps) {
+    const id = swap(s.id);
+    ids.set(s.id, unsafe(id) ? `step-redacted-${++n}` : id);
+  }
+  const mapId = (id) => ids.get(id) ?? swap(id);
+  return {
+    ...plan,
+    steps: plan.steps.map((s) => ({
+      ...s, id: mapId(s.id), dependsOn: s.dependsOn.map(mapId), ...(s.feature !== undefined ? { feature: swap(s.feature) } : {}),
+    })),
+    tracks: Object.fromEntries(Object.entries(plan.tracks).map(([k, v]) => [k, v.map(mapId)])),
+  };
 }
