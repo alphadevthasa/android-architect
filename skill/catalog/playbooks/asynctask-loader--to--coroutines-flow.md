@@ -44,7 +44,7 @@ Moving screen-scoped work to coroutines changes no persisted data, so that part 
 - `AsyncTask` ran tasks serially on a shared executor by default; coroutines run in parallel. Code that relied on that ordering (two tasks updating the same file or counter) needs a `Mutex` or a single-thread dispatcher.
 - A screen-scoped coroutine is cancelled when the ViewModel is cleared or the lifecycle ends; an `AsyncTask` often kept running. Decide on purpose whether the work should be cancelled.
 - Do not use `GlobalScope`; it recreates the leak problem. Use an injected application-level scope only for work that really is process-wide.
-- Exceptions: `AsyncTask` crashed the app on an uncaught exception in `doInBackground`; in a `launch` inside `viewModelScope` without a `CoroutineExceptionHandler` the exception still crashes the app, so it is not swallowed by default; handle it where the result is produced. Catch and map errors where the result is produced, and rethrow `CancellationException`.
+- Exceptions: `AsyncTask` crashed the app on an uncaught exception in `doInBackground`; in a `launch` inside `viewModelScope` without a `CoroutineExceptionHandler` the exception still crashes the app, so it is not swallowed by default. Catch and map errors where the result is produced, and rethrow `CancellationException`.
 - Loader callbacks were delivered on the main thread and tied to the Activity lifecycle; a collected Flow must be started with `repeatOnLifecycle`, or it keeps collecting while the UI is stopped.
 - Progress updates (`publishProgress`) become a `Flow` of progress states or a `StateFlow`; do not update views from `Dispatchers.IO`.
 

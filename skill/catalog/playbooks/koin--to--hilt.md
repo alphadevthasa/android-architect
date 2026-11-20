@@ -37,8 +37,8 @@ No persisted data changes in this migration, so it is reversible per unit. One s
 2. Define the seam: the classes that features use are interfaces with constructor injection, with no direct `get()` or `inject()` calls in business code (replace service-locator lookups with constructor parameters first, while still on Koin).
 3. Add Hilt next to Koin and annotate the `Application` with `@HiltAndroidApp`. Pick one owner for each type. A stateful type is created by one container only; the other container gets a bridge: a Hilt `@Provides` method that returns the instance from Koin, or a Koin definition that reads the Hilt instance through an `@EntryPoint`. Creating a stateful type in both containers would give two instances (two token stores, two database connections), so it is not allowed; stateless types may be defined in both.
 4. For one Koin module at a time, add the equivalent Hilt module with `@InstallIn`, make Hilt the owner of its stateful types, and replace the Koin definitions in that module with bridge definitions that point to the Hilt instance. The Koin module stays in place with the bridges until its units have moved and soaked. Run both containers side by side for the unit and compare the resolved implementations and instance identity in tests.
-5. Do the per-unit cutover: move one screen at a time to `@AndroidEntryPoint` or `@HiltViewModel` and remove its `by inject()` or `by viewModel()` usage. Non-Android classes that Hilt does not construct use an `@EntryPoint` with `EntryPointAccessors`, never a static lookup. Let the unit soak.
-6. Delete Koin in the last step only: remove the remaining Koin modules and bridge definitions, the `startKoin` and `stopKoin` calls, the flag and the Koin dependencies, after the last unit has shipped and soaked.
+5. Do the per-unit cutover: move one screen at a time to `@AndroidEntryPoint` or `@HiltViewModel` and stop using its `by inject()` or `by viewModel()` lookups. Non-Android classes that Hilt does not construct use an `@EntryPoint` with `EntryPointAccessors`, never a static lookup. Let the unit soak.
+6. Delete Koin in the last step only: remove the remaining Koin modules and bridge definitions, the `startKoin` and `stopKoin` calls and the Koin dependencies, after the last unit has shipped and soaked.
 
 ## Pitfalls
 
@@ -66,4 +66,4 @@ No persisted data changes in this migration, so it is reversible per unit. One s
 
 ## Rollback
 
-Per unit: switch the unit back to Koin by pointing its bridge definitions back at the Koin implementation; the Koin modules (with the bridge definitions) stay in the code until the last unit has shipped and soaked (step 6). Keep the single owner of each stateful type unchanged while both containers exist. After step 6 deletes Koin, restore it from version control. No persisted state is involved.
+Per unit: send the unit back to Koin by changing it back to its Koin lookups (`by inject()` or `by viewModel()`). The Koin modules, with their bridge definitions, stay in the code until the last unit has shipped and soaked (step 6), and the bridge definitions keep returning the instance that Hilt owns, so the single owner of each stateful type never changes during a rollback (never point a bridge back at a new Koin-created instance beside Hilt's). After step 6 deletes Koin, restore it from version control. No persisted state is involved.

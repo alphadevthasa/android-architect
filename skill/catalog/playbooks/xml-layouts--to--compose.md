@@ -35,7 +35,7 @@ Stable screens that rarely change, heavy custom `View` drawing, or screens built
 3. Add Compose to the module and create the theme that mirrors the XML theme.
 4. Build the Compose version of the screen as a stateless composable that takes state and callbacks, and run it side by side with the XML version behind a flag: the Fragment or Activity either inflates the XML layout or hosts the composable. In an existing Fragment, host Compose through `ComposeView` (in XML or created in code) and set the composition strategy suited to Fragment views (`ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed`, check the documentation); in an Activity use `setContent`.
 5. Where a Compose screen needs an existing View (a `WebView`, a map, a custom chart, an ad view), wrap it with `AndroidView` (factory to create and configure, update to apply state), and where an XML screen needs a new composable, use `ComposeView`. Convert the container screen first, then the leaf custom views.
-6. Do the per-unit cutover: switch one screen at a time to the composable, ship it behind the flag, and check metrics and crashes. Read the flag once when the screen is created and keep it for that screen instance, so a remote flag flip does not swap the UI under restored state. Keep the flag until the last screen has shipped; it is removed in step 8.
+6. Do the per-unit cutover: switch one screen at a time to the composable, ship it behind the flag, and check metrics and crashes. Read the flag once when the screen is first created and keep the chosen value in saved state, so a restored screen uses the UI that saved its state and a remote flag flip applies only to a fresh screen. Keep the flag until the last screen has shipped; it is removed in step 8.
 7. Move navigation last: once most screens are composables, host them in a Compose navigation graph (see the navigation playbook); until then, keep Fragments and the existing Navigation component hosting `ComposeView`.
 8. Delete the XML layouts, View Binding classes, adapters and custom views of each converted screen, the flags, and finally unused XML resources, view binding or data binding build options, and Material View dependencies after the last screen has shipped and soaked.
 
@@ -48,7 +48,7 @@ Stable screens that rarely change, heavy custom `View` drawing, or screens built
 - `AndroidView` is not recomposed like a composable: updates go through its `update` block, and views that hold resources need release in `onRelease`.
 - Insets, keyboard handling (`windowSoftInputMode`, `imePadding`) and edge-to-edge behave differently and should be tested on each screen.
 - Screenshot and UI tests written against view ids and Espresso matchers must be rewritten with the Compose test APIs and semantics; plan for a period with both.
-- A remote flag that flips between the XML and the Compose version while a screen is restored after process death can restore state into the wrong UI; read the flag once per screen instance.
+- A remote flag that flips between the XML and the Compose version while a screen is restored after process death can restore state into the wrong UI; read the flag once on first creation and keep it in saved state.
 - Process death and configuration changes: the saved state of views (text typed into an `EditText`) is not restored automatically for composables unless state is saved.
 
 ## Tests

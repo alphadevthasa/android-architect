@@ -199,6 +199,9 @@ test('batch B specifics', () => {
 // Splits the numbered steps of a Steps section into one string per step.
 const numberedSteps = (steps) => steps.split(/^(?=\d+\. )/m).filter((x) => /^\d+\. /.test(x));
 const DELETES = /\b(delet|remov)\w*/i;
+// Legitimate wording that only says when something is deleted later.
+const LATER = /\b(is |are )?(removed|deleted|kept) (only )?(in|until) (step \d+|the last step)/gi;
+const mentionsDelete = (text) => DELETES.test(text.replace(LATER, ''));
 
 test('batch B ordering: seam first, side by side before per-unit cutover, deletion of the old implementation only after it', () => {
   for (const id of BATCH_B) {
@@ -209,8 +212,8 @@ test('batch B ordering: seam first, side by side before per-unit cutover, deleti
     const list = numberedSteps(steps);
     const cut = list.findIndex((x) => /cutover/i.test(x));
     assert.ok(cut >= 0, `${id}: no cutover step`);
-    const firstDelete = list.findIndex((x) => DELETES.test(x));
-    assert.ok(firstDelete >= cut, `${id}: step ${firstDelete + 1} deletes or removes before the cutover step ${cut + 1}`);
+    const firstDelete = list.findIndex((x) => mentionsDelete(x));
+    assert.ok(firstDelete > cut, `${id}: step ${firstDelete + 1} deletes or removes at or before the cutover step ${cut + 1}`);
     assert.ok(/\bdelet/i.test(list[list.length - 1]), `${id}: the final step deletes the old implementation`);
     assert.ok(list.length - 1 > cut, `${id}: deletion step is after the cutover step`);
   }
@@ -234,4 +237,36 @@ test('Koin to Hilt: worth is false when kmp is present and true without it', () 
   assert.equal(kmp.worth.ok, false);
   assert.equal(applyPlaybook(koin, mk({}), catalog, { matches: [] }).worth.ok, true);
   assert.match(catalog.entry('di', 'koin').notes, /lateral/i);
+});
+
+test('Rollback step references point to existing steps (all playbooks)', () => {
+  for (const p of playbooks) {
+    const count = numberedSteps(p.sections.Steps).length;
+    for (const m of p.sections.Rollback.matchAll(/\bstep (\d+)\b/gi)) {
+      const n = Number(m[1]);
+      assert.ok(n >= 1 && n <= count, `${p.id}: Rollback references step ${n} but there are ${count}`);
+    }
+  }
+  // The referenced step must be the one that does what Rollback says.
+  for (const id of BATCH_B) {
+    const list = numberedSteps(byId.get(id).sections.Steps);
+    for (const m of byId.get(id).sections.Rollback.matchAll(/After step (\d+) (?:deletes|removes)/g)) {
+      assert.match(list[Number(m[1]) - 1], /^\d+\. (Delete|When every unit has moved|When the last graph has moved)/, `${id}: step ${m[1]} is not the deletion step`);
+    }
+  }
+});
+
+test('Dagger: stateful modules are installed in the owner graph only, with a dedicated ownership handover before deletion', () => {
+  const steps = byId.get('dagger2--to--hilt').sections.Steps;
+  assert.match(steps, /owner graph only/);
+  assert.match(steps, /Hand over ownership[^\n]*before the old component is deleted/);
+  assert.ok(steps.search(/Hand over ownership/) < steps.search(/per-unit cutover/));
+  assert.match(byId.get('dagger2--to--hilt').sections.Rollback, /revert that release as a whole/);
+});
+
+test('Koin rollback goes back to Koin lookups and never repoints a bridge', () => {
+  const r = byId.get('koin--to--hilt').sections.Rollback;
+  assert.match(r, /by inject\(\)/);
+  assert.match(r, /single owner of each stateful type never changes/);
+  assert.doesNotMatch(r + byId.get('koin--to--hilt').sections.Steps, /\bthe flag\b/);
 });

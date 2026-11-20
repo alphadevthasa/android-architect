@@ -36,8 +36,8 @@ No persisted data changes in this migration if `SavedStateHandle` keys and types
 3. Convert state: `MutableLiveData<T>` becomes `MutableStateFlow<T>` with an initial value, exposed read-only as `StateFlow<T>`. Derived state from a Flow becomes `stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), initial)`. `Transformations.map` becomes `map`, `switchMap` becomes `flatMapLatest`, and `MediatorLiveData` becomes `combine`.
 4. Convert events: model them as part of state that the UI consumes explicitly (an event field that the UI reports as handled), or use a `Channel` exposed with `receiveAsFlow()` where each event must be handled once. Do not model one-time events as `StateFlow` values or as a `SharedFlow` with `replay`, which redelivers them after rotation. Decide per event and test it.
 5. Run the old LiveData and the new Flow side by side during the unit: the UI collects the Flow in the new code path (behind a flag) while the LiveData still exists. Collect with `repeatOnLifecycle(Lifecycle.State.STARTED)` inside `viewLifecycleOwner.lifecycleScope.launch` in a fragment (or `lifecycleScope` in an activity), and `collectAsStateWithLifecycle()` in Compose; check the current documentation for the artifact that provides it.
-6. Do the per-unit cutover: move one screen (ViewModel plus its UI) at a time, switch the UI to the Flow, then remove that ViewModel's `LiveData`. Data Binding with Flow needs a lifecycle owner set on the binding; check the current documentation for Flow support there.
-7. Delete the bridges (`asLiveData`, `asFlow`), the event wrappers, the flag and the LiveData imports after the last unit has shipped and soaked.
+6. Do the per-unit cutover: move one screen (ViewModel plus its UI) at a time, switch the UI to the Flow, then stop observing that ViewModel's `LiveData` (the properties stay until step 7). Data Binding with Flow needs a lifecycle owner set on the binding; check the current documentation for Flow support there.
+7. Delete the bridges (`asLiveData`, `asFlow`), the event wrappers, the flag, the now unused `LiveData` properties and the imports after the last unit has shipped and soaked.
 
 ## Pitfalls
 

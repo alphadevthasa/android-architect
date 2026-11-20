@@ -44,7 +44,7 @@ No persisted data changes in this migration, so it is reversible per unit. The s
 - Exceptions in `launch` inside `viewModelScope` without a `CoroutineExceptionHandler` still crash the app.
 - Cooperative cancellation: a broad `catch (e: Exception)` swallows `CancellationException`; rethrow it.
 - `Schedulers.io()` is unbounded and `Dispatchers.IO` is capped (64 threads by default).
-- Mixed Rx 2 and Rx 3 in one app (through a library) means two sets of types and two `RxJavaPlugins` classes; convert the bridge module that matches each type.
+- Mixed Rx 2 and Rx 3 in one app (through a library) means two sets of types and two `RxJavaPlugins` classes; convert the bridge module that matches each type, and install an error handler on each of the two `RxJavaPlugins` classes (`io.reactivex.plugins` and `io.reactivex.rxjava3.plugins`), since setting one does not cover the other.
 - `retryWhen` token-refresh logic must be rebuilt with a single in-flight refresh.
 
 ## Tests

@@ -72,4 +72,4 @@ No persisted data changes in this migration, so it is reversible per unit. If a 
 
 ## Rollback
 
-Per unit: flip the switch back to the Rx implementation, which stays in the code until the last unit has shipped and soaked. No persisted state is changed, so the flip loses no data. After step 8 deletes the Rx code there is no switch; restore it from version control and treat later changes as new work.
+Per unit: flip the switch back to the Rx implementation, which stays in the code until the last unit has shipped and soaked. No persisted state is changed, so the flip loses no data. After step 7 deletes the Rx code there is no switch; restore it from version control and treat later changes as new work.
