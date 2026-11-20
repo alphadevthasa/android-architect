@@ -19,7 +19,8 @@ export function buildPerfLine(i) {
   const at = i.file ? ` [${mdText(i.line === null ? i.file : `${i.file}:${i.line}`)}]` : '';
   return `- ${PERF_LABELS[i.id] ?? mdText(i.id)}: ${i.status} (${mdText(i.detail)})${at}`;
 }
-const where = (e) => (e.line === null || e.line === undefined ? e.file : `${e.file}:${e.line}`);
+// Every project-derived string (paths, coordinates, details) passes through mdText: file names may hold line breaks.
+const where = (e) => mdText(e.line === null || e.line === undefined ? e.file : `${e.file}:${e.line}`);
 
 /**
  * Render a StackProfile as Markdown. Dimension and entry names come from the
@@ -33,7 +34,7 @@ export function renderProfileMarkdown(profile, catalog = loadCatalog()) {
   out.push(`- Catalog: ${profile.catalogVersion}`);
   out.push(`- SDK: min ${sdk.minSdk ?? '?'}, target ${sdk.targetSdk ?? '?'}, compile ${sdk.compileSdk ?? '?'}`);
   out.push(`- Size: ${size.files} files, ${size.sourceFiles} source files (${size.kotlinFiles} Kotlin, ${size.javaFiles} Java), ${size.xmlLayouts} XML layouts, ${size.loc} LOC`);
-  out.push(`- Modules: ${profile.modules.map((m) => m.path).join(', ') || 'none'}`);
+  out.push(`- Modules: ${profile.modules.map((m) => mdText(m.path)).join(', ') || 'none'}`);
   for (const [dimId, { entries }] of Object.entries(profile.dimensions)) {
     out.push('', `## ${dimName(dimId)}`, '');
     if (entries.length === 0) {
@@ -58,11 +59,11 @@ export function renderProfileMarkdown(profile, catalog = loadCatalog()) {
   out.push('', '## Security', '');
   if (findings.length === 0) out.push('- no security signals found');
   out.push(...findingCountLines(profile.security));
-  for (const f of findings) out.push(`- [${f.severity}] ${f.id}: ${f.file}:${f.line} (${f.detail})`);
+  for (const f of findings) out.push(`- [${f.severity}] ${mdText(f.id)}: ${mdText(`${f.file}:${f.line}`)} (${mdText(f.detail)})`);
   for (const v of profile.security?.vulnerable ?? []) {
-    out.push(`- [${v.severity}] ${v.id}: ${v.coord}:${v.version} at ${v.file}:${v.line} (${v.summary}; ${v.source})`);
+    out.push(`- [${v.severity}] ${mdText(v.id)}: ${mdText(`${v.coord}:${v.version}`)} at ${mdText(`${v.file}:${v.line}`)} (${mdText(v.summary)}; ${mdText(v.source)})`);
   }
-  for (const a of profile.security?.unresolvedAliases ?? []) out.push(`- cannot check (alias coordinates unresolved): ${a.alias} at ${a.file}:${a.line}`);
-  for (const c of profile.security?.unresolvedChecks ?? []) out.push(`- not checked (version unresolved): ${c}`);
+  for (const a of profile.security?.unresolvedAliases ?? []) out.push(`- cannot check (alias coordinates unresolved): ${mdText(a.alias)} at ${mdText(`${a.file}:${a.line}`)}`);
+  for (const c of profile.security?.unresolvedChecks ?? []) out.push(`- not checked (version unresolved): ${mdText(c)}`);
   return out.join('\n') + '\n';
 }

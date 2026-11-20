@@ -570,7 +570,9 @@ function readme(rules, skipped, names) {
     ...(konsist
       ? ['- `ArchitectureFitnessTest.kt`: a Konsist unit test for the package rules and, through the imports of each module, the module rules.']
       : []),
-    '- `verify-commands.json`: the verification commands for these checks, used by the agent loop.',
+    gradle || konsist
+      ? '- `verify-commands.json`: the verification commands for the generated checks, used by the agent loop.'
+      : '- `verify-commands.json`: an empty command list, because no check was generated.',
     '',
     ...(gradle || konsist
       ? [
@@ -589,17 +591,17 @@ function readme(rules, skipped, names) {
   ].join('\n');
 }
 
-const VERIFY_COMMANDS = {
-  schemaVersion: 1,
-  commands: ['./gradlew architectureFitness', "./gradlew testDebugUnitTest --tests '*ArchitectureFitnessTest'"],
-};
+// Fixed strings only: one per generated check, listed only when that check was generated.
+const GRADLE_COMMAND = './gradlew architectureFitness';
+const KONSIST_COMMAND = "./gradlew testDebugUnitTest --tests '*ArchitectureFitnessTest'";
 
 /** Every file name generateFitness can produce; a run removes the ones it does not produce this time. */
 export const FITNESS_FILES = ['architecture-fitness.gradle.kts', 'ArchitectureFitnessTest.kt', 'verify-commands.json', 'README.md'];
 
 /**
  * Generated files for .ai/fitness (paths relative to that folder): the Gradle script (only with module rules), the
- * Konsist test (only with rules), verify-commands.json and a README. Rules must come from parseFitnessRules; modules whose path or directory fails
+ * Konsist test (only with rules), verify-commands.json (the commands of the generated checks; an empty list when none
+ * was generated) and a README. Rules must come from parseFitnessRules; modules whose path or directory fails
  * validModules are left out (the README counts them). Throws when redaction would change a generated file, so a
  * secret-looking module directory never reaches generated code.
  */
@@ -609,7 +611,11 @@ export function generateFitness(rules, modules = []) {
   // A script without module rules checks nothing, and a JUnit class without tests fails ("No runnable methods").
   if (rules.some((r) => r.kind === 'module-no-dep')) files['architecture-fitness.gradle.kts'] = gradleScript(rules);
   if (rules.length) files['ArchitectureFitnessTest.kt'] = konsistTest(rules, safe);
-  files['verify-commands.json'] = JSON.stringify(VERIFY_COMMANDS, null, 2) + '\n';
+  const commands = [
+    ...('architecture-fitness.gradle.kts' in files ? [GRADLE_COMMAND] : []),
+    ...('ArchitectureFitnessTest.kt' in files ? [KONSIST_COMMAND] : []),
+  ];
+  files['verify-commands.json'] = JSON.stringify({ schemaVersion: 1, commands }, null, 2) + '\n';
   files['README.md'] = readme(rules, notes.length, Object.keys(files));
   for (const text of Object.values(files)) {
     if (redact(text).text !== text) throw new Error('a generated fitness file would be changed by secret redaction; check the module names');

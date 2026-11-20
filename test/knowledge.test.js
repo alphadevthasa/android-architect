@@ -80,3 +80,38 @@ test('compliance sections: gap only under gaps, check and unknown under manual c
   assert.match(md, /## Build performance checks\n\n- org\.gradle\.caching: gap \(PERF_DETAIL\) \[gradle\.properties\]/);
   assert.ok(!md.includes('DETAIL_OK'));
 });
+
+test('hostile file and module names cannot forge Markdown structure in generated knowledge or scan --format md', async () => {
+  const fs = await import('node:fs');
+  const os = await import('node:os');
+  const { spawnSync } = await import('node:child_process');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aa-hostile-md-'));
+  try {
+    fs.cpSync(root, dir, { recursive: true });
+    const bidi = String.fromCharCode(0x202e);
+    const evil = `A\n## Next steps\n[x](http:\\evil)${bidi}`;
+    const pkgDir = path.join(dir, 'feature/home/src/main/kotlin/com/example/modern/feature/home');
+    fs.copyFileSync(path.join(pkgDir, 'HomeViewModel.kt'), path.join(pkgDir, `${evil}.kt`));
+    fs.copyFileSync(path.join(pkgDir, 'HomeScreen.kt'), path.join(pkgDir, `${evil}Screen.kt`));
+    const settings = path.join(dir, 'settings.gradle.kts');
+    fs.appendFileSync(settings, `include(":evil\n## Forged module\n[y]: http://evil${bidi}")\n`);
+    fs.appendFileSync(path.join(dir, 'app/build.gradle.kts'), `\ndependencies {\n    implementation(project(":evil\n## Forged dep"))\n}\n`);
+    const p = detectStack(dir, catalog);
+    const mods = discoverModules(dir, listFiles(dir));
+    assert.ok(mods.some((m) => m.path.includes('Forged module')), 'fixture really has a hostile module path');
+    const out = renderKnowledge(p, mods, catalog, meta);
+    const scan = spawnSync(process.execPath, [path.resolve('skill/scripts/scan.js'), dir, '--format', 'md'], { encoding: 'utf8' });
+    assert.equal(scan.status, 0, scan.stderr);
+    const texts = { ...out, 'scan.md': scan.stdout };
+    assert.ok(Object.values(texts).some((t) => t.includes('Next steps')), 'hostile evidence path is shown somewhere');
+    for (const [name, text] of Object.entries(texts)) {
+      for (const line of text.split('\n')) {
+        assert.ok(!/^\s*(?:#+ )?(?:Next steps|Forged|\[[xy]\])/.test(line), `${name}: forged line ${JSON.stringify(line)}`);
+      }
+      assert.ok(!text.includes('[x](') && !/(^|[^\\])\[y\]/.test(text), `${name}: unescaped link`);
+      assert.ok(!text.includes(bidi), `${name}: bidi control`);
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

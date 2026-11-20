@@ -32,7 +32,10 @@ export function renderReadme(values, templatesDir = DEFAULT_TEMPLATES) {
 }
 
 const pct = (share, units) => (Math.round(share * 100) === 0 && units > 0 ? '<1%' : `${Math.round(share * 100)}%`);
-const cell = (s) => String(s).replace(/\|/g, '\\|');
+// Table cells hold project-derived text (module paths, coordinates): mdText keeps each on one line, pipes escaped.
+const cell = (s) => (s === '-' ? '-' : mdText(s) || '-');
+// Mermaid labels: a module path reduced to a safe character set (no quotes, brackets or line breaks).
+const mermaidLabel = (p) => String(p).replace(/[^A-Za-z0-9_.:\-/]/g, '-').slice(0, 120);
 const mermaidId = (p) => 'm_' + (p.replace(/[^A-Za-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'root');
 
 function renderArchitecture(profile, catalog) {
@@ -45,7 +48,7 @@ function renderArchitecture(profile, catalog) {
       const name = catalog.entry(dim.id, e.id)?.name ?? e.id;
       const share = e.share === null || e.share === undefined ? 'present' : pct(e.share, e.units);
       const ev = e.evidence?.[0];
-      const where = ev ? ` (evidence: ${ev.line === null || ev.line === undefined ? ev.file : `${ev.file}:${ev.line}`})` : '';
+      const where = ev ? ` (evidence: ${mdText(ev.line === null || ev.line === undefined ? ev.file : `${ev.file}:${ev.line}`)})` : '';
       out.push(`- ${oneLine(name)} (${e.id}): ${share}${where}`);
     }
     out.push('');
@@ -82,11 +85,11 @@ function renderArchitecture(profile, catalog) {
   out.push('', '## Security signals', '');
   out.push(`- high: ${count('high')}, medium: ${count('medium')}, low: ${count('low')}`);
   out.push(...findingCountLines(profile.security, { shown: findings.slice(0, 10) }));
-  for (const f of findings.slice(0, 10)) out.push(`- [${f.severity}] ${f.id}: ${f.file}:${f.line} (${f.detail})`);
+  for (const f of findings.slice(0, 10)) out.push(`- [${f.severity}] ${mdText(f.id)}: ${mdText(`${f.file}:${f.line}`)} (${mdText(f.detail)})`);
   const vulnerable = profile.security?.vulnerable ?? [];
   if (vulnerable.length) {
     out.push('', '## Vulnerable dependencies', '');
-    for (const v of vulnerable.slice(0, 10)) out.push(`- [${v.severity}] ${v.id}: ${v.coord}:${v.version} at ${v.file}:${v.line}`);
+    for (const v of vulnerable.slice(0, 10)) out.push(`- [${v.severity}] ${mdText(v.id)}: ${mdText(`${v.coord}:${v.version}`)} at ${mdText(`${v.file}:${v.line}`)}`);
   }
   return out.join('\n') + '\n';
 }
@@ -97,7 +100,7 @@ function renderModuleMap(modules) {
     out.push(`| ${cell(m.path)} | ${cell(m.dir || '.')} | ${cell(m.projectDeps.join(', ') || '-')} |`);
   }
   out.push('', '```mermaid', 'graph TD');
-  for (const m of modules) out.push(`  ${mermaidId(m.path)}["${m.path}"]`);
+  for (const m of modules) out.push(`  ${mermaidId(m.path)}["${mermaidLabel(m.path)}"]`);
   for (const m of modules) for (const to of m.projectDeps) out.push(`  ${mermaidId(m.path)} --> ${mermaidId(to)}`);
   out.push('```');
   return out.join('\n') + '\n';
@@ -110,7 +113,7 @@ function renderDependencies(modules) {
   const out = ['# Dependencies', ''];
   for (const m of modules) {
     const deps = m.build?.dependencies ?? [];
-    out.push(`## ${m.path}`, '');
+    out.push(`## ${mdText(m.path)}`, '');
     const external = deps
       .filter((d) => !d.project)
       .map((d) => [d.configuration, coordinate(d), d.unresolved ? 'unresolved' : d.version || '-'])
@@ -121,7 +124,7 @@ function renderDependencies(modules) {
     } else {
       out.push('No external dependencies.');
     }
-    const projects = deps.filter((d) => d.project).map((d) => `${d.configuration}: project(${d.project})`).sort(byText);
+    const projects = deps.filter((d) => d.project).map((d) => mdText(`${d.configuration}: project(${d.project})`)).sort(byText);
     if (projects.length) {
       out.push('', 'Project dependencies:', '');
       for (const p of projects) out.push(`- ${p}`);

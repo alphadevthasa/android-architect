@@ -69,7 +69,8 @@ before anything is generated. Rules are never dropped silently, and the reason n
   each build file, with the build file and line as evidence. Package rules read the `package` and `import` lines of
   Kotlin and Java sources that git does not ignore. Only the first 1 MB of a larger file is read (package and imports
   sit at the top); such files are counted in `truncatedFiles`, unreadable ones in `skippedFiles`.
-- In a workspace member repo the ADRs live in the hub, so the result carries a note to run fitness.js from the hub.
+- In a workspace member repo the ADRs live in the hub: fitness.js prints a note to run it from the hub, evaluates and
+  generates nothing, writes nothing, and exits 0 (in both modes).
 
 How package rules read sources, and where that is approximate:
 
@@ -101,8 +102,10 @@ written. Generated files are not meant to be edited by hand: change the ADR and 
   imports of each matching module with the packages declared in the forbidden modules (module directories are taken
   from the Gradle settings when the file is generated). The header lists the Konsist calls it relies on; check them
   against the Konsist version in use.
-- `verify-commands.json`: the fixed verification commands for these checks (`./gradlew architectureFitness` and the
-  Konsist test), for the agent loop. It holds no project-derived text and is the same whichever files were generated.
+- `verify-commands.json`: the verification commands of the generated checks, for the agent loop:
+  `./gradlew architectureFitness` when the Gradle script was generated, and the Konsist test command when the Konsist
+  test was generated. With no generated check the list is empty (`{ "schemaVersion": 1, "commands": [] }`); the file is
+  always written so its shape stays stable. It holds fixed strings only, no project-derived text.
 - `README.md`: the rule table and how to apply the files.
 
 ## Safety rules

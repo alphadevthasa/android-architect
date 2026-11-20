@@ -4,7 +4,7 @@
 // Default: prints the rules found (JSON) and writes the generated files into <root>/.ai/fitness through the guarded
 // writer, or into --out <dir> (outside the project). --check: evaluates the rules statically, JSON on stdout.
 // Exit codes: 0 ok (--check: no violation); 1 usage error, invalid ADR or rule, refused write, or violations (--check);
-// 2 not a Gradle project, or no .ai folder (run init first).
+// 2 not a Gradle project, or no .ai folder (run init first). In a workspace member: a note, nothing written, exit 0.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -115,6 +115,14 @@ export function main(argv) {
     }
   } catch {
     // an unreadable manifest only means no workspace note
+  }
+  // A workspace member has no ADRs of its own (they live in the hub): evaluate nothing, write nothing, exit 0.
+  if (memberNotes.length) {
+    const out = opts.check
+      ? { ok: true, rules: 0, violations: [], notes: memberNotes, skippedFiles: 0, truncatedFiles: 0 }
+      : { rules: [], notes: memberNotes, written: [], removed: [] };
+    process.stdout.write(JSON.stringify(out, null, 2) + '\n');
+    return;
   }
   const outPath = opts.out === null ? null : outDir(opts.out, root);
 

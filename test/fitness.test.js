@@ -257,6 +257,12 @@ test('zero rules: no Gradle script and no Konsist test; package rules only: no G
   const pkg = generateFitness(rulesOf([PACKAGE_RULE]).rules, []);
   assert.deepEqual(Object.keys(pkg).sort(), ['ArchitectureFitnessTest.kt', 'README.md', 'verify-commands.json']);
   assert.deepEqual(scanInstructions(pkg['README.md']), []);
+  const commands = (files) => JSON.parse(files['verify-commands.json']);
+  assert.deepEqual(commands(none), { schemaVersion: 1, commands: [] });
+  assert.match(none['README.md'], /empty command list/);
+  assert.deepEqual(commands(pkg).commands, ["./gradlew testDebugUnitTest --tests '*ArchitectureFitnessTest'"]);
+  assert.deepEqual(commands(generateFitness(rulesOf([MODULE_RULE]).rules, [])).commands,
+    ['./gradlew architectureFitness', "./gradlew testDebugUnitTest --tests '*ArchitectureFitnessTest'"]);
 });
 
 test('CLI removes its own generated files that a run no longer produces', () => {
@@ -323,13 +329,21 @@ test('CLI refuses a symlinked .ai with a symlink message', () => {
   }
 });
 
-test('CLI in a workspace member notes that ADRs live in the hub', () => {
-  const dir = project({});
+test('CLI in a workspace member: a note, nothing evaluated or written, exit 0', () => {
+  const dir = project();
   try {
     fs.writeFileSync(path.join(dir, '.ai/manifest.json'), JSON.stringify({ schemaVersion: 1, workspace: { role: 'member', hub: '../hub' } }));
-    const r = cli([dir, '--check']);
-    assert.equal(r.status, 0, r.stderr);
-    assert.ok(JSON.parse(r.stdout).notes.some((n) => /ADRs live in the hub; run fitness from the hub/.test(n)));
+    const check = cli([dir, '--check']);
+    assert.equal(check.status, 0, check.stderr);
+    const c = JSON.parse(check.stdout);
+    assert.ok(c.notes.some((n) => /ADRs live in the hub; run fitness from the hub/.test(n)));
+    assert.deepEqual([c.ok, c.rules, c.violations], [true, 0, []]);
+    const gen = cli([dir]);
+    assert.equal(gen.status, 0, gen.stderr);
+    const g = JSON.parse(gen.stdout);
+    assert.deepEqual([g.rules, g.written, g.removed], [[], [], []]);
+    assert.ok(g.notes.some((n) => /run fitness from the hub/.test(n)));
+    assert.equal(fs.existsSync(path.join(dir, '.ai/fitness')), false, 'no .ai/fitness in a member');
   } finally {
     cleanup(dir);
   }

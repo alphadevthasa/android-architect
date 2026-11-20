@@ -66,4 +66,4 @@ One safe ordering applies: (1) the migration is one-way per file with a single w
 
 ## Rollback
 
-Decide before the first release. Because the custom migration leaves the old file and the old key untouched, a flag or an older build can read the values as of the migration (later changes are lost) until the deletion release. Do not delete the old master key alias or file earlier. A rolled-back build must read the old file, not reset defaults. After the old file and key are deleted there is no reverse migration, so treat the move as one-way.
+Decide before the first release. Because the custom migration leaves the old file and the old key untouched, the flag or a new release that contains the old code can read the values as of the migration (later changes are lost) until the deletion release. Do not delete the old master key alias or file earlier. A rollback release (a new release that contains the old code) must read the old file, not reset defaults. After the old file and key are deleted there is no reverse migration, so treat the move as one-way.
