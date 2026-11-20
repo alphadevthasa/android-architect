@@ -13,7 +13,8 @@ import { loadScoring } from './catalog.js';
 import { buildFeatureMap } from './features.js';
 import { sha256File, hashTree, regularFiles } from './hash.js';
 import { MANIFEST_SCHEMA_VERSION, readManifest, writeManifest } from './manifest.js';
-import { readTemplate, renderReadme, renderKnowledge } from './knowledge.js';
+import { readTemplate, renderReadme, renderKnowledge, renderComponentsBlock, applyComponentsBlock } from './knowledge.js';
+import { detectReuse } from './reuse.js';
 import { applyPointers } from './pointers.js';
 import { redact, redactJson } from './redact.js';
 import { scanAiDir } from './injection.js';
@@ -24,11 +25,12 @@ const WORKFLOWS = ['01-read-context.md', '02-plan.md', '03-implement.md', '04-re
 const USER_TEMPLATES = [
   'knowledge/architecture-target.md',
   'knowledge/conventions.md',
-  'knowledge/components.md',
   'knowledge/adr/0000-template.md',
   'migration/roadmap.md',
   'catalog-overrides/README.md',
 ];
+// Region-managed: user text everywhere except the block between the markers, which every run regenerates.
+const COMPONENTS = 'knowledge/components.md';
 const USER_OPTIONAL = ['recommendations.json', 'repos.json'];
 // Paths whose changes do not make .ai stale: .ai itself and the pointer files init writes.
 const OWN_PATHS = ['.ai', 'AGENTS.md', 'CLAUDE.md', 'CLAUDE.local.md'];
@@ -150,7 +152,7 @@ export function preflight(root, { local = false, catalogDir = path.join(DEFAULT_
  * files written at the top of .ai (always rewritten, through the same guarded writer).
  * `prepared` is { loaded, profile } from a caller that already ran preflight (same options) and detectStack on its
  * catalog (refresh), so neither runs twice; the profile is recomputed when the pointers create a file.
- * Returns { written, kept, conflicts, pointers, excluded, suspicious } with paths relative to root, sorted (suspicious:
+ * Returns { written, kept, conflicts, notes, pointers, excluded, suspicious } with paths relative to root, sorted (suspicious:
  * scanAiDir findings once everything is written).
  */
 export function writeAiDir(
@@ -218,6 +220,15 @@ export function writeAiDir(
     featureMap = buildFeatureMap(root, { profile, scoring: loadScoring(scoringDir), churn: churnByCommit(root) });
   } catch (e) {
     featureMap = { error: String(e?.message ?? e) };
+  }
+  // Advisory like the feature map: a failure becomes a line in components.md, never an aborted run.
+  let reuse = null;
+  if (!isMember) {
+    try {
+      reuse = detectReuse(root, { files, modules });
+    } catch (e) {
+      reuse = { error: String(e?.message ?? e) };
+    }
   }
   const date = now.toISOString().slice(0, 10);
   const mode = local ? 'local' : 'committed';
@@ -289,6 +300,18 @@ export function writeAiDir(
       if (!written.has(`.ai/${rel}`) && fs.existsSync(path.join(aiDir, rel))) kept.add(`.ai/${rel}`);
     }
   }
+  // components.md: created from the template when missing; otherwise only the marked block is rewritten (redacted like
+  // every generated text; the user's own text is never redacted or changed).
+  const notes = [];
+  if (!isMember) {
+    const abs = path.join(aiDir, COMPONENTS);
+    const exists = fs.existsSync(abs);
+    const existing = exists ? fs.readFileSync(abs, 'utf8') : readTemplate(COMPONENTS, templatesDir);
+    const { text, note } = applyComponentsBlock(existing, redact(renderComponentsBlock(reuse)).text);
+    if (note) notes.push(note);
+    if (!exists || text !== existing) putAi(COMPONENTS, text);
+    else kept.add(`.ai/${COMPONENTS}`);
+  }
   const adrDir = path.join(aiDir, 'knowledge', 'adr');
   if (!isMember && fs.existsSync(adrDir)) {
     for (const f of regularFiles(adrDir)) if (!written.has(`.ai/knowledge/adr/${f}`)) kept.add(`.ai/knowledge/adr/${f}`);
@@ -300,7 +323,7 @@ export function writeAiDir(
   putAi('index/index.json', renderIndex(stableStamp(path.join(aiDir, 'index', 'index.json'), index.generatedAt, renderIndex)));
 
   const extra = typeof extraGenerated === 'function'
-    ? extraGenerated({ written: [...written].sort(byText), kept: [...kept].sort(byText), conflicts: [...conflicts].sort(byText), commit })
+    ? extraGenerated({ written: [...written].sort(byText), kept: [...kept].sort(byText), conflicts: [...conflicts].sort(byText), commit, notes: [...notes] })
     : extraGenerated ?? {};
   for (const [rel, text] of Object.entries(extra)) putRedacted(rel, text);
 
@@ -338,6 +361,7 @@ export function writeAiDir(
     written: [...written].sort(byText),
     kept: [...kept].sort(byText),
     conflicts: conflicts.sort(byText),
+    notes,
     pointers,
     excluded,
     suspicious: scanAiDir(root),

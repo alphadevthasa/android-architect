@@ -59,7 +59,8 @@ Vendored scripts live in `.ai/tools/` and run with plain `node` (for example `no
 | `.ai/README.md`, `.ai/knowledge/*` generated files (profile, maps), `.ai/candidates.json`, `.ai/index/`, `.ai/refresh-report.md` | tool | Overwritten (header says "Do not edit"). |
 | `.ai/tools/` (vendored scripts and catalog), `.ai/manifest.json` | tool | Wiped and rewritten. |
 | `.ai/workflows/*.md` | tool, managed | Updated unless you edited them; an edited file is kept and the new version is written next to it as `.new`, listed under conflicts. |
-| `.ai/knowledge/architecture-target.md`, `conventions.md`, `components.md`, ADRs in `.ai/knowledge/adr/`, `.ai/migration/roadmap.md`, `.ai/recommendations.json`, `.ai/repos.json` | you | Created once, never overwritten, listed as kept. |
+| `.ai/knowledge/architecture-target.md`, `conventions.md`, ADRs in `.ai/knowledge/adr/`, `.ai/migration/roadmap.md`, `.ai/recommendations.json`, `.ai/repos.json` | you | Created once, never overwritten, listed as kept. |
+| `.ai/knowledge/components.md` | shared | Created once from a template. Your text is never touched; only the block between the `android-architect:components` markers is rewritten (appended when the markers are missing). A damaged marker pair is reported as a note and never deletes text. |
 | `AGENTS.md`, `CLAUDE.md` | you | Only appended to with `--append-pointers`. |
 
 Recommendations you reject can be recorded as ADRs with `status: rejected`; they stay rejected until a `reopenIf` condition holds.

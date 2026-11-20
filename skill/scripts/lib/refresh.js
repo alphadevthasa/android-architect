@@ -266,6 +266,7 @@ export function refreshAiDir(root, { now = new Date(), catalogDir, skillDir = DE
       for (const [file, lines] of byFile) {
         notes.push(`suspicious instruction-like text in ${file} (lines ${[...new Set(lines)].join(', ')}): review before trusting it`);
       }
+      notes.push(...files.notes);
       report.files = { written: withOwn(files.written), kept: files.kept, conflicts: files.conflicts };
       const meta = { date: now.toISOString().slice(0, 10), commit: files.commit, catalogVersion: newCatalog.catalogVersion };
       return { 'refresh-report.md': renderReport(report, meta) };
