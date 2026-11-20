@@ -28,6 +28,8 @@ const USER_TEMPLATES = [
   'knowledge/adr/0000-template.md',
   'migration/roadmap.md',
   'catalog-overrides/README.md',
+  // Run-loop settings (agent command, budgets, verification argv): created once, then yours to edit.
+  'run.config.json',
 ];
 // Region-managed: user text everywhere except the block between the markers, which every run regenerates.
 const COMPONENTS = 'knowledge/components.md';
@@ -156,6 +158,29 @@ const SAFE_GENERATED_REL = /^[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*$/;
  * Returns { written, removed }: paths relative to root (".ai/..."), sorted.
  */
 export function writeGenerated(root, files, { remove = [] } = {}) {
+  return guardedWrite(root, files, { remove, redactText: true, atomic: false });
+}
+
+// The only files writeAiFiles may touch: the migration plan and roadmap (user-owned roadmap.md is replaced by callers only
+// under their own rules; roadmap.md.new is the tool's proposal next to it).
+const AI_FILE_ALLOW = ['migration/plan.json', 'migration/roadmap.md', 'migration/roadmap.md.new'];
+
+/**
+ * Write plan files into an existing .ai folder with the same guard as writeGenerated (symlink, containment and
+ * check-every-target-before-the-first-write rules), limited to migration/plan.json, migration/roadmap.md and
+ * migration/roadmap.md.new, each replaced atomically (temp file in the same folder, then rename). `redactText` (default
+ * true) runs every text through redact(); callers that edit a user-owned file in place (setStatus) pass false so the
+ * user's other bytes stay exactly as they were. Returns { written } (paths relative to root, sorted).
+ */
+export function writeAiFiles(root, files, { redactText = true } = {}) {
+  for (const rel of Object.keys(files)) {
+    if (!AI_FILE_ALLOW.includes(rel)) throw new Error('refusing to write a file outside the migration plan files');
+  }
+  const { written } = guardedWrite(root, files, { remove: [], redactText, atomic: true });
+  return { written };
+}
+
+function guardedWrite(root, files, { remove, redactText, atomic }) {
   const realRoot = fs.realpathSync(root);
   const guard = makeGuard(root, realRoot);
   const aiDir = path.join(root, '.ai');
@@ -200,7 +225,17 @@ export function writeGenerated(root, files, { remove = [] } = {}) {
     const abs = guard(`.ai/${rel}`);
     fs.mkdirSync(path.dirname(abs), { recursive: true });
     guard(`.ai/${rel}`);
-    fs.writeFileSync(abs, redact(String(text)).text);
+    const out = redactText ? redact(String(text)).text : String(text);
+    if (atomic) {
+      const tmp = `${abs}.tmp-${process.pid}`;
+      try {
+        fs.writeFileSync(tmp, out, { flag: 'wx' });
+        fs.renameSync(tmp, abs);
+      } catch (err) {
+        fs.rmSync(tmp, { force: true });
+        throw err;
+      }
+    } else fs.writeFileSync(abs, out);
     written.push(`.ai/${rel}`);
   }
   const removed = [];

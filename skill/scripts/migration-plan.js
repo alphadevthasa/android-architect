@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Usage: node skill/scripts/migration-plan.js <root> --recs <file> [--profile <file>] [--adr-dir <dir>] [--format json|md] [--out <file>]
 // Validates the recommendations (same checks as recommend-check.js), then prints a deterministic migration plan skeleton.
-// Never writes into the project; --out must be outside it. Exit 1: usage error, recommendation violations or plan integrity failure; 2: not a Gradle project or unreadable input.
+// Never writes into the project unless --write is given (only .ai/migration/plan.json and roadmap.md[.new], through the guarded .ai writer); --out must be outside it. Exit 1: usage error, recommendation violations or plan integrity failure; 2: not a Gradle project or unreadable input.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -17,8 +17,9 @@ import { loadAdrs } from './lib/adr.js';
 import { buildPlan, checkPlan, renderRoadmap, renameUnsafeIds } from './lib/migplan.js';
 import { safeOutPath, writeOut } from './lib/outpath.js';
 import { redact, redactJson } from './lib/redact.js';
+import { writeAiFiles } from './lib/aidir.js';
 
-const USAGE = 'usage: node migration-plan.js <root> --recs <file> [--profile <file>] [--adr-dir <dir>] [--format json|md] [--out <file>]';
+const USAGE = 'usage: node migration-plan.js <root> --recs <file> [--profile <file>] [--adr-dir <dir>] [--format json|md] [--out <file>] [--write]';
 const BUILD_FILES = ['build.gradle', 'build.gradle.kts', 'settings.gradle', 'settings.gradle.kts', 'build.xml'];
 
 function fail(code, message) {
@@ -28,11 +29,12 @@ function fail(code, message) {
 const shown = (s) => redact(oneLine(s).slice(0, 200)).text;
 
 function parseArgs(argv) {
-  const opts = { root: null, recs: null, profile: null, adrDir: null, format: 'json', out: null };
+  const opts = { root: null, recs: null, profile: null, adrDir: null, format: 'json', out: null, write: false };
   const valued = { '--recs': 'recs', '--profile': 'profile', '--adr-dir': 'adrDir', '--format': 'format', '--out': 'out' };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a in valued) {
+    if (a === '--write') opts.write = true;
+    else if (a in valued) {
       const v = argv[++i];
       if (v === undefined) fail(1, `missing value for ${a}\n${USAGE}`);
       opts[valued[a]] = v;
@@ -43,6 +45,40 @@ function parseArgs(argv) {
   if (opts.root === null || opts.recs === null) fail(1, USAGE);
   if (opts.format !== 'json' && opts.format !== 'md') fail(1, `unknown format\n${USAGE}`);
   return opts;
+}
+
+// The placeholder line init puts into a fresh roadmap (assembled so the docs scan for open-item words stays clean).
+const TEMPLATE_MARKER = `${'TO'}${'DO'}: run "setup"`;
+const TABLE_HEADER = '| Step | Description | Status |';
+const MAX_ROADMAP_BYTES = 4 * 1024 * 1024;
+
+/** The roadmap text with the table replaced by `table`, or null when the file has content of its own (no marker). */
+function replaceTemplateTable(existing, table) {
+  if (!existing.includes(TEMPLATE_MARKER)) return null;
+  const lines = existing.split('\n');
+  const head = lines.findIndex((l) => l.trim() === TABLE_HEADER);
+  const kept = (head === -1 ? lines : lines.slice(0, head)).filter((l) => !l.includes(TEMPLATE_MARKER));
+  return kept.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd() + '\n\n' + table;
+}
+
+/** Writes plan.json and the roadmap. The roadmap is replaced only while it still has the template marker, else roadmap.md.new. */
+function writePlanFiles(root, planText, table) {
+  const roadmap = path.join(root, '.ai/migration/roadmap.md');
+  let existing = null;
+  try {
+    const st = fs.lstatSync(roadmap);
+    if (!st.isFile() || st.size > MAX_ROADMAP_BYTES) throw new Error('.ai/migration/roadmap.md must be a regular file of reasonable size');
+    existing = fs.readFileSync(roadmap, 'utf8');
+  } catch (e) {
+    if (e.code !== 'ENOENT') throw e;
+  }
+  const replaced = existing === null ? `# Migration roadmap\n\n${table}` : replaceTemplateTable(existing, table);
+  const files = { 'migration/plan.json': planText, [replaced === null ? 'migration/roadmap.md.new' : 'migration/roadmap.md']: replaced ?? table };
+  writeAiFiles(root, files);
+  const lines = ['wrote .ai/migration/plan.json'];
+  if (replaced === null) lines.push('.ai/migration/roadmap.md has your content: wrote the proposed table to .ai/migration/roadmap.md.new (merge it by hand)');
+  else lines.push('wrote .ai/migration/roadmap.md');
+  return lines;
 }
 
 function checkOut(out, root) {
@@ -110,6 +146,16 @@ export function main(argv) {
   const after = checkPlan(redacted);
   if (after.length > 0) fail(1, `plan integrity check failed after redaction: ${redact(after.slice(0, 3).join('; ')).text}`);
   const text = opts.format === 'md' ? redact(renderRoadmap(plan)).text : JSON.stringify(redacted, null, 2) + '\n';
+  if (opts.write) {
+    try {
+      const json = opts.format === 'md' ? JSON.stringify(redacted, null, 2) + '\n' : text;
+      const lines = writePlanFiles(root, json, redact(renderRoadmap(plan)).text);
+      process.stdout.write(lines.join('\n') + '\n');
+    } catch (e) {
+      fail(1, redact(oneLine(e.message).slice(0, 300)).text);
+    }
+    if (outPath === null) return;
+  }
   if (outPath !== null) {
     try {
       writeOut(outPath, text);

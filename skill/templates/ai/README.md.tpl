@@ -22,7 +22,7 @@ Workflows live in `.ai/workflows/` (01-read-context, 02-plan, 03-implement, 04-r
 
 ## Refresh
 
-Run `refresh` in your agent, or `node .ai/tools/scripts/ai-status.js` to check whether the knowledge is stale. Refresh overwrites generated files only. Files you own (`architecture-target.md`, `conventions.md`, ADRs, `migration/roadmap.md`) are never overwritten. `components.md` is yours except the block between its `android-architect:components` markers, which refresh regenerates.
+Run `refresh` in your agent, or `node .ai/tools/scripts/ai-status.js` to check whether the knowledge is stale. Refresh overwrites generated files only. Files you own (`architecture-target.md`, `conventions.md`, ADRs, `migration/roadmap.md`, `run.config.json`) are never overwritten. `components.md` is yours except the block between its `android-architect:components` markers, which refresh regenerates.
 
 ## Review and trust
 
