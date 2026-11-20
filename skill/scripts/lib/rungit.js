@@ -158,7 +158,11 @@ function scanLocalConfig(root, gitDir, common) {
   const cached = configCache.get(common);
   if (cached && cached.sig === sig) return cached.result;
   const result = { problem: null, filters: [] };
+  // `git config --worktree` fails (exit 128) in a repo with linked worktrees unless extensions.worktreeConfig is set, and
+  // git ignores config.worktree unless it is set: scan that scope only when the local config enables it.
+  let worktreeConfig = false;
   for (const scope of ['--local', '--worktree']) {
+    if (scope === '--worktree' && !worktreeConfig) continue;
     let out;
     try {
       out = rawGit(root, ['config', scope, '--list', '-z', '--no-includes']);
@@ -170,6 +174,8 @@ function scanLocalConfig(root, gitDir, common) {
       if (!entry) continue;
       const nl = entry.indexOf('\n');
       const key = nl < 0 ? entry : entry.slice(0, nl);
+      const value = nl < 0 ? '' : entry.slice(nl + 1);
+      if (scope === '--local' && key.toLowerCase() === 'extensions.worktreeconfig' && ['true', 'yes', 'on', '1', ''].includes(value.toLowerCase())) worktreeConfig = true;
       const { section, sub } = splitKey(key);
       if (section === 'filter' && /^[A-Za-z0-9._-]{1,100}$/.test(sub) && !result.filters.includes(sub)) result.filters.push(sub);
       if (result.problem === null && dangerousKey(key)) {
@@ -187,17 +193,23 @@ function scanLocalConfig(root, gitDir, common) {
   return result;
 }
 
+const dirsCache = new Map();
+
 /** Extra -c arguments neutralizing every repo-local filter name (defense in depth next to the refusal). */
 function filterOverrides(root) {
-  let common;
-  let gitDir;
-  try {
-    common = path.resolve(root, rawGit(root, ['rev-parse', '--git-common-dir']).replace(/\n$/, ''));
-    gitDir = path.resolve(root, rawGit(root, ['rev-parse', '--git-dir']).replace(/\n$/, ''));
-  } catch {
-    return [];
+  let dirs = dirsCache.get(root);
+  if (!dirs) {
+    try {
+      dirs = {
+        common: path.resolve(root, rawGit(root, ['rev-parse', '--git-common-dir']).replace(/\n$/, '')),
+        gitDir: path.resolve(root, rawGit(root, ['rev-parse', '--git-dir']).replace(/\n$/, '')),
+      };
+    } catch {
+      return [];
+    }
+    dirsCache.set(root, dirs);
   }
-  const { filters } = scanLocalConfig(root, gitDir, common);
+  const { filters } = scanLocalConfig(root, dirs.gitDir, dirs.common);
   return filters.flatMap((n) => ['-c', `filter.${n}.clean=`, '-c', `filter.${n}.smudge=`, '-c', `filter.${n}.process=`, '-c', `filter.${n}.required=false`]);
 }
 
@@ -224,14 +236,18 @@ function tryGit(root, args) {
 // ---------- repository facts ----------
 /** Converts a git failure into a plain refusal. */
 function plainErrors(fn) {
+  const convert = (err) => {
+    if (err instanceof GitFailure) throw new RunRefusal(err.message);
+    if (err instanceof RunRefusal) throw err;
+    if (err && typeof err.code === 'string' && err.syscall) throw new RunRefusal(`a file operation failed (${err.code})`);
+    throw err;
+  };
   return (...a) => {
     try {
-      return fn(...a);
+      const r = fn(...a);
+      return r && typeof r.then === 'function' ? r.catch(convert) : r;
     } catch (err) {
-      if (err instanceof GitFailure) throw new RunRefusal(err.message);
-      if (err instanceof RunRefusal) throw err;
-      if (err && typeof err.code === 'string' && err.syscall) throw new RunRefusal(`a file operation failed (${err.code})`);
-      throw err;
+      return convert(err);
     }
   };
 }
@@ -268,9 +284,10 @@ function repoInfo(root) {
     throw new RunRefusal('the project folder is not the working tree git reports (core.worktree or a redirected repository)');
   }
   if (prefix.includes('\n') || prefix.includes('\r')) throw new RunRefusal('the project path contains a newline');
+  dirsCache.set(realRoot, { common, gitDir });
   const { problem } = scanLocalConfig(realRoot, gitDir, common);
   if (problem) throw new RunRefusal(problem);
-  return { top: realTop, prefix, common, root: realRoot };
+  return { top: realTop, prefix, common, gitDir, root: realRoot };
 }
 
 const isRuns = (p, prefix) => {
@@ -457,7 +474,7 @@ function resolveTarget(base, target) {
   return cur;
 }
 
-function symlinkEscapes(root, top, rec) {
+function symlinkEscapes(root, top, rec, gitDirs) {
   const target = runGit(root, ['cat-file', 'blob', rec.sha]);
   if (target.includes('\0')) return true;
   let base;
@@ -467,11 +484,13 @@ function symlinkEscapes(root, top, rec) {
     return true;
   }
   const real = resolveTarget(base, target);
-  return real === null || !(real === top || real.startsWith(top + path.sep));
+  if (real === null || !(real === top || real.startsWith(top + path.sep))) return true;
+  // A link into the git folder would expose or let others rewrite config and hooks.
+  return [path.join(top, '.git'), ...gitDirs].some((g) => real === g || real.startsWith(g + path.sep));
 }
 
 /** Returns a plain refusal message for the first unsafe staged record, or null. */
-function unsafeStaged(root, top, prefix, records) {
+function unsafeStaged(root, top, prefix, records, gitDirs) {
   const blobs = [];
   for (const r of records) {
     const shown = plainText(r.path, 120);
@@ -482,7 +501,7 @@ function unsafeStaged(root, top, prefix, records) {
     if (r.status === 'D') continue;
     if (r.mode === '160000') return `a staged path is a submodule: ${shown}`;
     if (r.mode === '120000') {
-      if (symlinkEscapes(root, top, r)) return `a staged symlink points outside the repository: ${shown}`;
+      if (symlinkEscapes(root, top, r, gitDirs)) return `a staged symlink points outside the repository: ${shown}`;
     } else blobs.push(r);
   }
   if (blobs.length > 0) {
@@ -524,7 +543,7 @@ export const commitStep = plainErrors((root, step, title) => {
     runGit(root, ['add', '-A', '--', '.', ...(ignored ? [] : [`:(exclude,icase)${RUNS_DIR}`])]);
     records = stagedRecords(root);
     if (records.length === 0) return null;
-    const problem = unsafeStaged(root, top, prefix, records);
+    const problem = unsafeStaged(root, top, prefix, records, [info.common, info.gitDir]);
     if (problem) throw new RunRefusal(problem);
     if (tryGit(root, ['-c', 'user.useConfigOnly=true', 'var', 'GIT_COMMITTER_IDENT']) === null || tryGit(root, ['-c', 'user.useConfigOnly=true', 'var', 'GIT_AUTHOR_IDENT']) === null) {
       throw new RunRefusal('no git identity is configured: set user.name and user.email (git config user.name ...); the runner never invents one');

@@ -17,19 +17,24 @@ const PK = '(?:(?:RSA|EC|OPENSSH|DSA|ENCRYPTED|PGP) )?PRIVATE KEY(?: BLOCK)?';
 // An unterminated BEGIN block runs to the end of the text (fail closed).
 const PRIVATE_KEY_RE = new RegExp(`-----BEGIN ${PK}-----[\\s\\S]*?(?:-----END ${PK}-----|(?![\\s\\S]))`, 'g');
 
+// A token after a scheme word: at least 8 characters with a digit, or it is long and mixes upper and lower case letters.
+const looksLikeToken = (t) => (t.length >= 8 && /\d/.test(t)) || (t.length >= 24 && /[a-z]/.test(t) && /[A-Z]/.test(t));
+
 const TOKEN_RULES = [
   { kind: 'aws-access-key', re: /AKIA[0-9A-Z]{16}/g },
   { kind: 'google-api-key', re: /AIza[0-9A-Za-z_-]{35}/g },
   { kind: 'github-token', re: /gh[pousr]_[A-Za-z0-9]{36,}/g },
   { kind: 'slack-token', re: /xox[abprs]-[A-Za-z0-9-]{10,}/g },
   { kind: 'jwt', re: /eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g },
-  { kind: 'authorization-header', re: /\bauthorization\s*[:=]\s*(?:(?:bearer|basic|token)\s+)?(?=[A-Za-z._~+\/=-]*\d)[A-Za-z0-9._~+/=-]{8,}/gi },
-  { kind: 'bearer-token', re: /\bbearer\s+(?=[A-Za-z._~+\/=-]*\d)[A-Za-z0-9._~+/=-]{8,}/gi },
+  // Header-shaped credentials. Each regex matches one scheme word, a short whitespace run and ONE plain run of token
+  // characters (no lookahead, no nesting: linear), and `decide` then keeps prose such as "bearer refresh" untouched.
+  { kind: 'authorization-header', re: /\bauthorization[ \t]{0,16}[:=][ \t]{0,16}(?:(bearer|basic|token)[ \t]{1,16})?([A-Za-z0-9._~+/=-]+)/gi, decide: (scheme, token) => (scheme ? looksLikeToken(token) : token.length >= 20 && /\d/.test(token)) },
+  { kind: 'bearer-token', re: /\b(?:bearer|basic|token)[ \t]{1,16}([A-Za-z0-9._~+/=-]+)/gi, decide: (token) => looksLikeToken(token) },
 ];
 
 export const SECRET_RULES = Object.freeze([
   Object.freeze({ kind: 'private-key', re: new RegExp(PRIVATE_KEY_RE.source) }),
-  ...TOKEN_RULES.map(({ kind, re }) => Object.freeze({ kind, re: new RegExp(re.source) })),
+  ...TOKEN_RULES.map(({ kind, re }) => Object.freeze({ kind, re: new RegExp(re.source, re.flags.replace('g', '')) })),
   Object.freeze({ kind: 'signing-password', re: /\b(?:storePassword|keyPassword)\b/ }),
   Object.freeze({ kind: 'credential', re: KEY_NAME }),
 ]);
@@ -58,7 +63,13 @@ function redactLine(line, lineNo, hits) {
   const hit = (kind) => hits.push({ kind, line: lineNo });
   const cred = (value) => value.length >= MIN_VALUE && !isMarked(value);
 
-  for (const { kind, re } of TOKEN_RULES) out = out.replace(re, () => (hit(kind), mark(kind)));
+  for (const { kind, re, decide } of TOKEN_RULES) {
+    out = out.replace(re, (m, ...groups) => {
+      if (decide && !decide(...groups.slice(0, decide.length))) return m;
+      hit(kind);
+      return mark(kind);
+    });
+  }
 
   out = out.replace(SIGNING_QUOTED, (m, pre, raw, q, str) => {
     const v = valueOf(raw, str);

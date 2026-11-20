@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { runVerification, killLiveGroups } from '../skill/scripts/lib/runverify.js';
+import { runVerification, killLiveGroups, Tail, cleanTail } from '../skill/scripts/lib/runverify.js';
 
 const tmps = [];
 const project = () => {
@@ -222,4 +222,47 @@ test('a Bearer token and an Authorization header printed by a command are redact
   const s = script(root, 'b.js', 'console.log("Authorization: Bearer abcdef1234567890abcdef");console.log("curl -H \\"authorization: token ghx1234567890abcd\\"");process.exit(1)');
   const r = await runVerification(root, cfg(node(s)), { timeoutMs: 20000 });
   assert.doesNotMatch(r.results[0].tail, /abcdef1234567890abcdef|ghx1234567890abcd/);
+});
+
+function fakeKeys() {
+  const rsa = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 }).privateKey;
+  const ec = crypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' }).privateKey;
+  const wrap = (label, b64) => `-----BEGIN ${label}-----\n${b64.match(/.{1,70}/g).join('\n')}\n-----END ${label}-----\n`;
+  return {
+    pkcs1: rsa.export({ type: 'pkcs1', format: 'pem' }),
+    pkcs8: rsa.export({ type: 'pkcs8', format: 'pem' }),
+    ec: ec.export({ type: 'sec1', format: 'pem' }),
+    encrypted: rsa.export({ type: 'pkcs1', format: 'pem', cipher: 'aes-256-cbc', passphrase: 'pw' }),
+    openssh: wrap('OPENSSH PRIVATE KEY', crypto.randomBytes(1200).toString('base64')),
+    shortLast: wrap('PRIVATE KEY', crypto.randomBytes(1000).toString('base64').slice(0, 1020 - 4 * 3) + 'Zg=='),
+  };
+}
+
+test('a tail window cut at EVERY byte offset of the first 2 KB of a key never leaks the key body', () => {
+  const cap = 20 * 1024;
+  for (const [name, key] of Object.entries(fakeKeys())) {
+    const bodyLines = key.split('\n').filter((l) => /^[A-Za-z0-9+/=]{16,}$/.test(l));
+    assert.ok(bodyLines.length >= 2, name);
+    const filler = Buffer.from('build log line 1\nbuild log line 2\n');
+    const allAfter = Buffer.from(Array.from({ length: 3000 }, (_, i) => `ok line ${i}\n`).join(''));
+    for (let k = 0; k <= 2048; k++) {
+      const keyBuf = Buffer.from(key);
+      const after = allAfter.subarray(0, Math.max(0, cap + k - keyBuf.length));
+      const t = new Tail();
+      t.push(Buffer.concat([filler, keyBuf, after]));
+      const out = t.text(); // redact() can only remove more
+      for (const l of bodyLines) assert.ok(!out.includes(l.slice(0, 12)), `${name} offset ${k} leaked a body line`);
+    }
+  }
+});
+
+test('output without a key is untouched, including leading word-like lines', () => {
+  const t = new Tail();
+  const text = Array.from({ length: 400 }, (_, i) => (i % 3 === 0 ? 'BUILD' : `Task :app:compile${i} FAILED ok`)).join('\n') + '\n';
+  t.push(Buffer.from(text));
+  assert.equal(cleanTail(t.text()), text);
+  const big = new Tail();
+  big.push(Buffer.from(text.repeat(5)));
+  const out = cleanTail(big.text());
+  assert.ok(out.length > 15 * 1024);
 });

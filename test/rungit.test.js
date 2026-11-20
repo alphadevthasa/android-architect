@@ -618,3 +618,68 @@ test('addToExclude refuses a symlinked info/exclude and newline patterns', async
   fs.rmSync(path.join(d, '.git/info/exclude'));
   assert.throws(() => addToExclude(d, ['/a\n!b']), /one line/);
 });
+
+// ---------- round 2 ----------
+test('a repo with a linked worktree can run in both checkouts', () => {
+  const d = repo('feature');
+  const wt = path.join(mk('aa-wt-'), 'wt');
+  g(d, 'worktree', 'add', '-q', '-b', 'other', wt);
+  fs.mkdirSync(path.join(wt, '.ai'));
+  for (const [dir, name] of [[d, 'one'], [wt, 'two']]) {
+    const r = start(dir, { now: new Date(NOW.getTime() + (name === 'two' ? 7000 : 0)) });
+    assert.match(r.branch, /^android-architect\/run-/);
+    assert.equal(hasChanges(dir), false);
+    write(dir, `${name}.txt`);
+    assert.equal(hasChanges(dir), true);
+    assert.ok(commitStep(dir, { id: name, title: 't' }));
+  }
+});
+
+test('a hostile config.worktree is refused once extensions.worktreeConfig is on, and ignored while it is off', () => {
+  const d = repo('feature');
+  write(d, '.git/config.worktree', '[filter "x"]\n\tclean = /bin/true\n');
+  assert.equal(start(d).baseBranch, 'feature'); // git ignores the file, so does the scan
+  const e = repo('feature');
+  g(e, 'config', 'extensions.worktreeConfig', 'true');
+  write(e, '.git/config.worktree', '[filter "x"]\n\tclean = /bin/true\n');
+  refuses(() => start(e), /filter\.x\.clean/);
+  const f = repo('feature');
+  g(f, 'config', 'extensions.worktreeConfig', 'true');
+  write(f, '.git/config.worktree', '[user]\n\tname = w\n');
+  assert.equal(start(f).baseBranch, 'feature');
+});
+
+test('a staged symlink into the git folder is refused', () => {
+  const d = repo('feature');
+  start(d);
+  fs.symlinkSync('.git/hooks', path.join(d, 'h1'));
+  refuses(() => commitStep(d, { id: 's1', title: 't' }), /symlink/);
+  fs.rmSync(path.join(d, 'h1'));
+  fs.symlinkSync('./.git', path.join(d, 'h2'));
+  refuses(() => commitStep(d, { id: 's2', title: 't' }), /symlink/);
+});
+
+test('a git failure inside confirmFirstUse becomes a RunRefusal', async () => {
+  const d = repo('feature');
+  cfgFile(d, '{"schemaVersion":1}');
+  const config = loadRunConfig(d);
+  fs.writeFileSync(path.join(d, '.git/index'), 'garbage');
+  await assert.rejects(() => confirmFirstUse(d, { confirm: () => true, say: () => {}, config, agentArgv: ['claude'] }), (e) => e instanceof RunRefusal && !/\n\s+at /.test(e.message));
+});
+
+test('runGit does not spawn extra git processes per call (rev-parse results are cached)', () => {
+  const bin = mk('aa-shim-');
+  const log = path.join(bin, 'calls.log');
+  const real = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
+  fs.writeFileSync(path.join(bin, 'git'), `#!/bin/sh\nprintf '%s\n' "$*" >> '${log}'\nexec '${real}' "$@"\n`, { mode: 0o755 });
+  const d = repo('feature');
+  const oldPath = process.env.PATH;
+  runGit(d, ['status', '--porcelain=v1']);
+  process.env.PATH = `${bin}${path.delimiter}${oldPath}`;
+  try {
+    for (let i = 0; i < 5; i++) runGit(d, ['status', '--porcelain=v1']);
+  } finally {
+    process.env.PATH = oldPath;
+  }
+  assert.equal(fs.readFileSync(log, 'utf8').split('\n').filter(Boolean).length, 5);
+});

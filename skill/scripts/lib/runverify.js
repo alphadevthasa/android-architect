@@ -22,21 +22,32 @@ function childEnv() {
   return env;
 }
 
-// A tail that starts inside a PEM block has lost its BEGIN line, so redact() cannot see the block: drop the leading
-// base64-looking lines (mixed case and digits, as key bodies are) and the END line after them; a run of 64 or more
-// such lines is dropped even without an END line. Plain repeated-character output is not mistaken for a key body.
-const B64_LINE = /^[A-Za-z0-9+/]{40,}={0,2}$/;
-const PEM_END = /^-----END [A-Z ]{3,40}-----$/;
-const looksBase64 = (l) => B64_LINE.test(l) && /[A-Z]/.test(l) && /[a-z]/.test(l) && /[0-9]/.test(l);
+// A tail that starts inside a PEM block has lost its BEGIN line, so redact() cannot see the block. After the cut line
+// is dropped, the leading run of base64-looking lines (4+ characters of A-Za-z0-9+/=, plus PEM header lines and blank
+// lines) is dropped together with the END line that follows it. A run of 64 or more base64-looking lines is dropped
+// even without an END line (the key is still being printed); only mixed-case, digit-bearing lines of 40+ characters
+// count towards the 64, so repeated-character output is kept. A tail that does not start like that is untouched.
+const B64_LINE = /^[A-Za-z0-9+/=]{4,}$/;
+const PEM_HEADER = /^(?:Proc-Type|DEK-Info|Comment|Version|Charset|Hash)\b[^\n]*$/;
+const PEM_END = /^-----END [A-Z0-9 ]{3,40}-----$/;
 
 function dropOpenBlock(text) {
   const lines = text.split('\n');
   let i = 0;
-  while (i < lines.length && looksBase64(lines[i].trim())) i++;
+  let body = 0;
+  for (; i < lines.length; i++) {
+    const l = lines[i].trim();
+    if (B64_LINE.test(l)) {
+      if (l.length >= 40 && /[A-Z]/.test(l) && /[a-z]/.test(l) && /\d/.test(l)) body++; // key-like, not repeated characters
+    }
+    else if (l !== '' && !PEM_HEADER.test(l)) break;
+  }
   if (i < lines.length && PEM_END.test(lines[i].trim())) i++;
-  else if (i < 64) i = 0;
+  else if (body < 64) i = 0;
   return lines.slice(i).join('\n');
 }
+
+export { Tail, cleanTail }; // test seam
 
 /** Keeps the last TAIL_BYTES bytes of everything fed to it; memory never exceeds TAIL_BYTES plus one chunk (<= 64 KB). */
 class Tail {

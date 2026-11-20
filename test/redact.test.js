@@ -177,17 +177,52 @@ test('an Android string resource with a credential name is redacted; labels and 
   assert.deepEqual(r.hits, [{ kind: 'credential', line: 1 }]);
 });
 
-test('Authorization and Bearer headers are redacted, linear time', () => {
-  const t = 'abcdef1234567890ABCDEF';
-  for (const line of [`Authorization: Bearer ${t}`, `authorization=${t}`, `curl -H "Authorization: Basic ${t}=="`, `Bearer ${t}`, `bearer\t${t}`]) {
+test('Authorization and Bearer credentials are redacted; prose is not', () => {
+  const digits = 'abcdef1234567890ABCDEF';
+  const letters = 'AbcdefGhijklMnopqrStuvwxYz'; // 26 chars, mixed case, no digit
+  for (const line of [
+    `Authorization: Bearer ${digits}`,
+    `authorization=${digits}-xyzxyz`,
+    `curl -H "Authorization: Basic ${digits}=="`,
+    `Bearer ${digits}`,
+    `bearer\t${digits}`,
+    `Authorization: Bearer ${letters}`,
+    `Token ${letters}`,
+    `Authorization: ${digits}0123`,
+  ]) {
     const r = redact(line);
-    assert.ok(!r.text.includes(t), line);
+    assert.ok(!r.text.includes(digits) && !r.text.includes(letters), line);
     assert.ok(r.hits.length >= 1, line);
   }
-  assert.equal(redact('the bearer of news').text, 'the bearer of news');
-  for (const l of ['Bearer ' + ' '.repeat(1024 * 1024) + 'y', 'authorization:' + ' '.repeat(1024 * 1024), 'Bearer '.repeat(100 * 1024), 'Authorization: '.repeat(60 * 1024)]) {
+  const jwt = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.abcdefghijklmnop';
+  assert.deepEqual(redact(`Authorization: Bearer ${jwt}`).hits.map((h) => h.kind), ['jwt']);
+  for (const prose of ['the bearer of news', 'Auth if you use bearer refresh.', 'basic usage of the token refresh', 'Token budget exceeded', 'Authorization: required', 'authorization = none', 'Bearer abcdefghijklmnopqrstuvwx', 'basic 2 things']) {
+    assert.equal(redact(prose).text, prose, prose);
+  }
+});
+
+test('the header rules are linear on 1 MB hostile single lines', () => {
+  const MB = 1024 * 1024;
+  const lines = [
+    'authorization='.repeat(100000),
+    'Authorization: '.repeat(70000),
+    'Bearer '.repeat(150000),
+    'bearer'.repeat(170000),
+    'Bearer' + 'a'.repeat(MB),
+    'Bearer ' + 'aB'.repeat(MB / 2),
+    'Bearer ' + ' '.repeat(MB) + 'x',
+    'Authorization:' + ' '.repeat(MB),
+    'authorization=a'.repeat(70000),
+    'Bearer a '.repeat(110000),
+    'token '.repeat(170000),
+    'basic\t'.repeat(170000),
+    'Authorization: Bearer ' + '1'.repeat(MB),
+    ('Authorization: Bearer ' + 'x'.repeat(30) + ' ').repeat(20000),
+  ];
+  for (const l of lines) {
     const t0 = Date.now();
     redact(l);
-    assert.ok(Date.now() - t0 < 1000, 'slow on a long line');
+    const ms = Date.now() - t0;
+    assert.ok(ms < 1000, `slow (${ms} ms) on ${l.slice(0, 30)}`);
   }
 });
