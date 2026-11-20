@@ -258,6 +258,7 @@ export function refreshAiDir(root, { now = new Date(), catalogDir, skillDir = DE
     toolVersion: toolTo,
     skillDir,
     catalogDir,
+    prepared: { loaded, profile },
     extraGenerated: (files) => {
       // Scan after the managed and user-owned files are settled, before the report is rendered.
       const byFile = new Map();

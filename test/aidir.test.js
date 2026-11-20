@@ -328,3 +328,17 @@ test('vendoring from inside .ai is refused and .ai/tools stays intact', () => {
   assert.throws(() => run({ skillDir: path.join(root, '.ai', 'tools') }), /refusing to vendor from inside \.ai/);
   assert.equal(snapshot(), before);
 });
+
+test('writeAiDir reuses a prepared profile (refresh detects once), unless the pointers create a file', async () => {
+  const { preflight } = await import('../skill/scripts/lib/aidir.js');
+  const { detectStack } = await import('../skill/scripts/lib/detect.js');
+  run();
+  const loaded = preflight(root);
+  const profile = detectStack(root, loaded.catalog);
+  const marked = { ...profile, sdk: { ...profile.sdk, minSdk: 4242 } };
+  run({ prepared: { loaded, profile: marked } });
+  assert.match(read('.ai/knowledge/architecture-current.md'), /min 4242/);
+  fs.rmSync(path.join(root, 'AGENTS.md'));
+  run({ prepared: { loaded, profile: marked } });
+  assert.doesNotMatch(read('.ai/knowledge/architecture-current.md'), /min 4242/);
+});

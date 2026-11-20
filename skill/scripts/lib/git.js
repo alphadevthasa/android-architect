@@ -109,7 +109,12 @@ export function ignoredPaths(root, relPaths) {
     const stderr = String(err.stderr ?? '');
     if (/not a git repository/i.test(stderr) && !insideGitTree(root)) return new Set();
     const first = stderr.split(/\r?\n/).find((l) => l.trim() !== '') ?? err.message.split('\n')[0];
-    throw new Error('could not determine git-ignored files: ' + first);
+    let hint = '';
+    if (/dubious ownership/i.test(stderr)) {
+      const repo = /dubious ownership in repository at '([^'\n]+)'/i.exec(stderr)?.[1] ?? path.resolve(root);
+      hint = ` (if this is a container or shared checkout, run: git config --global --add safe.directory ${repo})`;
+    }
+    throw new Error('could not determine git-ignored files: ' + first + hint);
   }
   return new Set(out.split('\0').filter(Boolean));
 }

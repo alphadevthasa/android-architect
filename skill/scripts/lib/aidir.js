@@ -128,9 +128,11 @@ function makeGuard(root, realRoot) {
 
 /**
  * Checks run before any write: --local needs a repo; .ai (and anything in it) and the pointer files must not be symlinks;
- * .ai/catalog-overrides (when present) must be valid against the catalog in `catalogDir` (default: this skill's).
+ * .ai/catalog-overrides (when present) must be valid against the catalog in `catalogDir` (default: this skill's); the
+ * git-ignore check must work (it fails closed, so a git error throws here, before anything is written).
  * writeAiDir runs this itself; workspace mode runs it for every repo first.
- * Returns { catalog, base, files }: the merged catalog (base + overrides), the base catalog and the override file names.
+ * Returns { catalog, base, files, listed }: the merged catalog (base + overrides), the base catalog, the override file
+ * names and the project files (git-ignored ones dropped).
  */
 export function preflight(root, { local = false, catalogDir = path.join(DEFAULT_SKILL_DIR, 'catalog') } = {}) {
   const realRoot = fs.realpathSync(root);
@@ -140,7 +142,8 @@ export function preflight(root, { local = false, catalogDir = path.join(DEFAULT_
   guard('.ai');
   if (fs.existsSync(aiDir)) regularFiles(aiDir);
   for (const f of ['AGENTS.md', 'CLAUDE.md', 'CLAUDE.local.md']) guard(f);
-  return loadCatalogWithOverrides(catalogDir, root);
+  const loaded = loadCatalogWithOverrides(catalogDir, root);
+  return { ...loaded, listed: listFiles(root, { gitignore: true }) };
 }
 
 /**
@@ -150,11 +153,13 @@ export function preflight(root, { local = false, catalogDir = path.join(DEFAULT_
  * or { role: 'member', hub: <relative path> } (thin .ai: no workflows, no user-owned files).
  * `extraGenerated` is { name: text } or a function of { written, kept, conflicts, commit } returning that: extra generated
  * files written at the top of .ai (always rewritten, through the same guarded writer).
+ * `prepared` is { loaded, profile } from a caller that already ran preflight (same options) and detectStack on its
+ * catalog (refresh), so neither runs twice; the profile is recomputed when the pointers create a file.
  * Returns { written, kept, conflicts, pointers, excluded } with paths relative to root, sorted.
  */
 export function writeAiDir(
   root,
-  { now, local = false, appendPointers = false, workspace = null, repos = null, toolVersion, skillDir = DEFAULT_SKILL_DIR, catalogDir, extraGenerated = null } = {},
+  { now, local = false, appendPointers = false, workspace = null, repos = null, toolVersion, skillDir = DEFAULT_SKILL_DIR, catalogDir, extraGenerated = null, prepared = null } = {},
 ) {
   const realRoot = fs.realpathSync(root);
   const aiDir = path.join(root, '.ai');
@@ -183,7 +188,7 @@ export function writeAiDir(
   const putRedacted = (rel, text) => putAi(rel, redact(text).text);
 
   // Overrides are validated here, before the first write; the result is reused for detection below.
-  const loaded = preflight(root, { local, catalogDir });
+  const loaded = prepared?.loaded ?? preflight(root, { local, catalogDir });
 
   // Vendor sources are read into memory before the first write, and must not live inside .ai.
   const vendorSources = collectVendorSources(skillDir, catalogDir, { aiDir });
@@ -204,8 +209,10 @@ export function writeAiDir(
     block: isMember ? hubWorkflows(readTemplate('pointer.md', templatesDir), workspace.hub) : readTemplate('pointer.md', templatesDir),
     write: (rel, content) => put(rel, content),
   });
-  const files = listFiles(root, { gitignore: true });
-  const profile = detectStack(root, catalog);
+  // The preflight listing, unless the pointers just created a file it could not include.
+  const pointersCreated = pointers.some((p) => p.action === 'created');
+  const files = pointersCreated ? listFiles(root, { gitignore: true }) : loaded.listed;
+  const profile = !pointersCreated && prepared?.profile ? prepared.profile : detectStack(root, catalog);
   const modules = discoverModules(root, files);
   const date = now.toISOString().slice(0, 10);
   const mode = local ? 'local' : 'committed';

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { listFiles } from '../skill/scripts/lib/walk.js';
 import { ignoredPaths } from '../skill/scripts/lib/git.js';
 import { buildIndex } from '../skill/scripts/lib/indexer.js';
@@ -179,5 +179,90 @@ test('plain non-repo dir gives an empty set under a localized environment', () =
       else process.env[k] = v;
     }
     fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+const INIT = path.resolve('skill/scripts/init-ai.js');
+const WS = path.resolve('test/fixtures/workspace');
+const corruptRepo = (dir) => {
+  execFileSync('git', ['init', '-q'], { cwd: dir });
+  fs.writeFileSync(path.join(dir, '.git', 'index'), 'garbage-not-an-index');
+};
+const created = (dir) => ['.ai', 'AGENTS.md', 'CLAUDE.md', 'CLAUDE.local.md'].filter((f) => fs.existsSync(path.join(dir, f)));
+
+test('init on a repo whose git-ignore check fails writes nothing at all', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'aa-gi-init-'));
+  try {
+    const root = path.join(tmp, 'hub-app');
+    fs.cpSync(path.join(WS, 'hub-app'), root, { recursive: true });
+    corruptRepo(root);
+    const r = spawnSync(process.execPath, [INIT, root], { encoding: 'utf8' });
+    assert.equal(r.status, 1, r.stdout);
+    assert.match(r.stderr, /could not determine git-ignored files/);
+    assert.deepEqual(created(root), []);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('workspace init with one failing member repo writes nothing in any repo', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'aa-gi-ws-'));
+  try {
+    const hub = path.join(tmp, 'hub-app');
+    const lib = path.join(tmp, 'lib-core');
+    fs.cpSync(path.join(WS, 'hub-app'), hub, { recursive: true });
+    fs.cpSync(path.join(WS, 'lib-core'), lib, { recursive: true });
+    corruptRepo(lib);
+    const r = spawnSync(process.execPath, [INIT, hub, '--workspace', '../lib-core'], { cwd: hub, encoding: 'utf8' });
+    assert.equal(r.status, 1, r.stdout);
+    assert.match(r.stderr, /could not determine git-ignored files/);
+    assert.deepEqual(created(hub), []);
+    assert.deepEqual(created(lib), []);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('a "dubious ownership" git error gets a safe.directory hint', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'aa-gi-dub-'));
+  const savedPath = process.env.PATH;
+  try {
+    const bin = path.join(tmp, 'bin');
+    fs.mkdirSync(bin);
+    fs.writeFileSync(
+      path.join(bin, 'git'),
+      "#!/bin/sh\necho \"fatal: detected dubious ownership in repository at '/srv/checkout'\" >&2\nexit 128\n",
+      { mode: 0o755 },
+    );
+    process.env.PATH = `${bin}${path.delimiter}${savedPath}`;
+    assert.throws(
+      () => ignoredPaths(tmp, ['a.kt']),
+      (e) => e.message.startsWith('could not determine git-ignored files: fatal: detected dubious ownership') &&
+        e.message.endsWith('(if this is a container or shared checkout, run: git config --global --add safe.directory /srv/checkout)'),
+    );
+  } finally {
+    process.env.PATH = savedPath;
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('refresh on a repo whose git-ignore check fails leaves .ai and the pointer files untouched', async () => {
+  const { initProject } = await import('../skill/scripts/lib/init.js');
+  const { refreshAiDir } = await import('../skill/scripts/lib/refresh.js');
+  const { hashTree } = await import('../skill/scripts/lib/hash.js');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'aa-gi-ref-'));
+  try {
+    const root = path.join(tmp, 'hub-app');
+    fs.cpSync(path.join(WS, 'hub-app'), root, { recursive: true });
+    execFileSync('git', ['init', '-q'], { cwd: root });
+    initProject(root, { now: new Date('2026-11-20T00:00:00Z') });
+    fs.rmSync(path.join(root, 'AGENTS.md'));
+    const before = hashTree(path.join(root, '.ai'));
+    fs.writeFileSync(path.join(root, '.git', 'index'), 'garbage-not-an-index');
+    assert.throws(() => refreshAiDir(root, { now: new Date('2026-11-21T00:00:00Z') }), /could not determine git-ignored files/);
+    assert.deepEqual(hashTree(path.join(root, '.ai')), before);
+    assert.equal(fs.existsSync(path.join(root, 'AGENTS.md')), false);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
