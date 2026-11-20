@@ -6,6 +6,8 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { RunRefusal } from './rungit.js';
 
+const posix = (p) => p.split(path.sep).join('/');
+
 export const STOP_FILE = '.ai/STOP';
 const MAX_DIGEST_BYTES = 16 * 1024 * 1024;
 const MAX_HOOKS = 200;
@@ -104,6 +106,7 @@ export async function acquireLock(git, root, { pid = process.pid, alive = pidAli
   for (let attempt = 0; attempt < 4; attempt++) {
     try {
       fs.writeFileSync(file, body, { flag: 'wx', mode: 0o600 });
+      if (!holds()) throw new RunRefusal('another run is starting in this repository; try again');
       return {
         holds,
         release() {
@@ -128,7 +131,13 @@ export async function acquireLock(git, root, { pid = process.pid, alive = pidAli
     } else if (alive(info.pid)) {
       throw new RunRefusal(`another run is active in this repository (process ${info.pid}); wait for it to finish`);
     }
-    fs.rmSync(file, { force: true }); // stale: its process is gone
+    // stale: its process is gone. Remove only the very lock that was judged stale (another run may have replaced it).
+    try {
+      const again = readLock(file);
+      if (again.bad ? info.bad : again.token === info.token) fs.rmSync(file, { force: true });
+    } catch {
+      // vanished: try again
+    }
   }
   throw new RunRefusal('another run is starting in this repository; try again');
 }
@@ -200,6 +209,8 @@ export function takeSnapshot(git, root) {
     gitParts.push(`${d}/hooks=${dirDigest(path.join(d, 'hooks'))}`);
   }
   gitParts.push(`consent=${dirDigest(path.join(common, 'android-architect')).split(';').filter((x) => !x.startsWith(`${LOCK_NAME}=`)).join(';')}`);
+  const tops = new Set([root, readGit(git, root, ['rev-parse', '--show-toplevel']) || root]);
+  for (const t of tops) for (const f of ['.gitignore', '.gitattributes', '.gitmodules']) gitParts.push(`${t}/${f}=${fileDigest(path.join(t, f))}`);
   return {
     config: combine([fileDigest(path.join(root, '.ai/run.config.json'))]),
     plan: combine([fileDigest(path.join(root, '.ai/migration/plan.json')), fileDigest(path.join(root, '.ai/migration/roadmap.md'))]),
@@ -210,4 +221,65 @@ export function takeSnapshot(git, root) {
 /** Plain labels of the categories that differ between two snapshots (empty when nothing changed). */
 export function diffSnapshots(before, after) {
   return Object.keys(SNAPSHOT_LABELS).filter((k) => before[k] !== after[k]).map((k) => SNAPSHOT_LABELS[k]);
+}
+
+// ---------- build-code gate ----------
+// Verification runs the project's build code (Gradle wrapper, build scripts, package scripts) as the user. When the
+// agent changed any file that can execute during a build, a human must look at it first.
+const BUILD_NAMES = new Set(['gradlew', 'gradlew.bat', 'gradle.properties', 'package.json', '.npmrc', 'makefile']);
+
+/** True when a repo-relative path can run code during verification. Case-insensitive (macOS/Windows fold names). */
+export function isBuildPath(p, verifyScripts = new Set()) {
+  const low = String(p).toLowerCase().split('\\').join('/');
+  const segs = low.split('/').filter(Boolean);
+  const base = segs[segs.length - 1] ?? '';
+  if (BUILD_NAMES.has(base) || base.endsWith('.gradle') || base.endsWith('.gradle.kts') || base.endsWith('.sh') || base.startsWith('settings.gradle')) return true;
+  if (segs.includes('buildsrc')) return true;
+  for (let i = 0; i + 1 < segs.length; i++) if (segs[i] === 'gradle' && segs[i + 1] === 'wrapper') return true;
+  const rel = segs.join('/');
+  for (const sc of verifyScripts) if (rel === sc || rel.endsWith(`/${sc}`)) return true;
+  return false;
+}
+
+/** Normalized (lowercase, no leading ./) arguments of the verification commands: scripts they name are build code. */
+export function verificationScripts(config) {
+  const out = new Set();
+  for (const argv of config?.verification?.commands ?? []) {
+    for (const a of argv.slice(1)) {
+      const n = String(a).toLowerCase().split('\\').join('/').replace(/^(\.\/)+/, '');
+      if (n !== '' && !n.startsWith('-')) out.add(n);
+    }
+  }
+  return out;
+}
+
+/** Changed and untracked repo-relative paths (read-only `git status -z`, every untracked file listed). */
+export function changedPaths(git, root) {
+  const out = git.runGit(root, ['status', '--porcelain=v1', '-z', '--untracked-files=all', '--no-renames']);
+  const paths = [];
+  for (const rec of out.split('\0')) {
+    if (rec.length > 3 && rec[2] === ' ') paths.push(rec.slice(3));
+  }
+  return paths;
+}
+
+/**
+ * The gate: null when no changed/untracked/deleted path is build code, or when `approved` (array of hashes) holds the exact
+ * approval hash; else { files (sorted repo-relative names), count, hash }. hash = sha256 over the sorted
+ * (path, content digest) pairs, so any later edit of those files invalidates an approval. A symlink is digested by its
+ * target text, a deleted file as "absent".
+ */
+export function buildGate(git, root, config, approved = []) {
+  const top = readGit(git, root, ['rev-parse', '--show-toplevel']) || root;
+  const scripts = verificationScripts(config);
+  const prefix = path.relative(top, root);
+  const files = [...new Set(changedPaths(git, root))].filter((p) => {
+    // a path inside the project is also compared by its project-relative name (scripts named in the verification argv)
+    const inner = prefix && posix(p).startsWith(`${posix(prefix)}/`) ? posix(p).slice(posix(prefix).length + 1) : posix(p);
+    return isBuildPath(p, scripts) || isBuildPath(inner, scripts);
+  }).sort();
+  if (files.length === 0) return null;
+  const hash = crypto.createHash('sha256').update(files.map((f) => `${f}\0${fileDigest(path.join(top, f))}`).join('\n')).digest('hex');
+  if (Array.isArray(approved) && approved.includes(hash)) return null;
+  return { files, count: files.length, hash };
 }

@@ -181,7 +181,7 @@ function installCleanup() {
   if (cleanupInstalled) return;
   cleanupInstalled = true;
   process.on('exit', () => killLiveGroups('SIGKILL'));
-  for (const sig of ['SIGINT', 'SIGTERM']) {
+  for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGQUIT']) {
     const handler = () => {
       killLiveGroups('SIGKILL');
       process.off(sig, handler);
@@ -265,12 +265,16 @@ async function runOne(root, argv, timeoutMs) {
  * (default config.verification.timeoutSeconds). An empty command list is ok:false with a `reason` (verifying nothing
  * is never a pass). After every command, normal or not, its whole process group is terminated.
  */
-export async function runVerification(root, config, { timeoutMs } = {}) {
+export async function runVerification(root, config, { timeoutMs, totalMs } = {}) {
+  const t0 = Date.now();
   const limit = timeoutMs ?? (config?.verification?.timeoutSeconds ?? 1800) * 1000;
   const results = [];
   if ((config?.verification?.commands ?? []).length === 0) return { ok: false, results, reason: 'no verification commands are configured' };
   for (const argv of config?.verification?.commands ?? []) {
-    const r = await runOne(root, argv, limit);
+    // `totalMs`: one deadline shared by all commands, so their sum cannot exceed it.
+    const left = totalMs === undefined ? limit : Math.min(limit, totalMs - (Date.now() - t0));
+    if (left <= 0) return { ok: false, results, reason: 'the verification time budget ran out' };
+    const r = await runOne(root, argv, left);
     results.push(r);
     if (r.exitCode !== 0 || r.timedOut) return { ok: false, results };
   }

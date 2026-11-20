@@ -16,7 +16,7 @@ import { redact } from './redact.js';
 import { stripUnsafe } from './mdtext.js';
 import fs from 'node:fs';
 import path from 'node:path';
-import { stopPresent, acquireLock, takeSnapshot, diffSnapshots } from './runguard.js';
+import { stopPresent, acquireLock, takeSnapshot, diffSnapshots, buildGate } from './runguard.js';
 import { writeRunReport } from './runreport.js';
 
 export const OUTCOMES = Object.freeze(['done', 'budget', 'no-progress', 'repeated-error', 'verification-failed', 'needs-human', 'stopped', 'failed', 'refused', 'tampered', 'interrupted']);
@@ -26,6 +26,8 @@ const VERIFY_GRACE_MS = 60 * 1000;
 const MAX_PREVIOUS_FAILURE = 8 * 1024;
 const MAX_LOG_TAIL = 32 * 1024;
 const MAX_LISTED = 10;
+const STOP_POLL_MS = 1000;
+const SIGNALS = ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGQUIT'];
 
 /** Fixed reason phrases (tests assert them). Dynamic parts are step ids (grammar-checked) or budget names. */
 export const REASONS = Object.freeze({
@@ -43,6 +45,8 @@ export const REASONS = Object.freeze({
   agentFailedTwice: (id) => `step ${id} failed twice in a row (the agent did not report done)`,
   verifyFailedTwice: (id) => `verification failed twice for step ${id}`,
   repeatedError: (id) => `the same error repeated on step ${id} after an earlier step failed the same way`,
+  buildFiles: (n, hash) => `build files changed: ${n} — review, then rerun with --approve-build-changes ${hash}`,
+  stopRemoved: 'the .ai/STOP file was removed while the agent was running',
   agentReported: (id, status) => `the agent reported ${status} for step ${id}`,
 });
 
@@ -106,7 +110,7 @@ export async function runLoop(root, options = {}) {
   };
 
   const startedMs = now();
-  const result = { outcome: 'failed', reason: '', steps: [], branch: null, startedAt: iso(startedMs), endedAt: null, iterations: 0, usage: { totalTokens: 0, estimated: false }, gated: [], reportPath: null, reportError: null, runId: null, resumed: false };
+  const result = { buildFiles: [], outcome: 'failed', reason: '', steps: [], branch: null, startedAt: iso(startedMs), endedAt: null, iterations: 0, usage: { totalTokens: 0, estimated: false }, gated: [], reportPath: null, reportError: null, runId: null, resumed: false };
   const state = { iterations: 0, tokens: 0, startedMs };
   const warnings = [];
   const entries = new Map();
@@ -125,18 +129,55 @@ export async function runLoop(root, options = {}) {
     wake = r;
   });
   const INT = Symbol('interrupted');
-  const raceInterrupt = (p) => {
-    const q = Promise.resolve(p);
-    q.catch(() => {});
-    return Promise.race([q, interruptP.then(() => INT)]);
+  const STP = Symbol('stop');
+  let stopSeen = false;
+  let wakeStop;
+  const stopP = new Promise((r) => {
+    wakeStop = r;
+  });
+  const raceInterrupt = async (p) => {
+    const q = Promise.resolve(p).then(() => {}, () => {});
+    const out = await Promise.race([Promise.resolve(p), interruptP.then(() => INT), stopP.then(() => STP)]);
+    // After an interrupt give the killed process groups a moment to be gone before the report is written; a second
+    // signal during this wait ends the process at once.
+    if (out === INT) {
+      let timer;
+      await Promise.race([q, new Promise((r) => { timer = setTimeout(r, options.interruptGraceMs ?? 3000); })]);
+      clearTimeout(timer);
+    }
+    return out;
+  };
+  // While the agent or verification runs, .ai/STOP is polled; when it shows up the process groups are killed at once.
+  let poller = null;
+  const pollStop = () => {
+    if (stopPresent(root)) {
+      stopSeen = true;
+      killLiveGroups('SIGKILL');
+      wakeStop();
+    }
+  };
+  const startPoll = () => {
+    poller = setInterval(pollStop, options.stopPollMs ?? STOP_POLL_MS);
+    poller.unref?.();
+  };
+  const endPoll = () => {
+    clearInterval(poller);
+    poller = null;
   };
   const onSignal = (sig) => {
-    if (interrupted) return;
+    if (interrupted) {
+      // a second signal: default handling, immediately
+      for (const [s, h] of handlers) process.off(s, h);
+      killLiveGroups('SIGKILL');
+      process.kill(process.pid, sig);
+      return;
+    }
     interrupted = sig;
     killLiveGroups('SIGKILL');
+    say(`interrupt received (${sig}); stopping; send the signal again to exit at once`);
     wake();
   };
-  const handlers = ['SIGINT', 'SIGTERM'].map((sig) => [sig, () => onSignal(sig)]);
+  const handlers = SIGNALS.map((sig) => [sig, () => onSignal(sig)]);
   const onAbort = () => onSignal('abort');
 
   const stop = (outcome, reason) => ({ outcome, reason });
@@ -206,7 +247,7 @@ export async function runLoop(root, options = {}) {
 
   // ---------- commit-based resume (ruling 3) ----------
   let subjects = null;
-  const committed = (id, baseCommit, branch) => {
+  const committed = (id, baseCommit, branch, plan) => {
     if (subjects === null) {
       subjects = [];
       let base = baseCommit;
@@ -228,6 +269,13 @@ export async function runLoop(root, options = {}) {
       }
     }
     const prefix = `feat(migration): ${id}`;
+    const cutAt = 72; // commitStep cuts subjects at 72 characters
+    if (prefix.length >= cutAt) {
+      // The subject holds only a cut prefix of the id: match that, unless another step shares it (then it proves nothing).
+      const cut = prefix.slice(0, cutAt).trimEnd();
+      if (plan.steps.some((o) => o.id !== id && `feat(migration): ${o.id}`.startsWith(cut))) return false;
+      return subjects.some((s) => s === cut);
+    }
     return subjects.some((s) => s.startsWith(prefix) && (s.length === prefix.length || s.startsWith(': ', prefix.length)));
   };
 
@@ -261,7 +309,7 @@ export async function runLoop(root, options = {}) {
           result.gated = [{ id: doing.id, tags: gated ? doing.tags : ['blocked'] }];
           return stop('needs-human', `step ${doing.id} is marked doing but ${gated ? 'needs a human decision' : 'depends on unfinished steps'}`);
         }
-        if (committed(doing.id, branchInfo.baseCommit, branchInfo.branch)) {
+        if (committed(doing.id, branchInfo.baseCommit, branchInfo.branch, plan)) {
           try {
             setStatus(root, doing.id, 'done', 'doing');
             git.commitStep(root, doing, doing.title);
@@ -318,12 +366,19 @@ export async function runLoop(root, options = {}) {
     const timeoutMs = Math.max(MIN_AGENT_TIMEOUT_MS, Math.min(options.agentTimeoutMs ?? DEFAULT_AGENT_TIMEOUT_MS, wallLeft));
 
     let r;
+    startPoll();
     try {
       r = await raceInterrupt(agent(root, config, { brief, step, nonce, turns: config.budgets.maxTurnsPerStep, timeoutMs, now: now(), runId: result.runId, n }));
     } catch (e) {
+      endPoll();
       return stop('failed', `the agent could not run: ${plain(e, 200)}`);
     }
+    endPoll();
     if (r === INT) return intStop();
+    if (r === STP) {
+      rec.status = 'stopped';
+      return stopPresent(root) ? stop('stopped', REASONS.stopped) : stop('tampered', REASONS.stopRemoved);
+    }
 
     // runner-observed facts only
     const exitCode = Number.isSafeInteger(r?.exitCode) ? r.exitCode : null;
@@ -341,6 +396,7 @@ export async function runLoop(root, options = {}) {
     // Guards after the agent: interruption, tampering (before anything else), STOP, config drift, lock.
     const guard = async () => {
       if (interrupted) return intStop();
+      if (stopSeen && !stopPresent(root)) return stop('tampered', REASONS.stopRemoved);
       const changed = diffSnapshots(snapshot, takeSnapshot(git, root));
       if (changed.length > 0) return stop('tampered', REASONS.tampered(changed.join(', ')));
       return topGuards();
@@ -368,18 +424,33 @@ export async function runLoop(root, options = {}) {
     }
 
     // The agent says done: the runner checks (never the claim).
-    if (!git.hasChanges(root, { ignore: [ROADMAP_FILE] })) {
+    if (!git.hasChanges(root, { ignore: [ROADMAP_FILE], ignoreDirs: ['.ai/migration'] })) {
       entry.result = 'no change';
       return stop('no-progress', REASONS.noChange);
     }
-    let v;
+    // Build-code gate: verification executes build code, so build files the agent touched need a human's approval first.
+    let gate;
     try {
-      const verifyMs = Math.min(config.verification.timeoutSeconds * 1000, Math.max(VERIFY_GRACE_MS, wallLeft));
-      v = await raceInterrupt(verifier(root, config, { timeoutMs: verifyMs }));
+      gate = buildGate(git, root, config, options.approvedBuildChanges);
     } catch (e) {
+      return stop('failed', `the build files could not be checked: ${plain(e, 200)}`);
+    }
+    if (gate) {
+      result.buildFiles = gate.files.slice(0, 20).map((f) => plainText(f, 120));
+      entry.result = 'build files changed';
+      return stop('needs-human', REASONS.buildFiles(gate.count, gate.hash));
+    }
+    let v;
+    startPoll();
+    try {
+      v = await raceInterrupt(verifier(root, config, { timeoutMs: config.verification.timeoutSeconds * 1000, totalMs: Math.max(VERIFY_GRACE_MS, wallLeft) }));
+    } catch (e) {
+      endPoll();
       return stop('failed', `verification could not run: ${plain(e, 200)}`);
     }
+    endPoll();
     if (v === INT) return intStop();
+    if (v === STP) return stopPresent(root) ? stop('stopped', REASONS.stopped) : stop('tampered', REASONS.stopRemoved);
     const results = Array.isArray(v?.results) ? v.results : [];
     const signatures = results.map((x) => (typeof x?.signature === 'string' ? x.signature : '')).filter(Boolean).slice(0, 10);
     const ok = v?.ok === true;
@@ -422,7 +493,7 @@ export async function runLoop(root, options = {}) {
       c = git.commitStep(root, step, step.title);
     } catch (e) {
       revert();
-      return stop(e instanceof RunRefusal ? 'refused' : 'failed', `the commit was refused: ${plain(e, 200)}`);
+      return stop(e?.needsHuman ? 'needs-human' : e instanceof RunRefusal ? 'refused' : 'failed', `the commit was refused: ${plain(e, 200)}`);
     }
     if (c === null) {
       revert();
@@ -499,6 +570,7 @@ export async function runLoop(root, options = {}) {
       outcome = e instanceof RunRefusal ? stop('refused', plain(e, 300)) : stop('failed', `internal error: ${plain(e, 200)}`);
     }
   } finally {
+    endPoll();
     for (const [sig, h] of handlers) process.off(sig, h);
     options.signal?.removeEventListener?.('abort', onAbort);
     killLiveGroups('SIGKILL');

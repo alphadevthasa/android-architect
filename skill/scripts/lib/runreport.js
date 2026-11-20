@@ -42,6 +42,7 @@ export function sanitizeReport(info) {
     remaining: { todo: num(rem.todo), doing: num(rem.doing), done: num(rem.done) },
     gated: (Array.isArray(info.gated) ? info.gated : []).slice(0, MAX_LIST).map((g) => ({ id: id(g.id), tags: (Array.isArray(g.tags) ? g.tags : []).slice(0, 4).map((t) => text(t, 20)) })),
     warnings: (Array.isArray(info.warnings) ? info.warnings : []).slice(0, MAX_LIST).map((w) => text(w, 300)),
+    buildFiles: (Array.isArray(info.buildFiles) ? info.buildFiles : []).slice(0, MAX_LIST).map((f) => text(f, 120)),
     nothingPushed: true,
   };
 }
@@ -81,6 +82,11 @@ export function renderReport(info) {
   if (r.gated.length > 0) {
     L.push('## Waiting for a human', '');
     for (const g of r.gated) L.push(`- \`${mdText(g.id)}\` (${g.tags.map((t) => mdText(t)).join(', ') || 'blocked'})`);
+    L.push('');
+  }
+  if (r.buildFiles.length > 0) {
+    L.push('## Build files changed by the agent (review before approving)', '');
+    for (const f of r.buildFiles) L.push(`- \`${mdText(f)}\``);
     L.push('');
   }
   if (r.warnings.length > 0) {

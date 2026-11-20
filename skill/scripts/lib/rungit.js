@@ -15,9 +15,10 @@ import { RUN_CONFIG_FILE, DEFAULT_RUN_CONFIG, validateRunConfig } from './runcon
 
 /** An expected refusal: the message is plain text (no stack, no absolute paths) and safe to print. */
 export class RunRefusal extends Error {
-  constructor(message) {
+  constructor(message, { needsHuman = false } = {}) {
     super(message);
     this.name = 'RunRefusal';
+    this.needsHuman = needsHuman; // true: a human must decide (the loop reports needs-human instead of refused)
   }
 }
 
@@ -516,6 +517,26 @@ function symlinkEscapes(root, top, rec, gitDirs) {
   });
 }
 
+// Names that must never be committed by the runner (credentials, signing material) and the only .ai files it commits.
+const SECRET_EXACT = new Set(['local.properties', 'google-services.json', 'keystore.properties']);
+const SECRET_SUFFIX = ['.jks', '.keystore', '.p12', '.pem'];
+const AI_COMMITTABLE = new Set(['.ai/migration/roadmap.md', '.ai/migration/plan.json']);
+export function isSecretName(p) {
+  const base = String(p).toLowerCase().split('/').pop();
+  return base.startsWith('.env') || base.startsWith('id_rsa') || SECRET_EXACT.has(base) || SECRET_SUFFIX.some((x) => base.endsWith(x));
+}
+
+/** A needs-human reason when the staged set holds secret-looking names or .ai files other than the roadmap and plan, else null. */
+function sensitiveStaged(prefix, records) {
+  const bad = [];
+  for (const r of records) {
+    if (r.status === 'D') continue;
+    const rel = r.path.slice(prefix.length).toLowerCase();
+    if (isSecretName(r.path) || (rel.startsWith('.ai/') && !AI_COMMITTABLE.has(rel))) bad.push(plainText(r.path, 80));
+  }
+  return bad.length === 0 ? null : `refusing to commit ${bad.length} file(s) that look like secrets or runner state (${bad.slice(0, 5).join(', ')}); nothing was committed`;
+}
+
 /** Returns a plain refusal message for the first unsafe staged record, or null. */
 function unsafeStaged(root, top, prefix, records, gitDirs) {
   const blobs = [];
@@ -567,9 +588,12 @@ export const commitStep = plainErrors((root, step, title) => {
     // Once .ai/runs/ is in .git/info/exclude git refuses a pathspec that names it ("paths are ignored"), and then it is
     // never staged anyway; otherwise the exclude pathspec keeps it out. Either way a staged runs path is refused below.
     const ignored = tryGit(root, ['check-ignore', '-q', '--', `${RUNS_DIR}/.confirmed`]) !== null;
+    unstage(root); // only the runner's own `add -A` may stage: anything the agent force-staged is unstaged first
     runGit(root, ['add', '-A', '--', '.', ...(ignored ? [] : [`:(exclude,icase)${RUNS_DIR}`])]);
     records = stagedRecords(root);
     if (records.length === 0) return null;
+    const sensitive = sensitiveStaged(prefix, records);
+    if (sensitive) throw new RunRefusal(sensitive, { needsHuman: true });
     const problem = unsafeStaged(root, top, prefix, records, [info.common, info.gitDir]);
     if (problem) throw new RunRefusal(problem);
     if (tryGit(root, ['-c', 'user.useConfigOnly=true', 'var', 'GIT_COMMITTER_IDENT']) === null || tryGit(root, ['-c', 'user.useConfigOnly=true', 'var', 'GIT_AUTHOR_IDENT']) === null) {
@@ -612,9 +636,10 @@ export const diffSince = plainErrors((root, commit) => {
 });
 
 /** True when the tree has uncommitted or untracked changes outside .ai/runs/ and outside `ignore` (project-relative paths). */
-export const hasChanges = plainErrors((root, { ignore = [] } = {}) => {
+export const hasChanges = plainErrors((root, { ignore = [], ignoreDirs = [] } = {}) => {
   const info = repoInfo(root);
-  return dirtyEntries(info.root, info.prefix, ignore).length > 0;
+  const dirs = ignoreDirs.map((d) => `${info.prefix}${d.endsWith('/') ? d : `${d}/`}`);
+  return dirtyEntries(info.root, info.prefix, ignore).filter((e) => !dirs.some((d) => e.path.startsWith(d))).length > 0;
 });
 
 // ---------- first-use confirmation ----------

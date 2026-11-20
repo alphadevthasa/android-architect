@@ -527,29 +527,30 @@ test('resume: a doing step without a commit is run again, never skipped', async 
 test('an AbortSignal during the agent stops the loop as interrupted: step doing, report written', async () => {
   const root = project();
   const ac = new AbortController();
-  const r = await go(root, { signal: ac.signal, agent: async () => { setTimeout(() => ac.abort(), 50); return new Promise(() => {}); } });
+  const r = await go(root, { signal: ac.signal, interruptGraceMs: 100, agent: async () => { setTimeout(() => ac.abort(), 50); return new Promise(() => {}); } });
   assert.equal(r.outcome, 'interrupted');
   assert.equal(r.reason, REASONS.interrupted('abort'));
   assert.equal(rowStatus(root, 'a'), 'doing');
   assert.equal(readReport(root, r).json.outcome, 'interrupted');
 });
 
-test('SIGINT in the middle of a real agent: cleanup runs, step left doing, report says interrupted', async () => {
+for (const SIG of ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGQUIT']) test(`${SIG} in the middle of a real agent: cleanup runs, step left doing, report says interrupted`, async () => {
   const root = project();
   const child = spawn(process.execPath, [CHILD, root, STUB], { stdio: ['ignore', 'pipe', 'pipe'] });
   let out = '';
   let ready;
   const isReady = new Promise((res) => { ready = res; });
   child.stdout.on('data', (c) => { out += c; if (out.includes('READY')) ready(); });
-  await Promise.race([isReady, new Promise((_, rej) => setTimeout(() => rej(new Error('child did not start the agent')), 30_000))]);
-  await new Promise((r) => setTimeout(r, 500)); // let the stub start
-  child.kill('SIGINT');
+  let guard;
+  await Promise.race([isReady, new Promise((_, rej) => { guard = setTimeout(() => rej(new Error('child did not start the agent')), 30_000); })]);
+  clearTimeout(guard); // an uncleared timer kept the whole test process alive for 30 s
+  child.kill(SIG);
   const code = await new Promise((res) => child.on('exit', res));
   assert.equal(code, 0);
   const line = out.split('\n').find((l) => l.startsWith('RESULT '));
   const res = JSON.parse(line.slice(7));
   assert.equal(res.outcome, 'interrupted');
-  assert.match(res.reason, /SIGINT/);
+  assert.ok(res.reason.includes(SIG));
   assert.ok(fs.existsSync(path.join(root, res.reportPath)));
   assert.equal(rowStatus(root, 'a'), 'doing');
   assert.equal(fs.existsSync(path.join(root, '.git/android-architect/run.lock')), false, 'the lock is released');
@@ -577,4 +578,152 @@ test('a roadmap full of doing rows cannot keep the loop spinning', async () => {
   const r = await go(root);
   assert.equal(r.outcome, 'budget');
   assert.equal(r.iterations, 3);
+});
+
+test('a second signal while the loop is stopping exits at once (default handling)', async () => {
+  const root = project();
+  const child = spawn(process.execPath, [CHILD, root, STUB, 'busy'], { stdio: ['ignore', 'pipe', 'pipe'] });
+  let out = '';
+  const waitFor = (word) => new Promise((res, rej) => {
+    const t = setTimeout(() => rej(new Error(`no ${word}`)), 30_000);
+    const check = () => { if (out.includes(word)) { clearTimeout(t); child.stdout.off('data', onData); res(); } };
+    const onData = (c) => { out += c; check(); };
+    child.stdout.on('data', onData);
+    check();
+  });
+  await waitFor('READY');
+  child.kill('SIGINT');
+  await waitFor('BUSY'); // the child is waiting for its (never settling) agent
+  child.kill('SIGINT');
+  const [code, sig] = await new Promise((res) => child.on('exit', (c, sg) => res([c, sg])));
+  assert.equal(sig, 'SIGINT');
+  assert.equal(code, null);
+  assert.ok(!out.includes('RESULT'));
+  assert.equal(rowStatus(root, 'a'), 'doing');
+});
+
+// ---------- build-code gate (ruling 15) ----------
+const GRADLEW = { gradlew: '#!/bin/sh\necho build\n' };
+const evilGradlew = (root) => fs.writeFileSync(path.join(root, 'gradlew'), '#!/bin/sh\ntouch pwned\n');
+
+test('build files changed by the agent stop the loop before verification; approval by exact hash lets it go on', async () => {
+  const root = project(CHAIN, { extra: GRADLEW });
+  let verified = 0;
+  const verifier = async () => { verified++; return okVerifier(); };
+  const r = await go(root, { agent: worker(async (rt) => { evilGradlew(rt); }), verifier });
+  assert.equal(r.outcome, 'needs-human');
+  assert.match(r.reason, /^build files changed: 1 — review, then rerun with --approve-build-changes [0-9a-f]{64}$/);
+  assert.equal(verified, 0, 'build code never ran');
+  assert.equal(rowStatus(root, 'a'), 'doing');
+  assert.equal(commits(root).length, 1);
+  assert.deepEqual(r.buildFiles, ['gradlew']);
+  const { md, json } = readReport(root, r);
+  assert.match(md, /Build files changed by the agent/);
+  assert.deepEqual(json.buildFiles, ['gradlew']);
+  const hash = r.reason.split(' ').pop();
+
+  const again = project(CHAIN, { extra: GRADLEW });
+  const ok = await go(again, { agent: worker(async (rt) => { evilGradlew(rt); }), approvedBuildChanges: [hash] });
+  assert.equal(ok.outcome, 'done');
+  // later edits invalidate the approval
+  const third = project(CHAIN, { extra: GRADLEW });
+  const bad = await go(third, { agent: worker(async (rt) => { fs.writeFileSync(path.join(rt, 'gradlew'), '#!/bin/sh\ntouch other\n'); }), approvedBuildChanges: [hash] });
+  assert.equal(bad.outcome, 'needs-human');
+});
+
+test('an untracked or nested build script is gated too', async () => {
+  const root = project();
+  const r = await go(root, { agent: worker(async (rt) => { fs.mkdirSync(path.join(rt, 'feature/x'), { recursive: true }); fs.writeFileSync(path.join(rt, 'feature/x/build.gradle.kts'), 'x'); }) });
+  assert.equal(r.outcome, 'needs-human');
+  assert.match(r.reason, /build files changed: 1/);
+});
+
+// ---------- STOP polling (ruling 16) ----------
+test('.ai/STOP appearing while the agent runs kills it at once (polled)', async () => {
+  const root = project();
+  setTimeout(() => fs.writeFileSync(path.join(root, '.ai/STOP'), ''), 600);
+  const t0 = Date.now();
+  const r = await go(root, { agent: stubAgent('hang'), agentTimeoutMs: 25_000, stopPollMs: 100 });
+  assert.equal(r.outcome, 'stopped');
+  assert.ok(Date.now() - t0 < 10_000, 'stopped long before the agent timeout');
+  assert.equal(rowStatus(root, 'a'), 'doing');
+});
+
+test('.ai/STOP appearing while verification runs kills it at once (polled)', async () => {
+  const root = project();
+  let started;
+  const verifier = () => new Promise(() => { started = true; setTimeout(() => fs.writeFileSync(path.join(root, '.ai/STOP'), ''), 300); });
+  const r = await go(root, { verifier, stopPollMs: 100 });
+  assert.ok(started);
+  assert.equal(r.outcome, 'stopped');
+  assert.equal(commits(root).length, 1);
+});
+
+// ---------- git index and ignore rules (ruling 17) ----------
+test('agent empties .gitignore and force-adds local.properties: tampered, nothing committed', async () => {
+  const root = project(CHAIN, { extra: { '.gitignore': 'local.properties\n' } });
+  const r = await go(root, { agent: worker(async (rt) => {
+    fs.writeFileSync(path.join(rt, 'local.properties'), `sdk.dir=/x\nkey=${FAKE_SECRET}\n`);
+    fs.writeFileSync(path.join(rt, '.gitignore'), '');
+    g(rt, 'add', '-f', 'local.properties');
+  }) });
+  assert.equal(r.outcome, 'tampered');
+  assert.equal(commits(root).length, 1);
+});
+
+test('files the agent force-staged are unstaged: only the runner add -A decides what is committed', async () => {
+  const root = project(CHAIN, { extra: { '.gitignore': 'local.properties\n' } });
+  const r = await go(root, { agent: worker(async (rt, o) => {
+    if (o.step.id !== 'a') return;
+    fs.writeFileSync(path.join(rt, 'local.properties'), `key=${FAKE_SECRET}\n`);
+    g(rt, 'add', '-f', 'local.properties');
+  }) });
+  assert.equal(r.outcome, 'done');
+  assert.ok(!g(root, 'ls-tree', '-r', '--name-only', 'HEAD').includes('local.properties'));
+  assert.ok(!g(root, 'log', '-p', '--all').includes(FAKE_SECRET));
+});
+
+test('secret-looking and runner-state files in the staged set: needs-human, nothing committed, step back to doing', async () => {
+  for (const rel of ['keystore.properties', '.env.production', 'app/release.jks', 'google-services.json', '.ai/notes.md', 'deploy/id_rsa']) {
+    const root = project();
+    const r = await go(root, { agent: worker(async (rt) => { fs.mkdirSync(path.join(rt, path.dirname(rel)), { recursive: true }); fs.writeFileSync(path.join(rt, rel), 'x'); }) });
+    assert.equal(r.outcome, 'needs-human', rel);
+    assert.match(r.reason, /^the commit was refused: refusing to commit 1 file\(s\) that look like secrets or runner state/, rel);
+    assert.equal(commits(root).length, 1, rel);
+    assert.equal(rowStatus(root, 'a'), 'doing', rel);
+    assert.equal(g(root, 'diff', '--cached', '--name-only').trim(), '', 'index left clean');
+  }
+});
+
+test('an agent change that only touches .ai/migration bookkeeping does not count as progress', async () => {
+  const root = project();
+  const r = await go(root, { agent: async (rt, _c, o) => { fs.writeFileSync(path.join(rt, '.ai/migration/notes.md'), 'x'); return reply(o.step.id); } });
+  assert.equal(r.outcome, 'no-progress');
+});
+
+// ---------- verification deadline, resume, lock (minors) ----------
+test('all verification commands share one deadline', async () => {
+  const root = project(CHAIN, { extra: { 'tools/sleep.js': 'setTimeout(() => {}, 800);\n' } });
+  const config = { verification: { commands: [['node', 'tools/sleep.js'], ['node', 'tools/sleep.js']], timeoutSeconds: 60 } };
+  const { runVerification } = await import('../skill/scripts/lib/runverify.js');
+  const r = await runVerification(root, config, { totalMs: 1200 });
+  assert.equal(r.ok, false);
+  assert.equal(r.results.length, 2);
+  assert.equal(r.results[1].timedOut, true, 'the second command only got what was left');
+});
+
+test('resume matches the cut subject of a long step id, but not when another step shares the cut prefix', async () => {
+  const long = `x${'y'.repeat(79)}`;
+  for (const [ids, expectRun] of [[[long, 'z'], ['z']], [[long, `${long}-2`], [`${long}`, `${long}-2`]]]) {
+    const plan = mkPlan(ids.map((id) => S(id, 'T', {})));
+    const root = project(plan);
+    startRunBranch(root, { branchPrefix: 'android-architect/run', now: Date.UTC(2026, 10, 20) });
+    setStatus(root, long, 'doing', 'todo');
+    fs.writeFileSync(path.join(root, 'a.kt'), 'x');
+    assert.ok(commitStep(root, { id: long, title: 'T' }, 'T'));
+    const calls = [];
+    const r = await go(root, { agent: worker(null, calls) });
+    assert.equal(r.outcome, 'done');
+    assert.deepEqual(calls.map((c) => c.step.id), expectRun);
+  }
 });
