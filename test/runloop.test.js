@@ -883,3 +883,13 @@ test('verify-only resume: a step whose commit already exists is refused plainly;
   assert.equal(r2.outcome, 'refused');
   assert.match(r2.reason, /tags of any step/);
 });
+
+test('an includeBuild the gate cannot read statically stops the loop (needs-human, plain), nothing verified', async () => {
+  const root = project();
+  let verified = 0;
+  const r = await go(root, { verifier: async () => { verified++; return okVerifier(); }, agent: worker(async (rt) => { fs.writeFileSync(path.join(rt, 'settings.gradle'), 'def p = "x"\nincludeBuild(p)\n'); }) });
+  assert.equal(r.outcome, 'needs-human');
+  assert.match(r.reason, /includeBuild in a form that cannot be read statically/);
+  assert.equal(verified, 0);
+  assert.ok(!r.reason.includes(root));
+});

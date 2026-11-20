@@ -16,7 +16,7 @@ import { redact } from './redact.js';
 import { stripUnsafe } from './mdtext.js';
 import fs from 'node:fs';
 import path from 'node:path';
-import { stopPresent, acquireLock, takeSnapshot, diffSnapshots, buildGate, resumeChecks, ignoredBuildMap, includeBuildDirs } from './runguard.js';
+import { stopPresent, acquireLock, takeSnapshot, diffSnapshots, buildGate, resumeChecks, ignoredBuildMap, includeBuildDirs, verificationScripts } from './runguard.js';
 import { writeRunReport } from './runreport.js';
 
 export const OUTCOMES = Object.freeze(['done', 'budget', 'no-progress', 'repeated-error', 'verification-failed', 'needs-human', 'stopped', 'failed', 'refused', 'tampered', 'interrupted']);
@@ -400,7 +400,7 @@ export async function runLoop(root, options = {}) {
     }
     snapshot = takeSnapshot(git, root);
     try {
-      ignoredBase = ignoredBuildMap(git, root, includeBuildDirs(topOf(), root));
+      ignoredBase = ignoredBuildMap(git, root, includeBuildDirs(topOf(), root), verificationScripts(config));
     } catch {
       ignoredBase = null; // the gate reports the same problem
     }

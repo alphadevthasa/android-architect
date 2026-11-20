@@ -102,7 +102,7 @@ class GitFailure extends Error {
   }
 }
 
-function rawGit(root, args, { input, extra = [] } = {}) {
+function rawGit(root, args, { input, extra = [], binary = false } = {}) {
   assertNeverNetwork(['git', ...args]);
   const env = cleanGitEnv({ GIT_TERMINAL_PROMPT: '0', GIT_CONFIG_NOSYSTEM: '1' });
   try {
@@ -110,7 +110,7 @@ function rawGit(root, args, { input, extra = [] } = {}) {
       cwd: root,
       env,
       input,
-      encoding: 'utf8',
+      encoding: binary ? 'buffer' : 'utf8',
       stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
       timeout: GIT_TIMEOUT_MS,
       maxBuffer: 64 * 1024 * 1024,
@@ -235,9 +235,9 @@ function filterOverrides(root) {
  * and carries the hardening list plus empty overrides for every repo-local filter.
  * Throws GitFailure (message "git <subcommand> failed", `status` = exit code or null) on a non-zero exit.
  */
-export function runGit(root, args, { input } = {}) {
+export function runGit(root, args, { input, binary = false } = {}) {
   assertNeverNetwork(['git', ...args]);
-  return rawGit(root, args, { input, extra: filterOverrides(root) });
+  return rawGit(root, args, { input, binary, extra: filterOverrides(root) });
 }
 
 /** Trimmed stdout, or null when git exits non-zero. */
@@ -543,19 +543,29 @@ function sensitiveStaged(prefix, records) {
 }
 
 const CONTENT_KINDS = new Set(['aws-access-key', 'google-api-key', 'github-token', 'slack-token', 'jwt', 'authorization-header', 'bearer-token', 'private-key', 'signing-password']);
-const SCAN_BYTES = 256 * 1024;
 const MAX_SCANNED_BLOBS = 2000;
 
-/** needs-human reason when a staged text file's first 256 KB holds a credential (names the PATH only), else null. */
+/** True when a blob's bytes hold a credential: UTF-16 (BOM) decoded, binary (NUL density over 1%) skipped, utf8 and latin1 views scanned. */
+export function blobHasCredentials(buf) {
+  const hit = (t) => findSecrets(t).some((h) => CONTENT_KINDS.has(h.kind));
+  if (buf.length >= 2 && buf[0] === 0xff && buf[1] === 0xfe) return hit(buf.subarray(2).toString('utf16le'));
+  if (buf.length >= 2 && buf[0] === 0xfe && buf[1] === 0xff) return hit(Buffer.from(buf.subarray(2)).swap16().toString('utf16le'));
+  let nul = 0;
+  for (let i = 0; i < buf.length; i++) if (buf[i] === 0) nul++;
+  if (nul > buf.length * 0.01) return false; // binary
+  const utf8 = buf.toString('utf8');
+  if (hit(utf8)) return true;
+  return utf8.includes('\uFFFD') && hit(buf.toString('latin1'));
+}
+
+/** needs-human reason when a staged text file holds a credential (the whole blob, at most 5 MB, is scanned; names the PATH only), else null. */
 function credentialsInStaged(root, prefix, records) {
   const bad = [];
   let scanned = 0;
   for (const r of records) {
     if (r.status === 'D' || (r.mode !== '100644' && r.mode !== '100755')) continue;
-    if (++scanned > MAX_SCANNED_BLOBS) return `more than ${MAX_SCANNED_BLOBS} staged files: too many to scan for credentials; nothing was committed`;
-    const head = runGit(root, ['cat-file', 'blob', r.sha]).slice(0, SCAN_BYTES);
-    if (head.includes('\0')) continue; // binary
-    if (findSecrets(head).some((h) => CONTENT_KINDS.has(h.kind))) bad.push(plainText(r.path.slice(prefix.length), 80));
+    if (++scanned > MAX_SCANNED_BLOBS) return `more than ${MAX_SCANNED_BLOBS} staged files: too many to scan for credentials, so a human must review and commit this step by hand; nothing was committed`;
+    if (blobHasCredentials(runGit(root, ['cat-file', 'blob', r.sha], { binary: true }))) bad.push(plainText(r.path.slice(prefix.length), 80));
   }
   return bad.length === 0 ? null : `refusing to commit ${bad.length} file(s) whose content looks like credentials (${bad.slice(0, 5).join(', ')}); nothing was committed`;
 }

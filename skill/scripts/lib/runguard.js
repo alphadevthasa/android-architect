@@ -4,7 +4,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { RunRefusal, isSecretName } from './rungit.js';
+import { RunRefusal, isSecretName, plainText } from './rungit.js';
 import { parseRoadmap } from './runplan.js';
 
 const posix = (p) => p.split(path.sep).join('/');
@@ -13,7 +13,7 @@ export const STOP_FILE = '.ai/STOP';
 const MAX_IGNORED_ENTRIES = 5000;
 const MAX_SETTINGS_BYTES = 256 * 1024;
 const MAX_SETTINGS_LINES = 5000;
-const MAX_NESTED_ENTRIES = 2000;
+const MAX_NESTED_ENTRIES = 5000;
 const MAX_HOOKS = 200;
 const LOCK_DIR = 'android-architect';
 const LOCK_NAME = 'run.lock';
@@ -147,37 +147,61 @@ export async function acquireLock(git, root, { pid = process.pid, alive = pidAli
 }
 
 // ---------- digest of the files an agent must not touch ----------
-function fileDigest(abs) {
+/** The gate could not read or bound something: the loop reports needs-human with this plain message (no approval possible). */
+export class GateUnsure extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'GateUnsure';
+    this.needsHuman = true;
+  }
+}
+
+/**
+ * Digest of one path: 'absent', 'link:<target>', 'dir', 'special:..', or `file:<mode>:<sha256>` (streamed in 1 MB chunks,
+ * opened O_NOFOLLOW|O_NONBLOCK and re-checked as a regular file, read no further than the observed size + 1 MB).
+ * `strict` (the build gate) throws GateUnsure on anything unreadable or still growing; otherwise a marker string is
+ * returned (tamper digests only need "did it change").
+ */
+function fileDigest(abs, { strict = false } = {}) {
+  const unsure = (why) => {
+    if (strict) throw new GateUnsure(`a build file cannot be checked (${why}); review it by hand`);
+    return `unreadable:${why}`;
+  };
   let st;
   try {
     st = fs.lstatSync(abs);
   } catch (err) {
-    return err.code === 'ENOENT' ? 'absent' : `error:${err.code ?? 'x'}`;
+    if (err.code === 'ENOENT') return 'absent';
+    return unsure(err.code ?? 'error');
   }
   if (st.isSymbolicLink()) {
     try {
       return `link:${fs.readlinkSync(abs)}`;
-    } catch {
-      return 'link:?';
+    } catch (err) {
+      return unsure(err.code ?? 'error');
     }
   }
   if (st.isDirectory()) return 'dir';
   if (!st.isFile()) return `special:${st.mode}`;
-  // Content and permission bits; large files are streamed in chunks (never digested by size alone).
-  const mode = (st.mode & 0o7777).toString(8);
   let fd;
   try {
-    fd = fs.openSync(abs, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
+    fd = fs.openSync(abs, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0) | (fs.constants.O_NONBLOCK ?? 0));
+    const open = fs.fstatSync(fd);
+    if (!open.isFile()) return unsure('not a regular file');
+    const limit = open.size + 1024 * 1024;
     const hash = crypto.createHash('sha256');
     const buf = Buffer.alloc(1024 * 1024);
+    let total = 0;
     for (;;) {
       const n = fs.readSync(fd, buf, 0, buf.length, null);
       if (n === 0) break;
+      total += n;
+      if (total > limit) return unsure('still growing');
       hash.update(buf.subarray(0, n));
     }
-    return `file:${mode}:${hash.digest('hex')}`;
-  } catch {
-    return 'unreadable';
+    return `file:${(open.mode & 0o7777).toString(8)}:${hash.digest('hex')}`;
+  } catch (err) {
+    return unsure(err.code ?? 'error');
   } finally {
     if (fd !== undefined) fs.closeSync(fd);
   }
@@ -272,46 +296,99 @@ export function verificationScripts(config) {
   return out;
 }
 
-/** First quoted string at or after `from` in a line (a literal scan, no pattern built from the text), or null. */
-function firstQuoted(line, from) {
-  let i = from;
-  while (i < line.length && line[i] !== '"' && line[i] !== "'") i++;
-  if (i >= line.length) return null;
-  const q = line[i];
-  const end = line.indexOf(q, i + 1);
-  if (end < 0 || end - i > 300) return null;
-  const v = line.slice(i + 1, end);
-  for (let k = 0; k < v.length; k++) if (v.charCodeAt(k) < 0x20) return null;
-  return v;
+const isInside = (rel) => rel !== '' && rel !== '..' && !rel.startsWith('../') && !path.isAbsolute(rel);
+
+/**
+ * Parses the argument of one `includeBuild` occurrence in `text` (after position `from`) as a LITERAL directory:
+ * includeBuild("dir"), includeBuild 'dir', includeBuild(file("dir")), arguments may continue on the next line. Returns the
+ * string or null when the argument is anything else (a variable, a path expression, interpolation, a call chain).
+ */
+function literalArg(text, from) {
+  const win = text.slice(from, from + 400); // bounded window: the scan stays linear
+  let i = 0;
+  const ws = () => {
+    while (i < win.length && (win[i] === ' ' || win[i] === '\t' || win[i] === '\n' || win[i] === '\r')) i++;
+  };
+  const quoted = () => {
+    const q = win[i];
+    if (q !== '"' && q !== "'") return null;
+    const end = win.indexOf(q, i + 1);
+    if (end < 0) return null;
+    const v = win.slice(i + 1, end);
+    i = end + 1;
+    for (let k = 0; k < v.length; k++) if (v.charCodeAt(k) < 0x20 || v[k] === '$' || v[k] === '\\') return null;
+    return v;
+  };
+  ws();
+  if (win[i] === '(') {
+    i++;
+    ws();
+  }
+  let v;
+  if (win.startsWith('file', i) || win.startsWith('File', i)) {
+    i += 4;
+    ws();
+    if (win[i] !== '(') return null;
+    i++;
+    ws();
+    v = quoted();
+    ws();
+    if (v === null || win[i] !== ')') return null;
+    i++;
+  } else {
+    v = quoted();
+  }
+  if (v === null || v === '') return null;
+  ws();
+  return win[i] === ')' || win[i] === ',' || win[i] === '{' || i >= win.length || win[i] === ';' || win.startsWith('//', i) ? v : null; // `.resolve(...)`, `+ x` and the like: not a literal
 }
 
 /**
- * Directories (repo-relative, lowercase) that settings.gradle(.kts) pulls in with includeBuild(...), read with a bounded
- * literal scan (size and line caps; the file is attacker-influenced). Paths outside the repository are ignored.
+ * Directories (top-relative, lowercase) that settings.gradle(.kts) pulls in with includeBuild: a bounded static literal
+ * scan. Fails closed: an `includeBuild` whose argument cannot be read as a literal, an unreadable/oversized settings file
+ * or more than 2000 occurrences throw GateUnsure. Directories outside the repository are ignored; a symlinked directory
+ * is also added under its real location.
  */
 export function includeBuildDirs(top, root) {
   const dirs = new Set();
+  let realTop;
+  try {
+    realTop = fs.realpathSync(top);
+  } catch {
+    realTop = top;
+  }
+  let occurrences = 0;
   for (const base of new Set([top, root])) {
     for (const name of ['settings.gradle', 'settings.gradle.kts']) {
+      const file = path.join(base, name);
       let text;
       try {
-        const file = path.join(base, name);
         const st = fs.lstatSync(file);
-        if (!st.isFile() || st.size > MAX_SETTINGS_BYTES) continue;
+        if (!st.isFile() || st.size > MAX_SETTINGS_BYTES) throw new GateUnsure(`${name} is not a regular file of at most ${MAX_SETTINGS_BYTES} bytes; review it by hand`);
         text = fs.readFileSync(file, 'utf8');
-      } catch {
-        continue;
+      } catch (err) {
+        if (err instanceof GateUnsure) throw err;
+        if (err.code === 'ENOENT') continue;
+        throw new GateUnsure(`${name} cannot be read (${err.code ?? 'error'}); review it by hand`);
       }
-      for (const line of text.split('\n', MAX_SETTINGS_LINES)) {
-        let from = 0;
-        for (;;) {
-          const at = line.indexOf('includeBuild', from);
-          if (at < 0) break;
-          from = at + 12;
-          const q = firstQuoted(line, from);
-          if (q === null) continue;
-          const rel = path.relative(top, path.resolve(base, q));
-          if (rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel)) dirs.add(posix(rel).toLowerCase());
+      let from = 0;
+      for (;;) {
+        const at = text.indexOf('includeBuild', from);
+        if (at < 0) break;
+        from = at + 12;
+        const next = text[from] ?? '';
+        if (next !== '(' && next !== ' ' && next !== '\t' && next !== '\n' && next !== '\r') continue; // includeBuilds, includeBuildFoo
+        if (++occurrences > 2000) throw new GateUnsure('settings uses includeBuild too often to read statically; review it by hand');
+        const q = literalArg(text, from);
+        if (q === null) throw new GateUnsure('settings uses includeBuild in a form that cannot be read statically; review it by hand');
+        const abs = path.resolve(base, q);
+        const rel = path.relative(top, abs);
+        if (isInside(rel)) dirs.add(posix(rel).toLowerCase());
+        try {
+          const realRel = path.relative(realTop, fs.realpathSync(abs));
+          if (isInside(realRel)) dirs.add(posix(realRel).toLowerCase());
+        } catch {
+          // does not exist (yet): only the lexical form
         }
       }
     }
@@ -319,40 +396,51 @@ export function includeBuildDirs(top, root) {
   return dirs;
 }
 
-/** Files below a directory entry of `git status` (a nested repository or submodule): depth 3, entry cap, no .git. */
+/**
+ * Files below a directory entry of `git status` (a nested repository or submodule), walked fully up to 5000 entries and
+ * depth 12 (no .git). Returns { files, truncated }: truncated is true when a cap was hit or a directory was unreadable.
+ */
 function expandDir(top, rel) {
   const out = [];
+  let truncated = false;
   const walk = (r, depth) => {
-    if (out.length >= MAX_NESTED_ENTRIES) return;
     let names;
     try {
       names = fs.readdirSync(path.join(top, r)).sort();
     } catch {
+      truncated = true;
       return;
     }
     for (const n of names) {
-      if (n === '.git' || out.length >= MAX_NESTED_ENTRIES) continue;
+      if (n === '.git') continue;
+      if (out.length >= MAX_NESTED_ENTRIES) {
+        truncated = true;
+        return;
+      }
       const child = `${r}/${n}`;
       let st;
       try {
         st = fs.lstatSync(path.join(top, child));
       } catch {
+        truncated = true;
         continue;
       }
       if (st.isDirectory() && !st.isSymbolicLink()) {
-        if (depth < 3) walk(child, depth + 1);
+        if (depth < 12) walk(child, depth + 1);
+        else truncated = true;
       } else out.push(child);
     }
   };
   walk(rel.replace(/\/+$/, ''), 1);
-  return out;
+  return { files: out, truncated };
 }
 
-/** Changed and untracked repo-relative paths (read-only `git status -z`); directory entries of nested repos are expanded. */
-export function changedPaths(git, root) {
+/** Like changedPaths, plus `truncated`: nested-repository directories that could not be listed completely. */
+export function changedPathsEx(git, root) {
   const out = git.runGit(root, ['status', '--porcelain=v1', '-z', '--untracked-files=all', '--no-renames']);
   const top = readGit(git, root, ['rev-parse', '--show-toplevel']) || root;
   const paths = [];
+  const truncated = [];
   for (const rec of out.split('\0')) {
     if (!(rec.length > 3 && rec[2] === ' ')) continue;
     const p = rec.slice(3);
@@ -365,36 +453,73 @@ export function changedPaths(git, root) {
         isDir = false;
       }
     }
-    if (isDir) paths.push(...expandDir(top, p));
-    else paths.push(p);
+    if (isDir) {
+      const e = expandDir(top, p);
+      paths.push(...e.files);
+      if (e.truncated) truncated.push(p);
+    } else paths.push(p);
   }
-  return paths;
+  return { paths, truncated };
+}
+
+/** Changed and untracked repo-relative paths (read-only `git status -z`); directory entries of nested repos are expanded. */
+export function changedPaths(git, root) {
+  return changedPathsEx(git, root).paths;
 }
 
 const IGNORED_SPECS = ['gradlew', 'gradlew.bat', '*.gradle', '*.gradle.kts', 'settings.gradle*', 'gradle.properties', 'package.json', '.npmrc', 'Makefile', '*.sh', 'pom.xml', 'verification-metadata.xml', '*.versions.toml', 'buildSrc/**', 'build-logic/**', '.mvn/**', 'gradle/wrapper/**'];
 
 /**
  * Ignored (.gitignore) files that could run during a build, as Map(top-relative path -> digest). Only names of the build
- * set are listed (node_modules/.bin separately, other node_modules content is not), so build/ and node_modules/ stay
- * cheap; more than 5000 entries fails closed (an error with needsHuman).
+ * set are listed (plus verification-argv scripts, includeBuild directories and node_modules/.bin; other node_modules
+ * content is not), so build/ and node_modules/ stay cheap. A node_modules/.bin symlink also lists and digests the file it
+ * resolves to (inside the repository); a target outside the repository or unreadable fails closed. More than 5000
+ * entries, or any unreadable file, throws GateUnsure.
  */
-export function ignoredBuildMap(git, root, dirs = []) {
+export function ignoredBuildMap(git, root, dirs = [], scripts = new Set()) {
   const top = readGit(git, root, ['rev-parse', '--show-toplevel']) || root;
-  const prefix = posix(path.relative(top, root));
   const list = (specs) => {
-    const out = git.runGit(root, ['ls-files', '-o', '-i', '--exclude-standard', '-z', '--', ...specs]);
+    const out = git.runGit(root, ['ls-files', '-o', '-i', '--exclude-standard', '--full-name', '-z', '--', ...specs]);
     return out.split('\0').filter(Boolean);
   };
-  const generic = [...IGNORED_SPECS.map((n) => `:(glob,icase)**/${n}`), ...[...dirs].map((d) => `:(icase)${d}/`), ':(exclude,glob,icase)**/node_modules/**'];
+  const generic = [
+    ...IGNORED_SPECS.map((n) => `:(glob,icase)**/${n}`),
+    ...[...dirs].map((d) => `:(top,literal,icase)${d}/`),
+    ...[...scripts].map((sc) => `:(literal,icase)${sc}`),
+    ':(exclude,glob,icase)**/node_modules/**',
+  ];
   const names = [...list(generic), ...list([':(glob,icase)**/node_modules/.bin/**'])];
-  if (names.length > MAX_IGNORED_ENTRIES) {
-    throw Object.assign(new Error(`more than ${MAX_IGNORED_ENTRIES} ignored build files; check them by hand`), { needsHuman: true });
-  }
+  if (names.length > MAX_IGNORED_ENTRIES) throw new GateUnsure(`more than ${MAX_IGNORED_ENTRIES} ignored build files; check them by hand`);
   const map = new Map();
-  for (const n of names) {
-    const rel = prefix ? `${prefix}/${n}` : n;
-    map.set(rel, fileDigest(path.join(top, rel)));
+  let realTop;
+  try {
+    realTop = fs.realpathSync(top);
+  } catch {
+    realTop = top;
   }
+  for (const rel of names) {
+    const abs = path.join(top, rel);
+    map.set(rel, fileDigest(abs, { strict: true }));
+    const segs = rel.toLowerCase().split('/');
+    const bin = segs.some((x, k) => x === 'node_modules' && segs[k + 1] === '.bin');
+    let isLink = false;
+    try {
+      isLink = fs.lstatSync(abs).isSymbolicLink();
+    } catch {
+      isLink = false;
+    }
+    if (bin && isLink) {
+      let target;
+      try {
+        target = path.relative(realTop, fs.realpathSync(abs));
+      } catch {
+        throw new GateUnsure('a node_modules/.bin entry points at something that cannot be resolved; review it by hand');
+      }
+      if (!isInside(target)) throw new GateUnsure('a node_modules/.bin entry points outside the repository; review it by hand');
+      map.set(posix(target), fileDigest(path.join(top, target), { strict: true }));
+    }
+  }
+  if (map.size > MAX_IGNORED_ENTRIES) throw new GateUnsure(`more than ${MAX_IGNORED_ENTRIES} ignored build files; check them by hand`);
   return map;
 }
 
@@ -425,13 +550,15 @@ export function buildGate(git, root, config, approved = [], baseline = null) {
     const inner = prefix && posix(p).startsWith(`${posix(prefix)}/`) ? posix(p).slice(posix(prefix).length + 1) : posix(p);
     return isBuildPath(p, scripts, dirs) || isBuildPath(inner, scripts, dirs) || symlinkMatches(top, p, scripts, dirs);
   };
-  const visible = [...new Set(changedPaths(git, root))].filter(matches);
-  const ignored = ignoredBuildMap(git, root, dirs);
+  const changed = changedPathsEx(git, root);
+  if (changed.truncated.length > 0) throw new GateUnsure(`a nested repository is too large or unreadable to check (${plainText(changed.truncated[0], 80)}); review it by hand`);
+  const visible = [...new Set(changed.paths)].filter(matches);
+  const ignored = ignoredBuildMap(git, root, dirs, scripts);
   const ignoredTriggers = [...ignored].filter(([p, d]) => baseline === null || baseline.get(p) !== d).map(([p]) => p);
   const files = [...new Set([...visible, ...ignoredTriggers])].sort();
   if (files.length === 0) return null;
   const all = [...new Set([...files, ...ignored.keys()])].sort();
-  const hash = crypto.createHash('sha256').update(all.map((f) => `${f}\0${fileDigest(path.join(top, f))}`).join('\n')).digest('hex');
+  const hash = crypto.createHash('sha256').update(all.map((f) => `${f}\0${fileDigest(path.join(top, f), { strict: true })}`).join('\n')).digest('hex');
   if (Array.isArray(approved) && approved.includes(hash)) return null;
   return { files, count: files.length, hash };
 }
