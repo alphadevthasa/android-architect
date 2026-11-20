@@ -709,7 +709,7 @@ test('all verification commands share one deadline', async () => {
   const r = await runVerification(root, config, { totalMs: 1200 });
   assert.equal(r.ok, false);
   // the second command only gets what is left: it times out, or (slow machine) the budget is already gone
-  assert.ok((r.results.length === 2 && r.results[1].timedOut === true) || (r.results.length === 1 && /time budget/.test(r.reason)));
+  assert.ok(r.results.at(-1)?.timedOut === true || /time budget/.test(r.reason ?? ''), 'the shared deadline, not 60 s per command, ended it');
 });
 
 test('resume matches the cut subject of a long step id, but not when another step shares the cut prefix', async () => {
@@ -806,4 +806,80 @@ test('verify-only resume: a secret-looking file in the tree -> needs-human; STOP
   r = await go(t.root, { agent: worker(null, calls), approvedBuildChanges: [t.hash] });
   assert.equal(r.outcome, 'refused');
   assert.equal(calls.length, 0);
+});
+
+// ---------- round 3 ----------
+test('a second synthetic abort signal does not crash; SIGINT then options.signal abort ends cleanly', async () => {
+  const root = project();
+  const ac = new AbortController();
+  const r = await go(root, { signal: ac.signal, interruptGraceMs: 300, agent: async () => { setTimeout(() => process.emit('SIGINT'), 20); setTimeout(() => ac.abort(), 100); return new Promise(() => {}); } });
+  assert.equal(r.outcome, 'interrupted');
+  assert.equal(r.reason, REASONS.interrupted('SIGINT'));
+});
+
+test('ignored build code written by the agent (build/x.sh, node_modules/.bin/x) gates before `npm test` verification', async () => {
+  for (const rel of ['build/x.sh', 'node_modules/.bin/x']) {
+    const root = project(CHAIN, { config: { verification: { commands: [['npm', 'test']] } }, extra: { '.gitignore': 'build/\nnode_modules/\n', 'package.json': '{"scripts":{"test":"x"}}' } });
+    let verified = 0;
+    const r = await go(root, { verifier: async () => { verified++; return okVerifier(); }, agent: worker(async (rt) => { fs.mkdirSync(path.dirname(path.join(rt, rel)), { recursive: true }); fs.writeFileSync(path.join(rt, rel), 'evil'); }) });
+    assert.equal(r.outcome, 'needs-human', rel);
+    assert.match(r.reason, /^build files changed: 1/, rel);
+    assert.equal(verified, 0);
+    assert.deepEqual(r.buildFiles, [rel]);
+  }
+});
+
+test('build-logic and includeBuild sources written by the agent gate', async () => {
+  const root = project(CHAIN, { extra: { 'settings.gradle.kts': 'includeBuild("conv")\n', 'conv/a.kt': 'a' } });
+  const r = await go(root, { agent: worker(async (rt) => { fs.writeFileSync(path.join(rt, 'conv/b.kt'), 'evil'); fs.mkdirSync(path.join(rt, 'build-logic'), { recursive: true }); fs.writeFileSync(path.join(rt, 'build-logic/c.kt'), 'evil'); }) });
+  assert.equal(r.outcome, 'needs-human');
+  assert.match(r.reason, /build files changed: 2/);
+});
+
+test('credential names (extended list) and credential content in staged files: needs-human, path only, index clean', async () => {
+  for (const rel of ['credentials.json', 'service-account-prod.json', 'AuthKey.p8', 'cert.pfx', 'secring.gpg', 'id_ed25519', 'id_ecdsa.pub', '.netrc', '.aws/credentials', 'vault.kdbx']) {
+    const root = project();
+    const r = await go(root, { agent: worker(async (rt) => { fs.mkdirSync(path.join(rt, path.dirname(rel)), { recursive: true }); fs.writeFileSync(path.join(rt, rel), 'x'); }) });
+    assert.equal(r.outcome, 'needs-human', rel);
+    assert.equal(g(root, 'diff', '--cached', '--name-only').trim(), '');
+  }
+  const contents = { 'src/Keys.kt': `val k = "${FAKE_SECRET}"\n`, 'src/pem.txt': '-----BEGIN RSA PRIVATE KEY-----\nMIIBOgIBAAJBAKj34GkxFhD90vcNLYLInFEX6Ppy1tPf9Cnzj4p4WGeKLs1Pt8Qu\n-----END RSA PRIVATE KEY-----\n', 'src/h.txt': 'Authorization: Bearer abcdef0123456789abcdef0123456789\n', 'app/build.txt': 'storePassword "hunter2hunter2"\n' };
+  for (const [rel, text] of Object.entries(contents)) {
+    const root = project();
+    const r = await go(root, { agent: worker(async (rt) => { fs.mkdirSync(path.join(rt, path.dirname(rel)), { recursive: true }); fs.writeFileSync(path.join(rt, rel), text); }) });
+    assert.equal(r.outcome, 'needs-human', rel);
+    assert.match(r.reason, /whose content looks like credentials/);
+    assert.ok(r.reason.includes(path.basename(rel)));
+    assert.ok(!JSON.stringify(r).includes(FAKE_SECRET) && !r.reason.includes('hunter2'));
+    assert.equal(g(root, 'diff', '--cached', '--name-only').trim(), '');
+    assert.equal(commits(root).length, 1);
+  }
+  // binary files and ordinary text pass
+  const root = project();
+  const ok = await go(root, { agent: worker(async (rt) => { fs.writeFileSync(path.join(rt, 'blob.bin'), Buffer.concat([Buffer.from([0]), Buffer.from(FAKE_SECRET)])); fs.writeFileSync(path.join(rt, 'notes.txt'), 'password handling is described here\n'); }) });
+  assert.equal(ok.outcome, 'done');
+});
+
+test('verify-only resume: a step whose commit already exists is refused plainly; changed tags in the dirty roadmap are refused', async () => {
+  const t = await gated();
+  // simulate: the doing step already has its commit on the run branch while approved changes sit in the tree
+  const stash = g(t.root, 'stash', '-u', '-q');
+  void stash;
+  g(t.root, 'stash', 'pop', '-q');
+  fs.mkdirSync(path.join(t.root, 'src'), { recursive: true });
+  g(t.root, 'add', 'src');
+  const commitNow = () => g(t.root, 'commit', '-q', '--allow-empty', '-m', 'feat(migration): a: First');
+  commitNow();
+  const calls = [];
+  const r = await go(t.root, { agent: worker(null, calls), approvedBuildChanges: [t.hash] });
+  assert.equal(r.outcome, 'refused');
+  assert.match(r.reason, /already has its commit on the run branch/);
+  assert.equal(calls.length, 0);
+
+  const u = await gated();
+  const rm = fs.readFileSync(path.join(u.root, '.ai/migration/roadmap.md'), 'utf8');
+  fs.writeFileSync(path.join(u.root, '.ai/migration/roadmap.md'), rm.replace('| `b` | Second', '| `b` | Second [decision]'));
+  const r2 = await go(u.root, { agent: worker(null, []), approvedBuildChanges: [u.hash] });
+  assert.equal(r2.outcome, 'refused');
+  assert.match(r2.reason, /tags of any step/);
 });

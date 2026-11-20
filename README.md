@@ -112,6 +112,10 @@ After `recommend`, these commands turn the path into work. All scripts are offli
 - `fitness` (`fitness.js`): turns the `fitness` rules of accepted ADRs into a static check (`--check`) and into generated files in `.ai/fitness/` (a Gradle task `architectureFitness`, a Konsist test, `verify-commands.json`, a README). The Gradle script needs Gradle 8.11 or newer. The files are yours to review and apply; `--out <dir>` writes them outside the project.
 - `review`: reads the current change with read-only `git diff` and checks it against accepted ADRs, the accepted architecture target, the rubrics, the components registry and, when rules exist, `fitness.js --check`. It writes nothing unless you ask.
 
+### Limits of the run loop
+
+The autonomous `run` loop is a guard rail, not a sandbox. Before verification it stops for a human when the agent changed build files (Gradle wrapper and scripts, `buildSrc`, `build-logic` and `includeBuild` folders, `package.json`, `.npmrc`, version catalogs, shell scripts and the like, including ignored ones), and you approve the exact content with `--approve-build-changes <hash>` after reading `git diff` of the listed files; that hash must come only from the command line, never from a config file or the environment. The gate covers build files only: test and main sources the agent writes, and annotation processors, still execute during verification as you. For repositories you do not trust, run the loop in a container, a VM or a dedicated user account. `.ai/STOP` is cooperative: it is checked every second and before each commit, and a hostile agent can race that poll; Ctrl-C and other signals always work.
+
 `--out` of `scan.js`, `features.js`, `lib-update.js` and `migration-plan.js` must point outside the project and never follows symlinks or hard links.
 
 **Unverified data.** Playbooks (`verified: false`), library versions (`catalog/versions.json`, `verified: false`, marked `verify` when older than 90 days) and the compliance dates and links in the catalog were written from memory and have not been audited. Check the official documentation before relying on them.

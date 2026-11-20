@@ -8,7 +8,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { cleanGitEnv, addToExclude } from './git.js';
-import { redact } from './redact.js';
+import { redact, findSecrets } from './redact.js';
 import { stripUnsafe } from './mdtext.js';
 import { oneLine } from './overrides.js';
 import { RUN_CONFIG_FILE, DEFAULT_RUN_CONFIG, validateRunConfig } from './runconfig.js';
@@ -519,12 +519,16 @@ function symlinkEscapes(root, top, rec, gitDirs) {
 }
 
 // Names that must never be committed by the runner (credentials, signing material) and the only .ai files it commits.
-const SECRET_EXACT = new Set(['local.properties', 'google-services.json', 'keystore.properties']);
-const SECRET_SUFFIX = ['.jks', '.keystore', '.p12', '.pem'];
+const SECRET_EXACT = new Set(['local.properties', 'google-services.json', 'keystore.properties', 'credentials.json', 'secring.gpg', '.netrc', '.npmrc']);
+const SECRET_SUFFIX = ['.jks', '.keystore', '.p12', '.pem', '.p8', '.pfx', '.kdbx'];
+const SECRET_PREFIX = ['.env', 'id_rsa', 'id_ed25519', 'id_ecdsa', 'service-account'];
 const AI_COMMITTABLE = new Set(['.ai/migration/roadmap.md', '.ai/migration/plan.json']);
 export function isSecretName(p) {
-  const base = String(p).toLowerCase().split('/').pop();
-  return base.startsWith('.env') || base.startsWith('id_rsa') || SECRET_EXACT.has(base) || SECRET_SUFFIX.some((x) => base.endsWith(x));
+  const low = String(p).toLowerCase();
+  const base = low.split('/').pop();
+  if (low === '.aws/credentials' || low.endsWith('/.aws/credentials')) return true;
+  if (base.startsWith('service-account')) return base.endsWith('.json');
+  return SECRET_PREFIX.some((x) => base.startsWith(x)) || SECRET_EXACT.has(base) || SECRET_SUFFIX.some((x) => base.endsWith(x));
 }
 
 /** A needs-human reason when the staged set holds secret-looking names or .ai files other than the roadmap and plan, else null. */
@@ -536,6 +540,24 @@ function sensitiveStaged(prefix, records) {
     if (isSecretName(r.path) || (rel.startsWith('.ai/') && !AI_COMMITTABLE.has(rel))) bad.push(plainText(r.path, 80));
   }
   return bad.length === 0 ? null : `refusing to commit ${bad.length} file(s) that look like secrets or runner state (${bad.slice(0, 5).join(', ')}); nothing was committed`;
+}
+
+const CONTENT_KINDS = new Set(['aws-access-key', 'google-api-key', 'github-token', 'slack-token', 'jwt', 'authorization-header', 'bearer-token', 'private-key', 'signing-password']);
+const SCAN_BYTES = 256 * 1024;
+const MAX_SCANNED_BLOBS = 2000;
+
+/** needs-human reason when a staged text file's first 256 KB holds a credential (names the PATH only), else null. */
+function credentialsInStaged(root, prefix, records) {
+  const bad = [];
+  let scanned = 0;
+  for (const r of records) {
+    if (r.status === 'D' || (r.mode !== '100644' && r.mode !== '100755')) continue;
+    if (++scanned > MAX_SCANNED_BLOBS) return `more than ${MAX_SCANNED_BLOBS} staged files: too many to scan for credentials; nothing was committed`;
+    const head = runGit(root, ['cat-file', 'blob', r.sha]).slice(0, SCAN_BYTES);
+    if (head.includes('\0')) continue; // binary
+    if (findSecrets(head).some((h) => CONTENT_KINDS.has(h.kind))) bad.push(plainText(r.path.slice(prefix.length), 80));
+  }
+  return bad.length === 0 ? null : `refusing to commit ${bad.length} file(s) whose content looks like credentials (${bad.slice(0, 5).join(', ')}); nothing was committed`;
 }
 
 /** Returns a plain refusal message for the first unsafe staged record, or null. */
@@ -597,6 +619,9 @@ export const commitStep = plainErrors((root, step, title) => {
     if (sensitive) throw new RunRefusal(sensitive, { needsHuman: true });
     const problem = unsafeStaged(root, top, prefix, records, [info.common, info.gitDir]);
     if (problem) throw new RunRefusal(problem);
+    // after the structural checks (size cap, symlinks) so only safe blobs are read
+    const leaked = credentialsInStaged(root, prefix, records);
+    if (leaked) throw new RunRefusal(leaked, { needsHuman: true });
     if (tryGit(root, ['-c', 'user.useConfigOnly=true', 'var', 'GIT_COMMITTER_IDENT']) === null || tryGit(root, ['-c', 'user.useConfigOnly=true', 'var', 'GIT_AUTHOR_IDENT']) === null) {
       throw new RunRefusal('no git identity is configured: set user.name and user.email (git config user.name ...); the runner never invents one');
     }

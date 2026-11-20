@@ -16,7 +16,7 @@ import { redact } from './redact.js';
 import { stripUnsafe } from './mdtext.js';
 import fs from 'node:fs';
 import path from 'node:path';
-import { stopPresent, acquireLock, takeSnapshot, diffSnapshots, buildGate, resumeChecks } from './runguard.js';
+import { stopPresent, acquireLock, takeSnapshot, diffSnapshots, buildGate, resumeChecks, ignoredBuildMap, includeBuildDirs } from './runguard.js';
 import { writeRunReport } from './runreport.js';
 
 export const OUTCOMES = Object.freeze(['done', 'budget', 'no-progress', 'repeated-error', 'verification-failed', 'needs-human', 'stopped', 'failed', 'refused', 'tampered', 'interrupted']);
@@ -120,6 +120,7 @@ export async function runLoop(root, options = {}) {
   let started = false;
   let pendingVerify = false;
   let snapshot = null;
+  let ignoredBase = null;
   let logText = '';
   let lock = null;
   let config = null;
@@ -170,7 +171,7 @@ export async function runLoop(root, options = {}) {
       // a second signal: default handling, immediately
       for (const [s, h] of handlers) process.off(s, h);
       killLiveGroups('SIGKILL');
-      process.kill(process.pid, sig);
+      if (SIGNALS.includes(sig)) process.kill(process.pid, sig); // 'abort' is synthetic: nothing to re-raise
       return;
     }
     interrupted = sig;
@@ -212,6 +213,14 @@ export async function runLoop(root, options = {}) {
     if (!lock.holds()) return stop('refused', REASONS.lockLost);
     return null;
   }
+
+  const topOf = () => {
+    try {
+      return git.runGit(root, ['rev-parse', '--show-toplevel']).trim() || root;
+    } catch {
+      return root;
+    }
+  };
 
   /** Guards after the agent or verification: interruption, tampering (before anything else), STOP, config drift, lock. */
   const guard = async () => {
@@ -321,6 +330,10 @@ export async function runLoop(root, options = {}) {
           return stop('needs-human', `step ${doing.id} is marked doing but ${gated ? 'needs a human decision' : 'depends on unfinished steps'}`);
         }
         if (committed(doing.id, branchInfo.baseCommit, branchInfo.branch, plan)) {
+          if (pendingVerify) {
+            pendingVerify = false;
+            return stop('refused', `step ${doing.id} already has its commit on the run branch; the approved changes belong to something else, so nothing was verified`);
+          }
           try {
             setStatus(root, doing.id, 'done', 'doing');
             git.commitStep(root, doing, doing.title);
@@ -379,12 +392,18 @@ export async function runLoop(root, options = {}) {
       const bad = resumeChecks(git, root, step.id);
       if (bad) return stop(bad.outcome, bad.reason);
       snapshot = takeSnapshot(git, root);
+      ignoredBase = null; // no baseline on a resume: every ignored build file counts
       say(`step ${step.id}: approved build changes; verifying the existing changes without running the agent`);
       entry.result = 'verify-only resume';
       rec.status = 'verify-only';
       return verifyAndCommit(step, entry, rec, config.budgets.maxWallClockMinutes * 60_000 - (now() - startedMs), log);
     }
     snapshot = takeSnapshot(git, root);
+    try {
+      ignoredBase = ignoredBuildMap(git, root, includeBuildDirs(topOf(), root));
+    } catch {
+      ignoredBase = null; // the gate reports the same problem
+    }
     const nonce = newNonce();
     const brief = buildStepBrief(root, { step, plan, config, nonce, previousFailure: previous.get(step.id) });
     const wallLeft = config.budgets.maxWallClockMinutes * 60_000 - (now() - startedMs);
@@ -454,8 +473,9 @@ export async function runLoop(root, options = {}) {
     // Build-code gate: verification executes build code, so build files the agent touched need a human's approval first.
     let gate;
     try {
-      gate = buildGate(git, root, config, options.approvedBuildChanges);
+      gate = buildGate(git, root, config, options.approvedBuildChanges, ignoredBase);
     } catch (e) {
+      if (e?.needsHuman) return stop('needs-human', plain(e, 200));
       return stop('failed', `the build files could not be checked: ${plain(e, 200)}`);
     }
     if (gate) {
