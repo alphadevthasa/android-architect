@@ -63,17 +63,20 @@ test('renderReadme fills placeholders and rejects missing or unknown', () => {
   assert.throws(() => renderReadme(v, path.join(root, '..', 'no-such-dir')));
 });
 
-test('compliance sections separate gap from unknown and omit ok', () => {
+test('compliance sections: gap only under gaps, check and unknown under manual check, ok omitted', () => {
   const ids = catalog.dimensions.find((d) => d.id === 'compliance')?.entries.map((e) => e.id) ?? ['a', 'b', 'c'];
   const p = { ...profile, compliance: [
     { id: ids[0] ?? 'a', status: 'ok', detail: 'DETAIL_OK' },
     { id: 'x-gap', status: 'gap', detail: 'DETAIL_GAP' },
     { id: 'x-unk', status: 'unknown', detail: 'DETAIL_UNK' },
-  ] };
+    { id: 'x-chk', status: 'check', detail: 'DETAIL_CHK\n## Forged', source: 'https://developer.android.com/x' },
+  ], buildPerformance: { items: [{ id: 'org.gradle.caching', status: 'gap', detail: 'PERF_DETAIL', file: 'gradle.properties', line: null }] } };
   const md = renderKnowledge(p, modules, catalog, meta)['knowledge/architecture-current.md'];
-  const gapSec = md.slice(md.indexOf('## Compliance gaps'), md.indexOf('## Compliance not verifiable statically'));
-  const unkSec = md.slice(md.indexOf('## Compliance not verifiable statically'));
-  assert.ok(gapSec.includes('DETAIL_GAP') && !gapSec.includes('DETAIL_UNK'));
-  assert.ok(unkSec.includes('DETAIL_UNK') && !unkSec.includes('DETAIL_GAP'));
+  const gapSec = md.slice(md.indexOf('## Compliance gaps'), md.indexOf('## Compliance needs manual check'));
+  const unkSec = md.slice(md.indexOf('## Compliance needs manual check'), md.indexOf('## Build performance checks'));
+  assert.ok(gapSec.includes('DETAIL_GAP') && !gapSec.includes('DETAIL_UNK') && !gapSec.includes('DETAIL_CHK'));
+  assert.ok(unkSec.includes('DETAIL_UNK') && unkSec.includes('DETAIL_CHK') && !unkSec.includes('DETAIL_GAP'));
+  assert.ok(!md.includes('\n## Forged'));
+  assert.match(md, /## Build performance checks\n\n- org\.gradle\.caching: gap \(PERF_DETAIL\) \[gradle\.properties\]/);
   assert.ok(!md.includes('DETAIL_OK'));
 });

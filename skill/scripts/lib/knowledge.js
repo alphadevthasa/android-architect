@@ -1,8 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { renderProfileMarkdown } from './report.js';
+import { renderProfileMarkdown, buildPerfLine } from './report.js';
 import { oneLine } from './overrides.js';
+import { mdText, stripUnsafe } from './mdtext.js';
+export { mdText, stripUnsafe };
 import { findingCountLines, severityCount } from './security.js';
 
 const DEFAULT_TEMPLATES = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'templates', 'ai');
@@ -59,15 +61,20 @@ function renderArchitecture(profile, catalog) {
   out.push('## Overview', '');
   out.push(`- Modules: ${profile.modules.length}`);
   out.push(`- SDK: min ${sdk.minSdk ?? '?'}, target ${sdk.targetSdk ?? '?'}, compile ${sdk.compileSdk ?? '?'}`);
-  const line = (c) => `- ${catalog.entry('compliance', c.id)?.name ?? c.id}: ${c.status} (${c.detail})`;
+  const line = (c) => `- ${oneLine(catalog.entry('compliance', c.id)?.name ?? c.id)}: ${c.status} (${mdText(c.detail)})${c.source ? ` source: ${mdText(c.source)}` : ''}`;
   const gaps = profile.compliance.filter((c) => c.status === 'gap');
-  const unknown = profile.compliance.filter((c) => c.status === 'unknown');
+  const manual = profile.compliance.filter((c) => c.status === 'check' || c.status === 'unknown');
   out.push('', '## Compliance gaps', '');
   if (gaps.length === 0) out.push('- none');
   for (const c of gaps) out.push(line(c));
-  if (unknown.length) {
-    out.push('', '## Compliance not verifiable statically', '');
-    for (const c of unknown) out.push(line(c));
+  if (manual.length) {
+    out.push('', '## Compliance needs manual check', '');
+    for (const c of manual) out.push(line(c));
+  }
+  const perf = profile.buildPerformance?.items ?? [];
+  if (perf.length) {
+    out.push('', '## Build performance checks', '');
+    for (const i of perf) out.push(buildPerfLine(i));
   }
   const findings = profile.security?.findings ?? [];
   const count = (sev) => severityCount(profile.security, sev);
@@ -127,21 +134,6 @@ const BUCKET_TITLES = {
   first: 'First: pilot candidates',
   next: 'Next: after the pilot',
   last: 'Last: needs preparation or has high risk',
-};
-
-/** Removes Unicode bidi controls and line/paragraph separators (they can visually reorder or forge lines). */
-export const stripUnsafe = (s) => String(s).replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069\u2028\u2029]/g, ' ');
-
-/** One line of Markdown-safe text: whitespace collapsed, pipes escaped, no leading heading, quote or list marker. */
-export const mdText = (s) => {
-  const t = stripUnsafe(s)
-    .replace(/[\u0000-\u0008\u000e-\u001f\u007f-\u009f]/g, '')
-    .replace(/[\s\u2028\u2029]+/g, ' ')
-    .trim()
-    .replace(/\|/g, '\\|')
-    .replace(/</g, '&lt;')
-    .replace(/`/g, "'");
-  return /^[#>-]/.test(t) ? '\\' + t : t;
 };
 
 /** Markdown for a buildFeatureMap result: notes, one table per bucket, then the reasons per feature. */

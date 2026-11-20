@@ -48,7 +48,11 @@
       "successors": [],
       "detect": {
         "computed": true
-      }
+      },
+      "appliesWhen": {
+        "hasNative": true
+      },
+      "source": "https://developer.android.com/guide/practices/page-sizes"
     },
     {
       "id": "edge-to-edge",
@@ -64,7 +68,11 @@
       "successors": [],
       "detect": {
         "computed": true
-      }
+      },
+      "appliesWhen": {
+        "targetSdkMin": 35
+      },
+      "source": "https://developer.android.com/about/versions/15/behavior-changes-15#edge-to-edge"
     },
     {
       "id": "predictive-back",
@@ -80,7 +88,11 @@
       "successors": [],
       "detect": {
         "computed": true
-      }
+      },
+      "appliesWhen": {
+        "targetSdkMin": 36
+      },
+      "source": "https://developer.android.com/guide/navigation/custom-back/predictive-back-gesture"
     },
     {
       "id": "fgs-types",
@@ -93,6 +105,70 @@
         "value": 34,
         "effective": "2024-08-31"
       },
+      "successors": [],
+      "detect": {
+        "computed": true
+      },
+      "appliesWhen": {
+        "usesForegroundService": true
+      },
+      "source": "https://developer.android.com/about/versions/14/changes/fgs-types-required"
+    },
+    {
+      "id": "post-notifications",
+      "name": "Notification runtime permission (Android 13)",
+      "era": 5,
+      "status": "current",
+      "since": "2022-08",
+      "policy": {
+        "kind": "targetSdkEnforced",
+        "value": 33,
+        "effective": "2023-08-31"
+      },
+      "appliesWhen": {
+        "usesNotifications": true
+      },
+      "source": "https://developer.android.com/develop/ui/views/notifications/notification-permission",
+      "successors": [],
+      "detect": {
+        "computed": true
+      }
+    },
+    {
+      "id": "media-permissions",
+      "name": "Granular media permissions (Android 13)",
+      "era": 5,
+      "status": "current",
+      "since": "2022-08",
+      "policy": {
+        "kind": "targetSdkEnforced",
+        "value": 33,
+        "effective": "2023-08-31"
+      },
+      "appliesWhen": {
+        "usesMediaStorage": true
+      },
+      "source": "https://developer.android.com/about/versions/13/behavior-changes-13#granular-media-permissions",
+      "successors": [],
+      "detect": {
+        "computed": true
+      }
+    },
+    {
+      "id": "exact-alarm",
+      "name": "Exact alarm permission (Android 12 to 14)",
+      "era": 5,
+      "status": "current",
+      "since": "2021-10",
+      "policy": {
+        "kind": "targetSdkEnforced",
+        "value": 34,
+        "effective": "2024-08-31"
+      },
+      "appliesWhen": {
+        "usesExactAlarm": true
+      },
+      "source": "https://developer.android.com/about/versions/14/changes/schedule-exact-alarms",
       "successors": [],
       "detect": {
         "computed": true

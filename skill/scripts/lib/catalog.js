@@ -13,6 +13,10 @@ const COMPUTED_DIMENSIONS = ['modularization', 'compliance', 'build-performance'
 const COMPUTED_ENTRIES = ['language.kotlin-k2', 'presentation.god-activity', 'navigation.multi-activity'];
 const SEVERITIES = ['critical', 'high', 'medium', 'low'];
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const POLICY_KINDS = ['targetSdkMin', 'targetSdkEnforced', 'pageSizeBytes'];
+// appliesWhen signals (compliance advice): targetSdkMin is an integer, every other key a boolean.
+const APPLIES_BOOLEAN = ['hasNative', 'usesForegroundService', 'usesExactAlarm', 'usesNotifications', 'usesMediaStorage'];
+const SOURCE_HOSTS = ['developer.android.com', 'source.android.com'];
 export const DEFAULT_CONTENT_GLOB = '**/*.{kt,java}';
 const DEFAULT_DIR = new URL('../../catalog/', import.meta.url);
 /** Directory of the migration playbooks shipped with the catalog. */
@@ -96,6 +100,33 @@ function validateVulnerable(where, e, errs) {
   }
 }
 
+function validateAppliesWhen(where, aw, errs) {
+  if (!isObj(aw)) {
+    errs.push(`${where}: appliesWhen must be an object`);
+    return;
+  }
+  for (const [k, v] of Object.entries(aw)) {
+    if (k === 'targetSdkMin') {
+      if (!Number.isInteger(v) || v < 1) errs.push(`${where}: appliesWhen.targetSdkMin must be a positive integer`);
+    } else if (APPLIES_BOOLEAN.includes(k)) {
+      if (typeof v !== 'boolean') errs.push(`${where}: appliesWhen.${k} must be a boolean`);
+    } else {
+      errs.push(`${where}: appliesWhen.${k} is not a known signal`);
+    }
+  }
+}
+
+/** A documentation link: https, an allowed host exactly, no credentials, no whitespace. */
+function isAllowedSource(v) {
+  if (!isStr(v) || !v.startsWith('https://') || /\s/.test(v)) return false;
+  try {
+    const u = new URL(v);
+    return u.protocol === 'https:' && u.username === '' && u.password === '' && u.port === '' && SOURCE_HOSTS.includes(u.hostname);
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Validate one catalog entry. `ctx` is { hasDimension(id), hasEntry(dimId, id), allowComputed? }: the lookups resolve
  * successor and prerequisite references; `allowComputed` (boolean) overrides the built-in computed-signal allowlist.
@@ -117,13 +148,20 @@ export function validateEntry(dimId, e, ctx) {
     if (!isObj(e.policy)) errs.push(`${where}: policy must be an object`);
     else {
       if (e.policy.kind !== undefined && !isStr(e.policy.kind)) errs.push(`${where}: policy.kind must be a non-empty string`);
-      if (e.policy.kind === 'targetSdkMin' && !Number.isInteger(e.policy.value)) {
-        errs.push(`${where}: policy.value must be an integer for targetSdkMin`);
+      else if (e.policy.kind !== undefined && !POLICY_KINDS.includes(e.policy.kind)) {
+        errs.push(`${where}: policy.kind "${e.policy.kind}" is not one of ${POLICY_KINDS.join(', ')}`);
+      }
+      if (POLICY_KINDS.includes(e.policy.kind) && !Number.isInteger(e.policy.value)) {
+        errs.push(`${where}: policy.value must be an integer for ${e.policy.kind}`);
       }
       if (e.policy.effective !== undefined && !(typeof e.policy.effective === 'string' && ISO_DATE_RE.test(e.policy.effective))) {
         errs.push(`${where}: policy.effective must be YYYY-MM-DD`);
       }
     }
+  }
+  if (e.appliesWhen !== undefined) validateAppliesWhen(where, e.appliesWhen, errs);
+  if (e.source !== undefined && !isAllowedSource(e.source)) {
+    errs.push(`${where}: source must be an https URL on ${SOURCE_HOSTS.join(' or ')}`);
   }
   if (!Array.isArray(e.successors)) {
     errs.push(`${where}: successors must be an array`);

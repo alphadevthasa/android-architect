@@ -176,7 +176,7 @@ test('required entry ids exist per dimension', () => {
     modularization: 'single-module app-plus-libraries layer-modules feature-modules api-impl-modules dynamic-features polyrepo-aar monorepo-convention',
     testing: 'instrumentation-robotium junit4 mockito espresso mockk turbine robolectric compose-ui-test paparazzi roborazzi junit5 kotest',
     'static-analysis': 'android-lint checkstyle pmd findbugs-spotbugs ktlint detekt spotless',
-    compliance: 'target-sdk-35 target-sdk-36 page-size-16kb edge-to-edge predictive-back fgs-types',
+    compliance: 'target-sdk-35 target-sdk-36 page-size-16kb edge-to-edge predictive-back fgs-types post-notifications media-permissions exact-alarm',
     'build-performance': 'config-cache build-cache non-transitive-r parallel kapt-free',
   };
   for (const [dim, ids] of Object.entries(want)) {

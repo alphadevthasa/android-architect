@@ -7,6 +7,8 @@ import { DEFAULT_CONTENT_GLOB } from './catalog.js';
 import { securityFindings, summarizeFindings } from './security.js';
 import { compareVersions } from './version.js';
 import { vulnerableDependencies } from './vuln.js';
+import { evaluateCompliance } from './compliance.js';
+import { evaluateBuildPerformance, kaptUse, K2_MIN_VERSION } from './buildperf.js';
 
 export { compareVersions };
 
@@ -19,7 +21,6 @@ const SOURCE_EXT = new Set(['.java', '.kt']);
 const LAYOUT_RE = globToRegExp('**/res/layout*/*.xml');
 const MANIFEST_RE = globToRegExp('**/AndroidManifest.xml');
 const IMPORT_RE = /^\s*import\s+(?:static\s+)?([\w.]+)/;
-const KAPT_PLUGINS = new Set(['kotlin-kapt', 'org.jetbrains.kotlin.kapt']);
 // Layer modules are top-level :data / :domain / :presentation only; a nested
 // :core:data is a shared library module, not layer-based modularization.
 const LAYER_NAMES = new Set(['data', 'domain', 'presentation']);
@@ -29,7 +30,6 @@ export const FEATURE_SEGMENT = /^features?([-_].+)?$/;
 // same dimension matched the same file (a plain ViewModel that already uses
 // LiveData or a StateFlow UI state is that pattern, not plain MVVM).
 const FILE_EXCLUSIONS = { 'presentation.mvvm-viewmodel': ['mvvm-livedata', 'udf-stateflow'] };
-const TARGET_SDK_MIN = 'targetSdkMin';
 // Computed entries not handled by evaluateComputed() are not evaluated in M1
 // and never emitted. Compliance is reported separately in profile.compliance.
 const COMPLIANCE_DIM = 'compliance';
@@ -227,12 +227,12 @@ function evaluateComputed(dimId, entryId, ctx) {
   if (key === 'language.kotlin-k2') {
     for (const u of ctx.buildUnits) {
       for (const p of u.build.plugins) {
-        if (p.id.startsWith('org.jetbrains.kotlin') && p.version && compareVersions(p.version, '2.0') >= 0) {
+        if (p.id.startsWith('org.jetbrains.kotlin') && p.version && compareVersions(p.version, K2_MIN_VERSION) >= 0) {
           addEvidence(acc, u.key, 'module', { file: u.file, line: p.line, signal: `kotlin plugin ${p.version}` });
         }
       }
       for (const dep of u.build.dependencies) {
-        if (dep.group === 'org.jetbrains.kotlin' && dep.version && compareVersions(dep.version, '2.0') >= 0) {
+        if (dep.group === 'org.jetbrains.kotlin' && dep.version && compareVersions(dep.version, K2_MIN_VERSION) >= 0) {
           addEvidence(acc, u.key, 'module', { file: u.file, line: dep.line, signal: `kotlin ${dep.version}` });
         }
       }
@@ -252,10 +252,7 @@ function evaluateComputed(dimId, entryId, ctx) {
     return acc;
   }
   if (key === 'build-performance.kapt-free') {
-    const usesKapt = ctx.buildUnits.some(
-      (u) => u.appliedPlugins.some((p) => KAPT_PLUGINS.has(p.id)) || u.build.dependencies.some((d) => /^kapt/.test(d.configuration ?? '')),
-    );
-    if (!usesKapt) for (const u of ctx.buildUnits) addEvidence(acc, u.key, 'module', { file: u.file, line: null, signal: 'computed no kapt' });
+    if (kaptUse(ctx) === null) for (const u of ctx.buildUnits) addEvidence(acc, u.key, 'module', { file: u.file, line: null, signal: 'computed no kapt' });
     return acc;
   }
   return null;
@@ -356,28 +353,6 @@ function sizeSummary(files, read) {
     if (lines) size.loc += lines.filter((l) => l.trim() !== '').length;
   }
   return size;
-}
-
-/**
- * The applied targetSdk policy is the targetSdkMin entry with the highest value
- * whose effective date is on or before the catalog's asOf date.
- */
-function evaluateCompliance(sdk, catalog) {
-  const asOf = String(catalog.asOf ?? '');
-  const policies = (catalog.dimensions.find((d) => d.id === COMPLIANCE_DIM)?.entries ?? [])
-    .filter((e) => e.policy?.kind === TARGET_SDK_MIN && typeof e.policy.effective === 'string' && e.policy.effective <= asOf)
-    .sort((a, b) => b.policy.value - a.policy.value);
-  const applied = policies[0];
-  if (!applied) return [];
-  const { value, effective } = applied.policy;
-  if (sdk.targetSdk === null) {
-    return [{ id: applied.id, status: 'unknown', detail: 'targetSdk not statically resolvable' }];
-  }
-  return [{
-    id: applied.id,
-    status: sdk.targetSdk >= value ? 'ok' : 'gap',
-    detail: `max targetSdk is ${sdk.targetSdk}; Google Play minimum is ${value} since ${effective}, per catalog asOf ${asOf}`,
-  }];
 }
 
 /** Drop file units of an entry where an excluding entry matched the same file. */
@@ -499,7 +474,8 @@ export function detectStack(root, catalog) {
     size: sizeSummary(files, read),
     modules: modules.map((m) => ({ path: m.path, dir: m.dir, projectDeps: m.projectDeps })),
     dimensions,
-    compliance: evaluateCompliance(sdk, catalog),
+    compliance: evaluateCompliance(ctx, sdk, catalog),
+    buildPerformance: evaluateBuildPerformance(ctx, catalog),
     security: { ...summarizeFindings(securityFindings(ctx)), ...vulnerableDependencies(ctx.buildUnits, catalog) },
   };
 }

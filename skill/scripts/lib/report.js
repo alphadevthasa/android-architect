@@ -1,7 +1,24 @@
 import { loadCatalog } from './catalog.js';
 import { findingCountLines } from './security.js';
+import { mdText } from './mdtext.js';
 
 const pct = (share, units) => (Math.round(share * 100) === 0 && units > 0 ? '<1%' : `${Math.round(share * 100)}%`);
+const PERF_LABELS = {
+  'org.gradle.configuration-cache': 'org.gradle.configuration-cache',
+  'org.gradle.caching': 'org.gradle.caching',
+  'org.gradle.parallel': 'org.gradle.parallel',
+  'android.nonTransitiveRClass': 'android.nonTransitiveRClass',
+  kapt: 'kapt',
+  'kotlin-version': 'Kotlin version',
+  'agp-version': 'Android Gradle Plugin version',
+  'gradle-version': 'Gradle version',
+};
+
+/** One Markdown line for a profile.buildPerformance item; file and detail are untrusted text. */
+export function buildPerfLine(i) {
+  const at = i.file ? ` [${mdText(i.line === null ? i.file : `${i.file}:${i.line}`)}]` : '';
+  return `- ${PERF_LABELS[i.id] ?? mdText(i.id)}: ${i.status} (${mdText(i.detail)})${at}`;
+}
 const where = (e) => (e.line === null || e.line === undefined ? e.file : `${e.file}:${e.line}`);
 
 /**
@@ -30,7 +47,12 @@ export function renderProfileMarkdown(profile, catalog = loadCatalog()) {
   }
   if (profile.compliance.length) {
     out.push('', `## ${dimName('compliance')}`, '');
-    for (const c of profile.compliance) out.push(`- ${entryName('compliance', c.id)}: ${c.status} (${c.detail})`);
+    for (const c of profile.compliance) out.push(`- ${mdText(entryName('compliance', c.id))}: ${c.status} (${mdText(c.detail)})${c.source ? ` source: ${mdText(c.source)}` : ''}`);
+  }
+  const perf = profile.buildPerformance?.items ?? [];
+  if (perf.length) {
+    out.push('', '## Build performance checks', '');
+    for (const i of perf) out.push(buildPerfLine(i));
   }
   const findings = profile.security?.findings ?? [];
   out.push('', '## Security', '');

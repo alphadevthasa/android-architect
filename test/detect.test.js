@@ -272,10 +272,11 @@ test('I6: compliance uses the highest targetSdkMin policy effective by catalog a
   assert.deepEqual(legacy.map((c) => [c.id, c.status]), [['target-sdk-36', 'gap']]);
   assert.match(legacy[0].detail, /max targetSdk is 28/);
   assert.match(legacy[0].detail, /36/);
-  assert.deepEqual(scan('modern-compose').compliance.map((c) => [c.id, c.status]), [['target-sdk-36', 'gap']]);
+  const targetRows = (p) => p.compliance.filter((c) => c.id.startsWith('target-sdk-')).map((c) => [c.id, c.status]);
+  assert.deepEqual(targetRows(scan('modern-compose')), [['target-sdk-36', 'gap']]);
   const older = { ...catalog, asOf: '2026-01-01' };
   const p = detectStack(fx('modern-compose'), older);
-  assert.deepEqual(p.compliance.map((c) => [c.id, c.status]), [['target-sdk-35', 'ok']]);
+  assert.deepEqual(targetRows(p), [['target-sdk-35', 'ok']]);
   assert.doesNotMatch(renderProfileMarkdown(scan('modern-compose')), /requires 35/);
 });
 
@@ -329,7 +330,7 @@ test('I2: targetSdk from root ext and from libs.versions reaches the profile', (
     'settings.gradle': "include ':app'\n",
     'build.gradle': 'ext {\n  targetSdkVersion = 36\n}\n',
     'app/build.gradle': 'android {\n  defaultConfig {\n    targetSdkVersion rootProject.ext.targetSdkVersion\n  }\n}\n',
-  }, (p) => assert.deepEqual(p.compliance.map((c) => [c.id, c.status]), [['target-sdk-36', 'ok']]));
+  }, (p) => assert.deepEqual(p.compliance.filter((c) => c.id.startsWith('target-sdk-')).map((c) => [c.id, c.status]), [['target-sdk-36', 'ok']]));
   withProject({
     'settings.gradle.kts': 'include(":app")\n',
     'gradle/libs.versions.toml': '[versions]\ntargetSdk = "34"\n',
