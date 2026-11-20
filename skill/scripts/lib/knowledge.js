@@ -251,7 +251,8 @@ function findMarkers(lines) {
   const ends = [];
   let fence = null;
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].endsWith('\r') ? lines[i].slice(0, -1) : lines[i];
+    let line = lines[i].endsWith('\r') ? lines[i].slice(0, -1) : lines[i];
+    if (i === 0 && line.charCodeAt(0) === 0xfeff) line = line.slice(1);
     let k = 0;
     while (k < 3 && line[k] === ' ') k++;
     const c = line[k];
@@ -260,10 +261,14 @@ function findMarkers(lines) {
       while (line[k + n] === c) n++;
       if (n >= 3) {
         if (fence === null) {
-          fence = { c, n };
-          continue;
-        }
-        if (fence.c === c && n >= fence.n && line.slice(k + n).trim() === '') {
+          // A backtick fence's info string cannot contain a backtick: ```x``` is inline code.
+          if (c === '`' && line.slice(k + n).includes('`')) {
+            // not a fence
+          } else {
+            fence = { c, n };
+            continue;
+          }
+        } else if (fence.c === c && n >= fence.n && line.slice(k + n).trim() === '') {
           fence = null;
           continue;
         }
@@ -293,6 +298,7 @@ export function applyComponentsBlock(existing, block) {
   const { begins, ends, fence } = findMarkers(lines);
   const splice = (b, e) => {
     const mid = blockLines.map((l, k) => (crlf && (k < blockLines.length - 1 || e < lines.length - 1) ? l + '\r' : l));
+    if (b === 0 && existing.charCodeAt(0) === 0xfeff) mid[0] = '\uFEFF' + mid[0]; // keep the BOM
     return [...lines.slice(0, b), ...mid, ...lines.slice(e + 1)].join('\n');
   };
   const append = () => {

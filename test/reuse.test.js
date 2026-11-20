@@ -459,3 +459,34 @@ test('secret-looking names in emitted text are redacted in components.md', () =>
 test('detectReuse accepts a profile option', () => {
   assert.equal(detectReuse(fx('reuse-app'), { profile: {} }).duplicationScore, 'medium');
 });
+
+test('annotation arguments with ::class do not break composable or preview detection', () => {
+  const d = tmp();
+  write(d, 'settings.gradle', "include ':app'\n");
+  const body = '    Card {\n        Text()\n        Icon()\n    }\n}\n';
+  const k = 'app/src/main/kotlin/p';
+  write(d, `${k}/A.kt`, `package p\n@Composable\n@OptIn(ExperimentalMaterial3Api::class)\nfun ScreenA() {\n${body}`);
+  write(d, `${k}/B.kt`, `package p\n@OptIn(ExperimentalMaterial3Api::class) @Composable\nfun ScreenB() {\n${body}`);
+  let r = detectReuse(d);
+  assert.deepEqual(r.duplicates.map((x) => x.kind), ['composable'], 'both are composables, not utils');
+  assert.equal(r.duplicates[0].files.length, 2);
+  // Previews stay excluded even with an @OptIn(...::class) line between.
+  write(d, `${k}/P1.kt`, `package p\n@Preview\n@OptIn(X::class)\n@Composable\nfun P1() {\n${body}`);
+  write(d, `${k}/P2.kt`, `package p\n@Composable\n@Preview\n@OptIn(X::class)\nfun P2() {\n${body}`);
+  r = detectReuse(d);
+  assert.equal(r.duplicates[0].files.length, 2, 'previews not counted');
+  assert.deepEqual(r.duplicates.map((x) => x.kind), ['composable']);
+});
+
+test('markers: BOM on line 1 is recognised and kept; inline triple backticks are not a fence', () => {
+  const block = renderComponentsBlock(detectReuse(fx('reuse-app')));
+  const bom = `﻿${COMPONENTS_BEGIN}\nold\n${COMPONENTS_END}\n`;
+  const r = applyComponentsBlock(bom, block);
+  assert.equal(r.note, null);
+  assert.ok(r.text.startsWith('﻿' + COMPONENTS_BEGIN) && !r.text.includes('old'));
+  assert.equal(applyComponentsBlock(r.text, block).text, r.text);
+  const inline = '```val x``` is inline\n\n' + `${COMPONENTS_BEGIN}\nstale\n${COMPONENTS_END}\n`;
+  const r2 = applyComponentsBlock(inline, block);
+  assert.equal(r2.note, null);
+  assert.ok(r2.text.startsWith('```val x``` is inline\n\n') && !r2.text.includes('stale'));
+});

@@ -19,7 +19,7 @@ const MIN_BOILERPLATE = 3;
 const SHARED_NAMES = new Set(['designsystem', 'design-system', 'ui', 'common', 'core-ui', 'shared']);
 const TOKEN_FILE = /^(colors?|theme|dimens?|spacing|tokens?|palette)\.kt$/i;
 const NOT_COMPONENT_CALLS = new Set(['Color', 'TextStyle', 'Offset', 'Size', 'RoundedCornerShape', 'PaddingValues']);
-const DECLARATION = /(^|[^A-Za-z0-9_$])(class|object|interface|fun)(?![A-Za-z0-9_$])/;
+const DECLARATION = /(^|[^A-Za-z0-9_$:.])(class|object|interface|fun)(?![A-Za-z0-9_$])/; // `X::class` is not a declaration
 const NOT_METHODS = new Set(['if', 'for', 'while', 'switch', 'catch', 'synchronized', 'else', 'return', 'new', 'try', 'do']);
 
 const byText = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
@@ -247,7 +247,7 @@ function findFunctions(code, skel, lineOf, java) {
     const current = rest.pop();
     let from = 0;
     for (let k = rest.length - 1; k >= 0; k--) {
-      if (DECLARATION.test(rest[k])) {
+      if (!rest[k].trimStart().startsWith('@') && DECLARATION.test(rest[k])) { // annotation lines never reset the window
         from = k + 1;
         break;
       }
