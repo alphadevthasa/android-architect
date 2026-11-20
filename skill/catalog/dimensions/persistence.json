@@ -114,7 +114,9 @@
       "era": 3,
       "status": "current",
       "since": "2017-05",
-      "successors": [],
+      "successors": [
+        "sqldelight"
+      ],
       "detect": {
         "gradle": [
           {

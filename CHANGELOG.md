@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.0] - Unreleased
+
+### Catalog
+
+- Catalog 2026.11.3: `room` gains the successor `sqldelight` (the Room to SQLDelight playbook needs the edge; written from memory, unverified).
+
 ## [0.3.0] - Unreleased
 
 ### Tool

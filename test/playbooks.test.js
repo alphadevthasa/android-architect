@@ -210,10 +210,13 @@ test('irreversible adds the irreversible tag', () => {
 
 const run = (args) => spawnSync(process.execPath, ['--import', HELPER, CLI, ...args], { encoding: 'utf8' });
 
-test('CLI: list exits 0 with an empty shipped set and lists a --dir playbook', () => {
+test('CLI: list exits 0, lists the shipped playbooks and a --dir playbook', () => {
   const r = run(['list']);
   assert.equal(r.status, 0);
-  assert.match(r.stdout, /No playbooks/);
+  assert.doesNotMatch(r.stdout, /No playbooks/);
+  for (const id of ['okhttp-retrofit--to--ktor-client', 'sqliteopenhelper--to--room', 'room--to--sqldelight']) {
+    assert.ok(r.stdout.includes(id), id);
+  }
   put('okhttp-retrofit--to--ktor-client.md', GOOD);
   const l = run(['list', '--dir', tmp]);
   assert.equal(l.status, 0);
