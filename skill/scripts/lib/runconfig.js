@@ -14,6 +14,7 @@ const MAX_ARGV = 50;
 const MAX_COMMANDS = 20;
 const MAX_ENV = 50;
 const MAX_BRANCH_PREFIX = 100;
+const MAX_PROTECTED = 20;
 const HARD_MAX = Object.freeze({ maxIterations: 200, maxTotalTokens: 20_000_000, maxTurnsPerStep: 200, maxWallClockMinutes: 24 * 60 });
 const MAX_TIMEOUT_SECONDS = 24 * 60 * 60;
 const KINDS = ['claude', 'codex', 'custom'];
@@ -27,6 +28,7 @@ export const DEFAULT_RUN_CONFIG = Object.freeze({
   budgets: Object.freeze({ maxIterations: 10, maxTotalTokens: 400000, maxTurnsPerStep: 20, maxWallClockMinutes: 120 }),
   verification: Object.freeze({ commands: Object.freeze([Object.freeze(['./gradlew', 'assembleDebug', 'testDebugUnitTest', 'lint'])]), timeoutSeconds: 1800 }),
   branchPrefix: 'android-architect/run',
+  protectedBranches: Object.freeze([]),
 });
 
 const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -133,7 +135,7 @@ const validEnvName = (k) => {
   return true;
 };
 
-function branchPrefixProblem(v) {
+function branchNameProblem(v) {
   if (typeof v !== 'string' || v.length === 0) return 'must be a non-empty string';
   if (v.length > MAX_BRANCH_PREFIX) return `is longer than ${MAX_BRANCH_PREFIX} characters`;
   for (const ch of v) if (!/[A-Za-z0-9._/-]/.test(ch)) return 'may only contain letters, digits, ".", "_", "-" and "/"';
@@ -147,7 +149,7 @@ export function validateRunConfig(value, root) {
   const problems = [];
   const bad = (m) => problems.push(m);
   if (!isObj(value)) return { config: null, problems: ['must be a JSON object'] };
-  checkKeys(value, ['schemaVersion', 'agent', 'budgets', 'verification', 'branchPrefix'], 'config', bad);
+  checkKeys(value, ['schemaVersion', 'agent', 'budgets', 'verification', 'branchPrefix', 'protectedBranches'], 'config', bad);
   if (value.schemaVersion !== 1) bad('schemaVersion must be 1');
   const d = DEFAULT_RUN_CONFIG;
   const config = {
@@ -156,6 +158,7 @@ export function validateRunConfig(value, root) {
     budgets: { ...d.budgets },
     verification: { commands: d.verification.commands.map((c) => [...c]), timeoutSeconds: d.verification.timeoutSeconds },
     branchPrefix: d.branchPrefix,
+    protectedBranches: [],
   };
 
   if (Object.hasOwn(value, 'agent')) {
@@ -235,9 +238,25 @@ export function validateRunConfig(value, root) {
   }
 
   if (Object.hasOwn(value, 'branchPrefix')) {
-    const p = branchPrefixProblem(value.branchPrefix);
+    const p = branchNameProblem(value.branchPrefix);
     if (p) bad(`branchPrefix ${p}`);
     else config.branchPrefix = value.branchPrefix;
+  }
+
+  // Extra branch names the runner refuses to work on (default branches it cannot detect: no origin/HEAD, custom name).
+  if (Object.hasOwn(value, 'protectedBranches')) {
+    const pb = value.protectedBranches;
+    if (!Array.isArray(pb)) bad('protectedBranches must be an array of branch names');
+    else if (pb.length > MAX_PROTECTED) bad(`protectedBranches has more than ${MAX_PROTECTED} entries`);
+    else {
+      const names = [];
+      pb.forEach((n, i) => {
+        const p = branchNameProblem(n);
+        if (p) bad(`protectedBranches[${i}] ${p}`);
+        else names.push(n);
+      });
+      config.protectedBranches = names;
+    }
   }
   return problems.length > 0 ? { config: null, problems } : { config, problems };
 }

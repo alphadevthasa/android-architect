@@ -23,5 +23,6 @@
     ],
     "timeoutSeconds": 1800
   },
-  "branchPrefix": "android-architect/run"
+  "branchPrefix": "android-architect/run",
+  "protectedBranches": []
 }

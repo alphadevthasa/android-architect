@@ -170,3 +170,14 @@ test('init creates run.config.json once as a user-owned file and never overwrite
   assert.equal(fs.readFileSync(file, 'utf8'), '{"mine":true}\n');
   assert.ok(second.kept.includes('.ai/run.config.json') && !second.written.includes('.ai/run.config.json'));
 });
+
+test('protectedBranches: default empty, validated names, at most 20', () => {
+  assert.deepEqual(DEFAULT_RUN_CONFIG.protectedBranches, []);
+  assert.deepEqual(loadRunConfig(withConfig(cfg({ protectedBranches: ['release/1.x', 'prod'] }))).protectedBranches, ['release/1.x', 'prod']);
+  rejects(cfg({ protectedBranches: 'main' }), /protectedBranches/);
+  rejects(cfg({ protectedBranches: ['a b'] }), /protectedBranches\[0\]/);
+  rejects(cfg({ protectedBranches: ['-x'] }), /protectedBranches\[0\]/);
+  rejects(cfg({ protectedBranches: ['a..b'] }), /protectedBranches\[0\]/);
+  rejects(cfg({ protectedBranches: [5] }), /protectedBranches\[0\]/);
+  rejects(cfg({ protectedBranches: Array.from({ length: 21 }, (_, i) => `b${i}`) }), /more than 20/);
+});
