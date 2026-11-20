@@ -168,3 +168,11 @@ test('long single lines redact in linear time', () => {
     assert.ok(Date.now() - t0 < 1000, 'redact is too slow on a long line');
   }
 });
+
+test('an Android string resource with a credential name is redacted; labels and references stay', () => {
+  const value = 'k3y' + 'Value' + '0042';
+  const r = redact(`<string name="backend_api_key">${value}</string>\n<string name="password">Password</string>\n<string name="token">@string/x</string>`);
+  assert.equal(r.text.split('\n')[0], '<string name="backend_api_key">[REDACTED:credential]</string>');
+  assert.ok(!r.text.includes(value), 'value removed');
+  assert.deepEqual(r.hits, [{ kind: 'credential', line: 1 }]);
+});

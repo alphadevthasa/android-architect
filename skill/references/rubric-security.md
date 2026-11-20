@@ -19,11 +19,11 @@ Moving from Retrofit and OkHttp to Ktor, or from SharedPreferences to DataStore,
 
 ## 1. Hardcoded secrets
 
-API keys, tokens, passwords, private keys and signing credentials in source, Gradle files, `buildConfigField` values or `.properties` files.
+API keys, tokens, passwords, private keys and signing credentials in source, Gradle files, `buildConfigField` values, `.properties` files or string resources (`res/values*/*.xml`: known key shapes, and credential-like names such as `api_key` or `token` with a value that has a digit).
 
 Signal: `hardcoded-secret` (high). Detail is the secret kind only.
 
-Manual: values built by concatenation, secrets in resources (`strings.xml`), in assets or in test fixtures that ship, keys committed in git history. A key in `BuildConfig` is still in the APK. Prefer server-side secrets, or short-lived tokens issued after login.
+Manual: values built by concatenation, resource values the signal misses (multi-line or without a digit), secrets in assets or in test fixtures that ship, keys committed in git history. A key in `BuildConfig` is still in the APK. Prefer server-side secrets, or short-lived tokens issued after login.
 
 ## 2. Cleartext traffic and network security config
 

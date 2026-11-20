@@ -40,6 +40,10 @@ const SIGNING_QUOTED = /\b((?:storePassword|keyPassword)\s*(?:[=:]\s*|\s+))(?:""
 const SIGNING_BARE_PREFIX = /^(\s*(?:storePassword|keyPassword)\s*[=:]\s*)([\s\S]*)$/; // the rest is checked without backtracking
 const SIGNING_BARE_VALUE = /^[^\s"'$()[\]][^\r\n"'()[\]]*$/;
 const BUILD_CONFIG = /(\bbuildConfigField\s*\(?\s*["']String["']\s*,\s*["']([\w.\-]{1,64})["']\s*,\s*(["'])\\?")((?:\\.|(?!\\?"\3)[^\\])*)(\\?"\3)/g;
+// Android string resource on one line: <string name="api_key" ...>value</string>. Bounded spans keep it linear.
+const XML_STRING = /(<string\b[^>]{0,200}?\bname\s*=\s*["']([\w.\-]{1,64})["'][^>]{0,200}>)([^<]{1,4000})(<\/string>)/g;
+// A credential-looking resource value: no whitespace, at least one digit (UI labels such as "Password" stay), not a reference.
+const XML_SECRET_VALUE = /^(?![@?])(?=[^\d]*\d)\S+$/;
 // key [: Type] (= | : | space) value   e.g. token = "x", const val API_KEY: String = "x", apiKey "x"
 const ASSIGN = new RegExp(`(?<![\\w.\\-])(["']?([\\w.\\-]{1,64})["']?(?:\\s*:\\s*[A-Za-z_][\\w.<>?]{0,40})?(?:\\s*[=:]\\s*|\\s+))${VAL}`, 'g');
 // "KEY"] = v   "KEY" to v   "KEY", v   e.g. manifestPlaceholders["K"] = "x", mapOf("k" to "x"), addHeader("K", "x")
@@ -70,6 +74,12 @@ function redactLine(line, lineNo, hits) {
   }
   out = out.replace(BUILD_CONFIG, (m, pre, key, _q, value, post) => {
     if (!cred(value) || !isCredentialKey(key)) return m;
+    hit('credential');
+    return `${pre}${mark('credential')}${post}`;
+  });
+  out = out.replace(XML_STRING, (m, pre, key, value, post) => {
+    const v = value.trim();
+    if (!cred(v) || !isCredentialKey(key) || !XML_SECRET_VALUE.test(v)) return m;
     hit('credential');
     return `${pre}${mark('credential')}${post}`;
   });

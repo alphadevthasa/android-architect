@@ -6,6 +6,7 @@ const SOURCE_RE = /\.(?:java|kt)$/;
 const GRADLE_RE = /(?:^|\/)[^/]*\.(?:gradle|gradle\.kts)$/;
 const PROPERTIES_RE = /\.properties$/;
 const NETWORK_CONFIG_RE = /(?:^|\/)src\/[^/]+\/res\/xml\/[^/]+\.xml$/;
+const VALUES_XML_RE = /(?:^|\/)res\/values[^/]*\/[^/]+\.xml$/;
 const MAX_TAG = 4000;
 
 const SENSITIVE_LOG_CALL = /\b(?:Log|Timber)\.[vdiwe]\(/;
@@ -148,14 +149,15 @@ export function securityFindings(ctx) {
     const isNetworkConfig = NETWORK_CONFIG_RE.test(file);
     const isSource = SOURCE_RE.test(file);
     const isGradle = GRADLE_RE.test(file);
-    if (!isManifest && !isNetworkConfig && !isSource && !isGradle && !PROPERTIES_RE.test(file)) continue;
+    const isValues = VALUES_XML_RE.test(file);
+    if (!isManifest && !isNetworkConfig && !isSource && !isGradle && !isValues && !PROPERTIES_RE.test(file)) continue;
     const lines = ctx.read(file);
     if (!lines) continue;
     if (isManifest) scanManifest(file, lines, out);
     if (isNetworkConfig) scanNetworkConfig(file, lines, out);
     if (isGradle) scanGradleBuildTypes(file, lines, out);
     if (isSource) scanSource(file, lines, out);
-    if (isSource || isGradle || PROPERTIES_RE.test(file)) scanSecrets(file, lines, out);
+    if (isSource || isGradle || isValues || PROPERTIES_RE.test(file)) scanSecrets(file, lines, out);
   }
   const seen = new Set();
   return out

@@ -197,3 +197,36 @@ test('findings are capped at 50 per id in the profile, with full counts (100k lo
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('res/values*/*.xml string resources: secret shapes and credential names are hardcoded-secret, labels are not', () => {
+  const googleKey = 'AIza' + 'Sy' + 'X'.repeat(33);
+  const named = 'k3y' + 'Value' + '0042';
+  const dir = project({
+    'settings.gradle': "include ':app'\n",
+    'app/build.gradle': "plugins { id 'com.android.application' }\n",
+    'app/src/main/res/values/strings.xml': [
+      '<resources>',
+      `  <string name="google_maps_key" translatable="false">${googleKey}</string>`,
+      `  <string name="backend_api_key">${named}</string>`,
+      '  <string name="password">Password</string>',
+      '  <string name="password_hint">Enter your password</string>',
+      '  <string name="token_ref">@string/other</string>',
+      '</resources>',
+    ].join('\n'),
+    'app/src/main/res/values-de/strings.xml': `<resources>\n  <string name="auth_token">${named}</string>\n</resources>\n`,
+    'app/src/main/res/layout/main.xml': `<x>${googleKey}</x>\n`,
+  });
+  try {
+    const p = detectStack(dir, catalog);
+    const hits = p.security.findings.filter((f) => f.id === 'hardcoded-secret');
+    assert.deepEqual(hits.map((f) => [f.file, f.line, f.detail]), [
+      ['app/src/main/res/values-de/strings.xml', 2, 'credential'],
+      ['app/src/main/res/values/strings.xml', 2, 'google-api-key'],
+      ['app/src/main/res/values/strings.xml', 3, 'credential'],
+    ]);
+    const out = JSON.stringify(p) + renderProfileMarkdown(p, catalog);
+    assert.ok(!out.includes(googleKey) && !out.includes(named), 'no secret value in the profile or its Markdown');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
