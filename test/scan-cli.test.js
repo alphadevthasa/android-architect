@@ -53,3 +53,32 @@ test('bad arguments exit 1 with usage', () => {
   assert.equal(r.status, 1);
   assert.match(r.stderr, /usage: /i);
 });
+
+test('standalone project with an unreadable manifest: plain actionable error, --no-overrides still works', async () => {
+  const { execFileSync, spawnSync } = await import('node:child_process');
+  const cases = [
+    ['corrupt JSON', (ai) => fs.writeFileSync(path.join(ai, 'manifest.json'), '{ nope'), /invalid manifest \.ai\/manifest\.json/],
+    ['newer schema', (ai) => fs.writeFileSync(path.join(ai, 'manifest.json'), '{"schemaVersion":99}'), /newer than supported.*update android-architect|newer than supported.*newer android-architect/],
+    ['a directory instead of a file', (ai) => fs.mkdirSync(path.join(ai, 'manifest.json')), /cannot read \.ai\/manifest\.json: /],
+  ];
+  for (const [name, setup, reason] of cases) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aa-scan-man-'));
+    try {
+      fs.cpSync(path.resolve('test/fixtures/modern-compose'), dir, { recursive: true });
+      fs.mkdirSync(path.join(dir, '.ai'), { recursive: true });
+      setup(path.join(dir, '.ai'));
+      const script = path.resolve('skill/scripts/scan.js');
+      const run = (...a) => spawnSync(process.execPath, [script, dir, ...a], { encoding: 'utf8' });
+      const r = run();
+      assert.equal(r.status, 1, name);
+      assert.match(r.stderr, /^cannot read \.ai\/manifest\.json: /, name);
+      assert.match(r.stderr, reason, name);
+      assert.match(r.stderr, /--no-overrides/, name);
+      assert.doesNotMatch(r.stderr, /Invalid catalog/, name);
+      assert.equal(r.stderr.includes(dir), false, `${name}: no absolute path`);
+      assert.equal(run('--no-overrides').status, 0, name);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
+});

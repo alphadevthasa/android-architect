@@ -3,6 +3,7 @@ import path from 'node:path';
 import { writeAiDir, preflight } from './aidir.js';
 import { siblingRepos, linkWorkspace } from './workspace.js';
 import { readManifest } from './manifest.js';
+import { hubListsRepo } from './overrides.js';
 
 export const BUILD_FILES = ['build.gradle', 'build.gradle.kts', 'settings.gradle', 'settings.gradle.kts'];
 
@@ -131,7 +132,11 @@ export function initProject(root, { now = new Date(), local = false, appendPoint
   }
   const hub = writeAiDir(root, { ...base, workspace: { role: 'hub', hub: '.' }, repos: plan.repos });
   for (const m of plan.members) {
-    members[m.name] = writeAiDir(m.abs, { ...base, workspace: { role: 'member', hub: m.hubRel }, trustedHub: true });
+    // The hub is written now: verify it normally when its repos.json lists this member. When an existing, different
+    // repos.json was kept (the new one went to repos.json.new), the member is not listed yet, so the hub path given on the
+    // command line is trusted for this run only; later runs verify.
+    const listed = hubListsRepo(fs.realpathSync(root), readJson(path.join(root, '.ai', 'repos.json')), m.abs);
+    members[m.name] = writeAiDir(m.abs, { ...base, workspace: { role: 'member', hub: m.hubRel }, trustedHub: !listed });
   }
   return { hub, members, repos: plan.repos };
 }

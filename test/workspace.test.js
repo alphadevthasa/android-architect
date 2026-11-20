@@ -416,7 +416,7 @@ test('an unreadable member manifest raises the hub error instead of falling back
   fs.writeFileSync(path.join(lib, '.ai/manifest.json'), '{ not json');
   const r = script('scan.js', [lib]);
   assert.equal(r.status, 1, r.stdout);
-  assert.match(r.stderr, /catalog-overrides: cannot tell whether this repo is a workspace member/);
+  assert.match(r.stderr, /cannot read \.ai\/manifest\.json: .*doctor --root.*--no-overrides/);
   assert.equal(r.stderr.includes(tmp), false);
 });
 
@@ -428,4 +428,33 @@ test('the member heading names the hub overrides folder, sanitized', () => {
   assert.doesNotMatch(arch(), /from `\.ai\/catalog-overrides\/`/);
   // a hub standalone-style repo keeps the plain heading
   assert.equal(script('scan.js', [hub]).status, 0);
+});
+
+test('hub verification: symlinked hub manifest.json or repos.json, hub inside the member, absolute hub value', () => {
+  hubOverride('company.json', COMPANY);
+  assert.equal(init(['.', '--workspace', '../lib-core']).status, 0);
+  for (const name of ['manifest.json', 'repos.json']) {
+    const f = path.join(hub, '.ai', name);
+    const moved = path.join(tmp, `moved-${name}`);
+    fs.renameSync(f, moved);
+    fs.symlinkSync(moved, f);
+    const r = refreshMember();
+    assert.equal(r.status, 1, name);
+    assert.match(r.stderr, /not a verified workspace hub/);
+    fs.rmSync(f);
+    fs.renameSync(moved, f);
+  }
+  assert.equal(refreshMember().status, 0);
+  // a hub inside the member repo
+  fs.cpSync(path.join(hub, '.ai'), path.join(lib, 'inner/.ai'), { recursive: true });
+  setMemberManifest((m) => { m.workspace.hub = 'inner'; });
+  let r = refreshMember();
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /hub must be outside this repo/);
+  // an absolute hub value prints only its basename
+  setMemberManifest((m) => { m.workspace.hub = path.join(tmp, 'unrelated-abs'); });
+  r = refreshMember();
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /unrelated-abs\/\.ai\/catalog-overrides: workspace hub not found/);
+  assert.equal(r.stderr.includes(tmp), false, 'no absolute path');
 });

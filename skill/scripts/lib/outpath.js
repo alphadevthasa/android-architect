@@ -49,7 +49,12 @@ export function writeOut(target, text) {
     fd = fs.openSync(target, 'wx');
   } catch (e) {
     if (e.code !== 'EEXIST') throw new Error('cannot write --out');
-    const st = fs.lstatSync(target);
+    let st;
+    try {
+      st = fs.lstatSync(target);
+    } catch {
+      throw new Error('cannot write --out');
+    }
     if (!st.isFile() || st.nlink > 1) throw new Error('--out must be a regular file');
     try {
       fd = fs.openSync(target, fs.constants.O_WRONLY | (fs.constants.O_NOFOLLOW ?? 0));
