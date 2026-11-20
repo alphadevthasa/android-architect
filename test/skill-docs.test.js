@@ -55,7 +55,7 @@ test('SKILL.md has the six required sections in order', () => {
     '## Scripts',
     '## Command: audit',
     '## Command: recommend',
-    '## Not yet available',
+    '## Not available to the agent',
   ];
   const positions = required.map((h) => headings.indexOf(h));
   for (let i = 0; i < required.length; i++) assert.ok(positions[i] >= 0, `missing heading ${required[i]}`);
@@ -64,13 +64,66 @@ test('SKILL.md has the six required sections in order', () => {
   }
 });
 
-test('Not yet available lists only run', () => {
+test('Not available to the agent: run is described, the agent never runs it', () => {
   const body = readSkill();
-  const section = body.slice(body.indexOf('## Not yet available'));
-  const listed = section.slice(0, section.indexOf('When asked for'));
-  assert.match(listed, /`run`/);
-  const names = [...listed.matchAll(/`([^`]+)`/g)].map((m) => m[1]);
-  assert.deepEqual(names, ['run']);
+  const section = body.slice(body.indexOf('## Not available to the agent'));
+  assert.match(section, /`run` \(`scripts\/run\.js`/);
+  assert.match(section, /The agent never runs it/);
+  assert.match(section, /only the user starts it, from a terminal/);
+  assert.match(section, /there is no `--yes`/);
+  assert.match(section, /git diff/);
+  assert.match(section, /git status/);
+  assert.match(section, /Never take or pass that hash for them/);
+  assert.match(body, /Never run `run\.js`/);
+  for (const h of body.split('\n').filter((l) => l.startsWith('## '))) assert.doesNotMatch(h, /Command: run/);
+});
+
+test('run docs: every flag in SKILL.md, README and the CLI usage exists in the run.js parser, and every parser flag is documented', async () => {
+  const { BOOLEAN_FLAGS, VALUE_FLAGS, USAGE } = await import('../skill/scripts/run.js');
+  const known = new Set([...BOOLEAN_FLAGS, ...VALUE_FLAGS]);
+  const readme = fs.readFileSync(new URL('../README.md', import.meta.url), 'utf8');
+  const start = readme.indexOf('### Autonomous runs');
+  assert.ok(start > 0, 'README needs an Autonomous runs section');
+  const section = readme.slice(start, readme.indexOf('### Limits of the run loop'));
+  const skillRun = readSkill().slice(readSkill().indexOf('## Not available to the agent'));
+  const docs = { 'README section': section, 'SKILL section': skillRun, 'run.js USAGE': USAGE };
+  for (const [name, text] of Object.entries(docs)) {
+    for (const m of text.matchAll(/(?<![\w-])--([a-z][a-z-]*)/g)) {
+      if (m[1] === 'yes' || m[1] === 'write') continue; // yes: documented only as "there is no --yes"; write: migration-plan.js
+      assert.ok(known.has(m[1]), `${name} mentions --${m[1]}, which run.js does not parse`);
+    }
+  }
+  for (const f of [...BOOLEAN_FLAGS, ...VALUE_FLAGS]) {
+    assert.ok(section.includes(`--${f}`), `README must document --${f}`);
+    assert.ok(USAGE.includes(`--${f}`), `USAGE must list --${f}`);
+  }
+  assert.match(section, /There is deliberately no `--yes`/);
+  assert.ok(!BOOLEAN_FLAGS.includes('yes') && !VALUE_FLAGS.includes('yes'));
+});
+
+test('README documents the run consent flow, build-file approval and every exit code', async () => {
+  const { OUTCOME_EXIT, EXIT } = await import('../skill/scripts/run.js');
+  const readme = fs.readFileSync(new URL('../README.md', import.meta.url), 'utf8');
+  const section = readme.slice(readme.indexOf('### Autonomous runs'), readme.indexOf('### Limits of the run loop'));
+  assert.match(section, /interactive terminal/);
+  assert.match(section, /never confirms/);
+  assert.match(section, /names \(never the values\)/);
+  assert.match(section, /unverified/);
+  assert.match(section, /`HOME` and `PATH` are inherited/);
+  assert.match(section, /Review `git diff` and `git status`/);
+  assert.match(section, /nothing is pushed, merged or published|Nothing is ever pushed, merged or published/);
+  for (const [outcome, code] of Object.entries(OUTCOME_EXIT)) {
+    const row = section.split('\n').find((l) => l.startsWith('| ') && l.includes(`\`${outcome}\``));
+    assert.ok(row, `exit-code table must list ${outcome}`);
+    assert.ok(row.startsWith(`| ${code} |`), `${outcome} must be exit code ${code} in the README`);
+  }
+  assert.ok(Object.values(EXIT).every((c) => section.includes(`| ${c} |`)));
+  assert.match(readme, /### Limits of the run loop/);
+});
+
+test('the implement workflow mentions the runner and its step boundaries', () => {
+  const wf = fs.readFileSync(new URL('../skill/templates/ai/workflows/03-implement.md', import.meta.url), 'utf8');
+  assert.match(wf, /autonomous runner[^\n]*same step boundaries/);
 });
 
 test('every script named in SKILL.md exists', () => {
@@ -129,7 +182,7 @@ test('I7: SKILL.md ground rules, recommend loop and profile notes', () => {
   assert.match(rule5, /\[REDACTED:<kind>\]/);
   assert.match(rule5, /signingConfigs/);
   assert.match(rule5, /git-ignored/);
-  const rec = body.slice(body.indexOf('## Command: recommend'), body.indexOf('## Not yet available'));
+  const rec = body.slice(body.indexOf('## Command: recommend'), body.indexOf('## Not available to the agent'));
   assert.match(rec, /If `<tmp>` does not exist yet, create it as in audit step 1/);
   assert.match(rec, /Exit 2 because your own recommendations JSON is malformed[^\n]*counts as an attempt/);
   assert.match(rec, /more than 5 times in total/);

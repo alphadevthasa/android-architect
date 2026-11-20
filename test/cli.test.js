@@ -363,3 +363,10 @@ test('init summary and doctor --root print suspicious text with file:line and ru
     fs.rmSync(home, { recursive: true, force: true });
   }
 });
+
+test('cli: usage lists the run command and its flags', () => {
+  const r = run([]);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /version\|run>/);
+  assert.match(r.stderr, /run \[--root <dir>\] \[--json\] \[--dry-run\] \[--approve-build-changes <hash>\]/);
+});
