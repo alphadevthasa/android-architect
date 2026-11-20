@@ -25,6 +25,8 @@ const MODULE_DIR = /^[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*$/;
 // Fixed, anchored line patterns; the name spans are single character classes, so matching stays linear.
 const PACKAGE_LINE = /^\s*package\s+([A-Za-z_`][\w.`]*)/;
 const IMPORT_LINE = /^\s*import\s+(?:static\s+)?([A-Za-z_`][\w.`]*\*?)/;
+// A package name: dot-separated identifiers, no empty segment (so "com.example." never matches "com.example.*").
+const PACKAGE_NAME = /^[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*$/;
 
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
@@ -168,9 +170,9 @@ export function matchModuleGlob(pattern, modulePath) {
   return matchGlob(pattern.slice(1), modulePath.slice(1), { sep: ':' });
 }
 
-/** Package glob match: "."-separated segments; the default (empty) package never matches. */
+/** Package glob match: "."-separated segments; the default (empty) package and malformed names never match. */
 export function matchPackageGlob(pattern, packageName) {
-  if (packageName === '') return false;
+  if (!PACKAGE_NAME.test(packageName)) return false;
   return matchGlob(pattern, packageName, { sep: '.' });
 }
 
@@ -197,13 +199,58 @@ const normalizeProject = (p) => {
   return t.startsWith(':') ? t : `:${t}`;
 };
 
-/** package and import lines of a Kotlin/Java source, line by line: { pkg, imports: [{ name, line }] }. */
+/**
+ * The text of one line outside block comments, triple-quoted strings, string and char literals and line comments
+ * (each replaced by a space). `state` carries an open block comment or triple-quoted string to the next line. Linear.
+ */
+function visibleText(line, state) {
+  let out = '';
+  let i = 0;
+  while (i < line.length) {
+    if (state.block) {
+      const end = line.indexOf('*/', i);
+      if (end === -1) return out;
+      state.block = false;
+      i = end + 2;
+      out += ' ';
+    } else if (state.raw) {
+      const end = line.indexOf('"""', i);
+      if (end === -1) return out;
+      state.raw = false;
+      i = end + 3;
+      out += ' ';
+    } else if (line.startsWith('/*', i)) {
+      state.block = true;
+      i += 2;
+    } else if (line.startsWith('//', i)) {
+      return out;
+    } else if (line.startsWith('"""', i)) {
+      state.raw = true;
+      i += 3;
+    } else if (line[i] === '"' || line[i] === "'") {
+      const q = line[i];
+      i++;
+      while (i < line.length && line[i] !== q) i += line[i] === '\\' ? 2 : 1;
+      i++;
+      out += ' ';
+    } else {
+      out += line[i++];
+    }
+  }
+  return out;
+}
+
+/** package and import lines of a Kotlin/Java source, line by line, outside comments and strings: { pkg, imports }. */
 function sourceNames(text) {
   let pkg = '';
   const imports = [];
+  const state = { block: false, raw: false };
   const lines = text.split('\n');
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
+    const raw = lines[i];
+    const line = state.block || state.raw || raw.includes('/*') || raw.includes('"') || raw.includes("'") || raw.includes('//')
+      ? visibleText(raw, state)
+      : raw;
     if (pkg === '' && line.includes('package')) {
       const m = PACKAGE_LINE.exec(line);
       if (m) pkg = m[1].replaceAll('`', '');
@@ -216,14 +263,28 @@ function sourceNames(text) {
   return { pkg, imports };
 }
 
+/** The first MAX_SOURCE_BYTES of a file as UTF-8, and whether it was cut. */
+function readHead(abs) {
+  const fd = fs.openSync(abs, 'r');
+  try {
+    const buf = Buffer.alloc(MAX_SOURCE_BYTES + 1);
+    const n = fs.readSync(fd, buf, 0, buf.length, 0);
+    const cut = n > MAX_SOURCE_BYTES;
+    return { text: buf.subarray(0, Math.min(n, MAX_SOURCE_BYTES)).toString('utf8'), cut };
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
 const byText = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
 
 /**
  * Static evaluation of the rules: module rules against the declared project dependencies of every module (evidence: the
  * build file and line of the `project(...)` dependency), package rules against the package and import lines of the
- * Kotlin/Java sources (git-ignored files dropped; files over 1 MB are counted in `skippedFiles`, not read).
+ * Kotlin/Java sources (git-ignored files dropped; only the first 1 MB of a larger file is read, counted in
+ * `truncatedFiles`; unreadable and non-regular files are counted in `skippedFiles`).
  * `opts.files` / `opts.modules` reuse an existing listing. Returns { ok, violations: [{ rule, from, to, file, line }],
- * notes, skippedFiles }.
+ * notes, skippedFiles, truncatedFiles }.
  */
 export function checkFitness(root, rules, opts = {}) {
   const needFiles = opts.files === undefined && (opts.modules === undefined || rules.some((r) => r.kind === 'package-no-import'));
@@ -242,7 +303,7 @@ export function checkFitness(root, rules, opts = {}) {
         if (to === m.path) continue;
         for (const r of moduleRules) {
           if (matchModuleGlob(r.from, m.path) && matchModuleGlob(r.to, to)) {
-            violations.push({ rule: r.id, from: m.path, to, file: m.buildFile, line: dep.line ?? null });
+            violations.push({ rule: r.id, from: m.path, to, file: displayPath(m.buildFile), line: dep.line ?? null });
           }
         }
       }
@@ -252,14 +313,17 @@ export function checkFitness(root, rules, opts = {}) {
 
   const packageRules = rules.filter((r) => r.kind === 'package-no-import');
   let skippedFiles = 0;
+  let truncatedFiles = 0;
   if (packageRules.length) {
     for (const rel of files) {
       if (!rel.endsWith('.kt') && !rel.endsWith('.java')) continue;
       let text;
       try {
         const abs = path.join(root, rel);
-        if (fs.statSync(abs).size > MAX_SOURCE_BYTES) { skippedFiles++; continue; }
-        text = fs.readFileSync(abs, 'utf8');
+        if (!fs.statSync(abs).isFile()) { skippedFiles++; continue; }
+        const head = readHead(abs);
+        if (head.cut) truncatedFiles++;
+        text = head.text;
       } catch {
         skippedFiles++;
         continue;
@@ -274,10 +338,11 @@ export function checkFitness(root, rules, opts = {}) {
       }
     }
   }
-  if (skippedFiles) notes.push(`${plural(skippedFiles, 'source file')} over 1 MB or unreadable, not checked for package rules`);
+  if (skippedFiles) notes.push(`${plural(skippedFiles, 'source file')} unreadable, not checked for package rules`);
+  if (truncatedFiles) notes.push(`${plural(truncatedFiles, 'source file')} over 1 MB: only the first 1 MB checked for package rules`);
 
   violations.sort((a, b) => byText(a.rule, b.rule) || byText(a.file, b.file) || (a.line ?? 0) - (b.line ?? 0) || byText(a.to, b.to));
-  return { ok: violations.length === 0, violations, notes, skippedFiles };
+  return { ok: violations.length === 0, violations, notes, skippedFiles, truncatedFiles };
 }
 
 // ---------- generated sources ----------
@@ -298,10 +363,10 @@ function gradleScript(rules) {
     '//     apply(from = ".ai/fitness/architecture-fitness.gradle.kts")',
     '// or copy it into the project first (for example gradle/architecture-fitness.gradle.kts) and apply the copy.',
     '// The task only reads the declared project dependencies of every project. It starts no process and reads no',
-    '// network. When the root project has a check task, check depends on architectureFitness.',
-    '// Gradle API notes: written for the Gradle 8 API. ProjectDependency.dependencyProject is deprecated in newer',
-    '// Gradle versions; there, use dependency.path instead of dependency.dependencyProject.path. The task does not',
-    '// support the configuration cache, because it reads other projects when it runs.',
+    '// network.',
+    '// Requires Gradle 8.11 or newer: it reads ProjectDependency.path (check the Gradle docs for your version). The',
+    '// task does not support the configuration cache, because it reads other projects when it runs. The check task',
+    '// depends on it when the root project applies the base plugin (directly or through another plugin).',
     '//',
     '// Rules:',
     ...(mod.length ? mod.map((r) => ruleComment(r, '  ')) : ['//   none (no accepted ADR has a module-no-dep rule)']),
@@ -343,7 +408,7 @@ function gradleScript(rules) {
     '        for (candidate in rootProject.allprojects) {',
     '            for (configuration in candidate.configurations) {',
     '                for (dependency in configuration.dependencies.withType(ProjectDependency::class.java)) {',
-    '                    val target = dependency.dependencyProject.path',
+    '                    val target = dependency.path',
     '                    for (rule in architectureFitnessModuleRules) {',
     '                        if (candidate.path != target && architectureFitnessMatches(rule[1], candidate.path) && architectureFitnessMatches(rule[2], target)) {',
     '                            val line = "rule " + rule[0] + ": " + candidate.path + " depends on " + target + " (" + configuration.name + ")"',
@@ -359,8 +424,10 @@ function gradleScript(rules) {
     '    }',
     '}',
     '',
-    'tasks.matching { it.name == "check" }.configureEach {',
-    '    dependsOn(architectureFitness)',
+    'plugins.withId("base") {',
+    '    tasks.named("check") {',
+    '        dependsOn(architectureFitness)',
+    '    }',
     '}',
     '',
   ].join('\n');
@@ -473,43 +540,52 @@ function konsistTest(rules, modules) {
   ].join('\n');
 }
 
-function readme(rules, skipped) {
+function readme(rules, skipped, names) {
   const code = (v) => `\`${v}\``;
+  const gradle = names.includes('architecture-fitness.gradle.kts');
+  const konsist = names.includes('ArchitectureFitnessTest.kt');
   return [
     '<!-- Generated by android-architect (fitness.js) from accepted ADRs. Rewritten on every fitness.js run: change the ADRs, not this file. -->',
     '# Architecture fitness checks',
     '',
     'These files encode the `fitness` rules of the accepted ADRs in `.ai/knowledge/adr`. They are proposals for the build:',
     'review them, then copy or apply them yourself. Nothing in this folder is applied to the project automatically.',
+    'Regenerate them with fitness.js instead of editing them.',
     '',
     '## Rules',
     '',
     ...(rules.length
       ? ['| Rule | ADR | Kind | From | To |', '|---|---|---|---|---|',
         ...rules.map((r) => `| ${code(safeLabel(r.id))} | ${code(safeLabel(r.adr))} | ${r.kind} | ${code(r.from)} | ${code(r.to)} |`)]
-      : ['No accepted ADR has a `fitness` key, so the generated checks contain no rules.']),
+      : ['No accepted ADR has a `fitness` key, so no Gradle script and no Konsist test were generated.']),
     '',
     ...(skipped
       ? [`${skipped} ${skipped === 1 ? 'module was' : 'modules were'} skipped because the module path or directory uses characters outside the safe set; they appear in no generated file.`, '']
       : []),
     '## Files',
     '',
-    '- `architecture-fitness.gradle.kts`: a root-project Gradle script with the `architectureFitness` task. It fails the build with one line per forbidden project dependency, and `check` depends on it when the root project has a `check` task.',
-    '- `ArchitectureFitnessTest.kt`: a Konsist unit test for the package rules and, through the imports of each module, the module rules.',
+    ...(gradle
+      ? ['- `architecture-fitness.gradle.kts`: a root-project Gradle script with the `architectureFitness` task (Gradle 8.11 or newer). It fails the build with one line per forbidden project dependency, and `check` depends on it when the root project applies the `base` plugin.']
+      : ['- No Gradle script: it is generated only when an accepted ADR has a `module-no-dep` rule.']),
+    ...(konsist
+      ? ['- `ArchitectureFitnessTest.kt`: a Konsist unit test for the package rules and, through the imports of each module, the module rules.']
+      : []),
     '- `verify-commands.json`: the verification commands for these checks, used by the agent loop.',
     '',
-    '## Applying them',
-    '',
-    '1. Review every file. They change what the build checks, so they go through the normal code review.',
-    '2. Gradle task: add this line to the root `build.gradle.kts` (or copy the script into the project and apply the copy):',
-    '',
-    '   ```kotlin',
-    '   apply(from = ".ai/fitness/architecture-fitness.gradle.kts")',
-    '   ```',
-    '',
-    '3. Konsist test: copy `ArchitectureFitnessTest.kt` into a unit test source set, add a matching package line and the Konsist test dependency.',
-    '4. Regenerate these files with fitness.js after changing a fitness rule or the module list, then review and copy them again.',
-    '',
+    ...(gradle || konsist
+      ? [
+        '## Applying them',
+        '',
+        '1. Review every file. They change what the build checks, so they go through the normal code review.',
+        ...(gradle
+          ? ['1. Gradle task: add this line to the root `build.gradle.kts` (or copy the script into the project and apply the copy):', '',
+            '   ```kotlin', '   apply(from = ".ai/fitness/architecture-fitness.gradle.kts")', '   ```', '']
+          : []),
+        ...(konsist ? ['1. Konsist test: copy `ArchitectureFitnessTest.kt` into a unit test source set, add a matching package line and the Konsist test dependency.'] : []),
+        '1. Regenerate these files with fitness.js after changing a fitness rule or the module list, then review and copy them again.',
+        '',
+      ]
+      : []),
   ].join('\n');
 }
 
@@ -518,20 +594,23 @@ const VERIFY_COMMANDS = {
   commands: ['./gradlew architectureFitness', "./gradlew testDebugUnitTest --tests '*ArchitectureFitnessTest'"],
 };
 
+/** Every file name generateFitness can produce; a run removes the ones it does not produce this time. */
+export const FITNESS_FILES = ['architecture-fitness.gradle.kts', 'ArchitectureFitnessTest.kt', 'verify-commands.json', 'README.md'];
+
 /**
- * Generated files for .ai/fitness (paths relative to that folder): the Gradle script, the Konsist test,
- * verify-commands.json and a README. Rules must come from parseFitnessRules; modules whose path or directory fails
+ * Generated files for .ai/fitness (paths relative to that folder): the Gradle script (only with module rules), the
+ * Konsist test (only with rules), verify-commands.json and a README. Rules must come from parseFitnessRules; modules whose path or directory fails
  * validModules are left out (the README counts them). Throws when redaction would change a generated file, so a
  * secret-looking module directory never reaches generated code.
  */
 export function generateFitness(rules, modules = []) {
   const { modules: safe, notes } = validModules(modules);
-  const files = {
-    'architecture-fitness.gradle.kts': gradleScript(rules),
-    'ArchitectureFitnessTest.kt': konsistTest(rules, safe),
-    'verify-commands.json': JSON.stringify(VERIFY_COMMANDS, null, 2) + '\n',
-    'README.md': readme(rules, notes.length),
-  };
+  const files = {};
+  // A script without module rules checks nothing, and a JUnit class without tests fails ("No runnable methods").
+  if (rules.some((r) => r.kind === 'module-no-dep')) files['architecture-fitness.gradle.kts'] = gradleScript(rules);
+  if (rules.length) files['ArchitectureFitnessTest.kt'] = konsistTest(rules, safe);
+  files['verify-commands.json'] = JSON.stringify(VERIFY_COMMANDS, null, 2) + '\n';
+  files['README.md'] = readme(rules, notes.length, Object.keys(files));
   for (const text of Object.values(files)) {
     if (redact(text).text !== text) throw new Error('a generated fitness file would be changed by secret redaction; check the module names');
   }

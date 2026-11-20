@@ -133,8 +133,8 @@ test('hostile rule text is rejected with a rule-prefixed error and produces noth
     'module-no-dep: :a:*a*a*a*a*a*a*a*b -> :b',
     'package-no-import: com.example.**.x.** -> a.b.',
     'package-no-import: com.example.ui.* -> a.*.b',
-    'module-no-dep: :feature:a  -> :feature:b',
-    'module-no-dep: :feature:a‮ -> :feature:b',
+    'module-no-dep: :feature:a\u2028 -> :feature:b',
+    'module-no-dep: :feature:a\u202e -> :feature:b',
     'module-no-dep: :feature:a */ -> :feature:b',
     'module-no-dep: :feature:a -> :feature:b -> :core:x',
     'shell-exec: :a -> :b',
@@ -199,13 +199,149 @@ test('checkFitness: package rule reports the import with file and line', () => {
   assert.deepEqual(checkFitness(FIXTURE, rulesOf(['package-no-import: com.example.ui.* -> com.example.net.']).rules).violations, []);
 });
 
-test('checkFitness counts files too large to read instead of ignoring them silently', () => {
+test('checkFitness reads the first 1 MB of a larger file and counts it as truncated', () => {
   const dir = project();
   try {
-    fs.writeFileSync(path.join(dir, 'feature/a/src/main/kotlin/com/example/ui/login/Big.kt'), 'package com.example.ui.login\n' + '//x\n'.repeat(300000));
+    const big = 'feature/a/src/main/kotlin/com/example/ui/login/Big.kt';
+    fs.writeFileSync(path.join(dir, big), 'package com.example.ui.login\n\nimport com.example.data.db.Big\n' + '//x\n'.repeat(300000));
     const r = checkFitness(dir, rulesOf([PACKAGE_RULE]).rules);
-    assert.equal(r.skippedFiles, 1);
-    assert.ok(r.notes.some((n) => /1 source file/.test(n)));
+    assert.equal(r.truncatedFiles, 1);
+    assert.equal(r.skippedFiles, 0);
+    assert.ok(r.notes.some((n) => /1 source file over 1 MB/.test(n)));
+    assert.ok(r.violations.some((v) => v.file === big && v.line === 3 && v.to === 'com.example.data.db.Big'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('package and import lines inside block comments and strings are ignored', () => {
+  const dir = project();
+  try {
+    const f = 'feature/a/src/main/kotlin/com/example/ui/login/Commented.kt';
+    fs.writeFileSync(path.join(dir, f), [
+      '/* package com.example.fake',
+      'import com.example.data.db.InComment */',
+      'package com.example.ui.login',
+      '',
+      '/*',
+      'import com.example.data.db.AlsoInComment',
+      '*/',
+      'import com.example.data.db.Real',
+      'val s = """',
+      'import com.example.data.db.InRawString',
+      '"""',
+      'val t = "/* not a comment"',
+      'import com.example.data.db.AfterString',
+    ].join('\n'));
+    const r = checkFitness(dir, rulesOf([PACKAGE_RULE]).rules);
+    const mine = r.violations.filter((v) => v.file === f);
+    assert.deepEqual(mine.map((v) => [v.from, v.to, v.line]), [
+      ['com.example.ui.login', 'com.example.data.db.Real', 8],
+      ['com.example.ui.login', 'com.example.data.db.AfterString', 13],
+    ]);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('a malformed package name such as a trailing dot never matches', () => {
+  assert.equal(matchPackageGlob('com.example.*', 'com.example.'), false);
+  assert.equal(matchPackageGlob('com.**', 'com..x'), false);
+  assert.equal(matchPackageGlob('com.example.*', 'com.example.x'), true);
+});
+
+test('zero rules: no Gradle script and no Konsist test; package rules only: no Gradle script', () => {
+  const none = generateFitness([], []);
+  assert.deepEqual(Object.keys(none).sort(), ['README.md', 'verify-commands.json']);
+  assert.match(none['README.md'], /no Gradle script and no Konsist test/);
+  const pkg = generateFitness(rulesOf([PACKAGE_RULE]).rules, []);
+  assert.deepEqual(Object.keys(pkg).sort(), ['ArchitectureFitnessTest.kt', 'README.md', 'verify-commands.json']);
+  assert.deepEqual(scanInstructions(pkg['README.md']), []);
+});
+
+test('CLI removes its own generated files that a run no longer produces', () => {
+  const dir = project();
+  try {
+    assert.equal(cli([dir]).status, 0);
+    fs.writeFileSync(path.join(dir, '.ai/knowledge/adr/0001-feature-isolation.md'), adrText('accepted', [PACKAGE_RULE]));
+    const r = cli([dir]);
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(JSON.parse(r.stdout).removed, ['.ai/fitness/architecture-fitness.gradle.kts']);
+    assert.deepEqual(fs.readdirSync(path.join(dir, '.ai/fitness')).sort(), ['ArchitectureFitnessTest.kt', 'README.md', 'verify-commands.json']);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('CLI refuses non-regular targets before any write', () => {
+  const listing = (d) => {
+    const f = path.join(d, '.ai/fitness');
+    return fs.existsSync(f) && fs.lstatSync(f).isDirectory() ? fs.readdirSync(f).sort() : null;
+  };
+  const cases = [
+    ['README.md as a directory', (d) => fs.mkdirSync(path.join(d, '.ai/fitness/README.md'), { recursive: true })],
+    ['.ai/fitness as a regular file', (d) => fs.writeFileSync(path.join(d, '.ai/fitness'), 'x')],
+  ];
+  const probe = spawnSync('mkfifo', [path.join(os.tmpdir(), `aa-fifo-probe-${process.pid}`)]);
+  if (probe.status === 0) {
+    fs.rmSync(path.join(os.tmpdir(), `aa-fifo-probe-${process.pid}`), { force: true });
+    cases.push(['README.md as a FIFO', (d) => {
+      fs.mkdirSync(path.join(d, '.ai/fitness'), { recursive: true });
+      assert.equal(spawnSync('mkfifo', [path.join(d, '.ai/fitness/README.md')]).status, 0);
+    }]);
+  }
+  for (const [name, setup] of cases) {
+    const dir = project();
+    try {
+      setup(dir);
+      const before = listing(dir);
+      const r = cli([dir]);
+      assert.equal(r.status, 1, name);
+      assert.match(r.stderr, /refusing/, name);
+      assert.ok(!r.stderr.includes(dir), `${name}: no absolute path`);
+      assert.deepEqual(listing(dir), before, `${name}: nothing written`);
+    } finally {
+      cleanup(dir);
+    }
+  }
+});
+
+test('CLI refuses a symlinked .ai with a symlink message', () => {
+  const dir = project({}, { ai: false });
+  const real = fs.mkdtempSync(path.join(os.tmpdir(), 'aa-fitness-ai-'));
+  try {
+    fs.symlinkSync(real, path.join(dir, '.ai'));
+    for (const args of [[dir], [dir, '--check']]) {
+      const r = cli(args);
+      assert.equal(r.status, 1);
+      assert.match(r.stderr, /symlink/);
+    }
+    assert.deepEqual(fs.readdirSync(real), []);
+  } finally {
+    cleanup(dir);
+    cleanup(real);
+  }
+});
+
+test('CLI in a workspace member notes that ADRs live in the hub', () => {
+  const dir = project({});
+  try {
+    fs.writeFileSync(path.join(dir, '.ai/manifest.json'), JSON.stringify({ schemaVersion: 1, workspace: { role: 'member', hub: '../hub' } }));
+    const r = cli([dir, '--check']);
+    assert.equal(r.status, 0, r.stderr);
+    assert.ok(JSON.parse(r.stdout).notes.some((n) => /ADRs live in the hub; run fitness from the hub/.test(n)));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('CLI: ADR parse errors are printed on one line without control or direction characters', () => {
+  const dir = project({ '0001-bad.md': '---\nid: "1"\ntitle: x\u202e\u2028y\nstatus: maybe\n---\n' });
+  try {
+    const r = cli([dir, '--check']);
+    assert.equal(r.status, 1);
+    assert.equal(r.stderr.trimEnd().split('\n').length, 1);
+    assert.ok(!/[\u202e\u2028]/.test(r.stderr));
   } finally {
     cleanup(dir);
   }
@@ -276,7 +412,11 @@ test('generated Gradle script and Konsist test are structurally safe Kotlin', ()
   const gradle = files['architecture-fitness.gradle.kts'];
   const konsist = files['ArchitectureFitnessTest.kt'];
   assert.match(gradle, /tasks\.register\("architectureFitness"\)/);
-  assert.match(gradle, /dependsOn\(architectureFitness\)/);
+  assert.match(gradle, /plugins\.withId\("base"\) \{\n {4}tasks\.named\("check"\) \{\n {8}dependsOn\(architectureFitness\)/);
+  assert.ok(gradle.includes('val target = dependency.path') && !gradle.includes('dependencyProject'));
+  assert.match(gradle, /Gradle 8\.11 or newer/);
+  assert.ok(!gradle.includes('tasks.matching'));
+  assert.match(files['README.md'], /Gradle 8\.11 or newer/);
   assert.ok(gradle.includes('":feature:*"'));
   assert.ok(gradle.includes('0001-feature-isolation.md'));
   assert.ok(konsist.includes('"com.example.ui.*"') && konsist.includes('"com.example.data.db."'));
@@ -316,7 +456,7 @@ test('odd but valid values add no new code shapes', () => {
 
 test('kotlinString validates then escapes', () => {
   assert.equal(kotlinString(':feature:*'), '":feature:*"');
-  for (const bad of ['a"b', 'a$b', 'a\nb', 'a\\b', '', 'a b', 'a ']) assert.throws(() => kotlinString(bad), JSON.stringify(bad));
+  for (const bad of ['a"b', 'a$b', 'a\nb', 'a\\b', '', 'a b', 'a\u2028']) assert.throws(() => kotlinString(bad), JSON.stringify(bad));
 });
 
 const discoverFixture = () => discoverModules(FIXTURE, listFiles(FIXTURE));

@@ -12,12 +12,17 @@ import { loadAdrs } from './lib/adr.js';
 import { writeGenerated } from './lib/aidir.js';
 import { discoverModules } from './lib/modules.js';
 import { listFiles } from './lib/walk.js';
-import { parseFitnessRules, checkFitness, generateFitness, validModules } from './lib/fitness.js';
+import { parseFitnessRules, checkFitness, generateFitness, validModules, FITNESS_FILES } from './lib/fitness.js';
+import { readManifest } from './lib/manifest.js';
 import { oneLine } from './lib/overrides.js';
 import { redact, redactJson } from './lib/redact.js';
 
 const USAGE = 'usage: node fitness.js <projectRoot> [--check] [--out <dir>]';
 const BUILD_FILES = ['build.gradle', 'build.gradle.kts', 'settings.gradle', 'settings.gradle.kts'];
+
+// Line breaks, Unicode line separators and direction controls, removed from text echoed from ADR files.
+const UNSAFE_TEXT = /[\u0000-\u001f\u007f\u2028\u2029\u200e\u200f\u202a-\u202e\u2066-\u2069]/g;
+const cleanText = (s) => oneLine(String(s).replace(UNSAFE_TEXT, ' ')).slice(0, 500);
 
 function fail(code, message) {
   process.stderr.write(redact(message).text + '\n');
@@ -63,16 +68,18 @@ function outDir(out, root) {
 function writeOut(dir, files) {
   fs.mkdirSync(dir, { recursive: true });
   if (fs.lstatSync(dir).isSymbolicLink()) throw new Error('refusing to write through a symlink: --out');
-  const written = [];
-  for (const [name, text] of Object.entries(files)) {
-    const abs = path.join(dir, name);
+  for (const name of Object.keys(files)) {
     let st = null;
     try {
-      st = fs.lstatSync(abs);
+      st = fs.lstatSync(path.join(dir, name));
     } catch {
       st = null;
     }
     if (st !== null && !st.isFile()) throw new Error(`refusing to replace a non-regular file in --out: ${name}`);
+  }
+  const written = [];
+  for (const [name, text] of Object.entries(files)) {
+    const abs = path.join(dir, name);
     fs.writeFileSync(abs, redact(text).text);
     written.push(name);
   }
@@ -96,7 +103,16 @@ export function main(argv) {
   } catch {
     ai = null;
   }
+  if (ai !== null && ai.isSymbolicLink()) fail(1, 'refusing to use .ai: it is a symlink (symlinks are refused)');
   if (ai === null || !ai.isDirectory()) fail(2, `no .ai folder in ${shown}; run init first`);
+  const memberNotes = [];
+  try {
+    if (readManifest(path.join(root, '.ai'))?.workspace?.role === 'member') {
+      memberNotes.push('this repo is a workspace member: ADRs live in the hub; run fitness from the hub');
+    }
+  } catch {
+    // an unreadable manifest only means no workspace note
+  }
   const outPath = opts.out === null ? null : outDir(opts.out, root);
 
   let parsed;
@@ -104,7 +120,7 @@ export function main(argv) {
     const adrDir = path.join(root, '.ai', 'knowledge', 'adr');
     parsed = parseFitnessRules(fs.existsSync(adrDir) ? loadAdrs(adrDir) : []);
   } catch (e) {
-    fail(1, String(e.message));
+    fail(1, cleanText(e.message));
   }
   if (parsed.errors.length) fail(1, parsed.errors.join('\n'));
   const { rules } = parsed;
@@ -114,16 +130,21 @@ export function main(argv) {
     const modules = discoverModules(root, files);
     if (opts.check) {
       const result = checkFitness(root, rules, { files, modules });
-      const out = { ok: result.ok, rules: rules.length, violations: result.violations, notes: [...parsed.notes, ...result.notes], skippedFiles: result.skippedFiles };
+      const out = {
+        ok: result.ok, rules: rules.length, violations: result.violations, notes: [...memberNotes, ...parsed.notes, ...result.notes],
+        skippedFiles: result.skippedFiles, truncatedFiles: result.truncatedFiles,
+      };
       process.stdout.write(JSON.stringify(redactJson(out), null, 2) + '\n');
       process.exitCode = result.ok ? 0 : 1;
       return;
     }
     const generated = generateFitness(rules, modules);
-    const written = outPath === null
-      ? writeGenerated(root, Object.fromEntries(Object.entries(generated).map(([n, t]) => [`fitness/${n}`, t])))
-      : writeOut(outPath, generated);
-    const out = { rules, notes: [...parsed.notes, ...validModules(modules).notes], written };
+    const { written, removed } = outPath === null
+      ? writeGenerated(root, Object.fromEntries(Object.entries(generated).map(([n, t]) => [`fitness/${n}`, t])), {
+        remove: FITNESS_FILES.map((n) => `fitness/${n}`),
+      })
+      : { written: writeOut(outPath, generated), removed: [] };
+    const out = { rules, notes: [...memberNotes, ...parsed.notes, ...validModules(modules).notes], written, removed };
     process.stdout.write(JSON.stringify(redactJson(out), null, 2) + '\n');
   } catch (e) {
     fail(1, String(e.message));

@@ -147,11 +147,15 @@ const SAFE_GENERATED_REL = /^[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*$/;
 
 /**
  * Write generated files into an existing .ai folder with the same guard as writeAiDir: .ai and every component on the
- * way to each file must not be a symlink (nothing in .ai may be one), paths stay inside the project, and every text
- * passes through redact(). `files` is { relativePathUnderAi: text }. All paths are checked before the first write.
- * Throws when .ai does not exist (run init first). Returns the written paths relative to root (".ai/..."), sorted.
+ * way to each file must not be a symlink (nothing in .ai may be one), and paths stay inside the project. Before the
+ * first write every target is checked with lstat: each existing folder on the way must be a directory and each
+ * existing target a regular file (a FIFO, device, directory or other node is refused, so nothing hangs and nothing is
+ * half written). `files` is { relativePathUnderAi: text }; every text passes through redact(). `remove` lists paths
+ * under .ai to delete when they exist as regular files (generated files a run no longer produces), checked the same way.
+ * Throws when .ai does not exist (run init first); messages name paths relative to the project only.
+ * Returns { written, removed }: paths relative to root (".ai/..."), sorted.
  */
-export function writeGenerated(root, files) {
+export function writeGenerated(root, files, { remove = [] } = {}) {
   const realRoot = fs.realpathSync(root);
   const guard = makeGuard(root, realRoot);
   const aiDir = path.join(root, '.ai');
@@ -162,15 +166,35 @@ export function writeGenerated(root, files) {
   } catch {
     st = null;
   }
+  if (st !== null && st.isSymbolicLink()) throw refuse('.ai');
   if (st === null || !st.isDirectory()) throw new Error('no .ai folder; run init first');
   regularFiles(aiDir);
   const entries = Object.entries(files);
-  for (const [rel] of entries) {
+  const lstatOrNull = (abs) => {
+    try {
+      return fs.lstatSync(abs);
+    } catch (err) {
+      if (err.code === 'ENOENT') return null;
+      throw new Error(`cannot check a generated path (${err.code ?? 'error'})`);
+    }
+  };
+  const check = (rel) => {
     if (!SAFE_GENERATED_REL.test(rel) || rel.split('/').some((seg) => seg === '.' || seg === '..')) {
       throw new Error('refusing to write a generated file with an unsafe path');
     }
     guard(`.ai/${rel}`);
-  }
+    const parts = rel.split('/');
+    for (let i = 1; i < parts.length; i++) {
+      const dir = parts.slice(0, i).join('/');
+      const s = lstatOrNull(path.join(aiDir, dir));
+      if (s !== null && !s.isDirectory()) throw new Error(`refusing to write into .ai/${dir}: it exists and is not a directory`);
+    }
+    const t = lstatOrNull(path.join(aiDir, rel));
+    if (t !== null && !t.isFile()) throw new Error(`refusing to replace .ai/${rel}: it exists and is not a regular file`);
+    return t !== null;
+  };
+  for (const [rel] of entries) check(rel);
+  const toRemove = remove.filter((rel) => !(rel in files) && check(rel));
   const written = [];
   for (const [rel, text] of entries) {
     const abs = guard(`.ai/${rel}`);
@@ -179,7 +203,12 @@ export function writeGenerated(root, files) {
     fs.writeFileSync(abs, redact(String(text)).text);
     written.push(`.ai/${rel}`);
   }
-  return written.sort(byText);
+  const removed = [];
+  for (const rel of toRemove) {
+    fs.rmSync(guard(`.ai/${rel}`), { force: true });
+    removed.push(`.ai/${rel}`);
+  }
+  return { written: written.sort(byText), removed: removed.sort(byText) };
 }
 
 /**

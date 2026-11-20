@@ -65,28 +65,44 @@ before anything is generated. Rules are never dropped silently, and the reason n
   through the same guarded writer as init (the `.ai` folder must exist, symlinks are refused, every text is redacted).
   With `--out <dir>` the files go to that directory instead, which must be outside the project.
 - With `--check`: evaluates the rules statically and prints JSON with `ok`, `violations` (`rule`, `from`, `to`, `file`,
-  `line`), `notes` and `skippedFiles`. Module rules use the declared `project(...)` dependencies of each build file, with
-  the build file and line as evidence. Package rules read the `package` and `import` lines of Kotlin and Java sources
-  that git does not ignore; files over 1 MB are counted in `skippedFiles` instead of being read.
+  `line`), `notes`, `skippedFiles` and `truncatedFiles`. Module rules use the declared `project(...)` dependencies of
+  each build file, with the build file and line as evidence. Package rules read the `package` and `import` lines of
+  Kotlin and Java sources that git does not ignore. Only the first 1 MB of a larger file is read (package and imports
+  sit at the top); such files are counted in `truncatedFiles`, unreadable ones in `skippedFiles`.
+- In a workspace member repo the ADRs live in the hub, so the result carries a note to run fitness.js from the hub.
+
+How package rules read sources, and where that is approximate:
+
+- Lines are read one by one. Block comments, triple-quoted strings, string and char literals and line comments are
+  skipped with a simple linear state, so a `package` or `import` inside a comment is ignored.
+- Nested Kotlin block comments are treated as ending at the first closing marker, and a string spanning lines with
+  escapes is not tracked beyond its line.
+- The first `package` line counts; every `import` line counts, wherever it appears outside comments and strings.
+- Names are compared as text: a package glob against the declared package, an import prefix against the imported
+  name. Type aliases, star imports of classes and fully qualified names in code are not resolved.
 
 Exit codes: 0 success (and, with `--check`, no violation); 1 usage error, invalid ADR or rule, refused write, or
 violations found by `--check`; 2 not a Gradle project, or no `.ai` folder (init has not been run).
 
-`.ai/fitness/` is generated: fitness.js rewrites it on every run, while init and refresh leave it alone and never delete
-it. Its files are scanned for planted instructions like the other generated text in `.ai`.
+`.ai/fitness/` is generated: fitness.js rewrites it on every run (and removes the files of its own that a run no longer
+produces), while init and refresh leave it alone and never delete it. Before the first write every target is checked:
+a symlink, a directory, a FIFO or any other non-regular file where a generated file goes is refused, and nothing is
+written. Generated files are not meant to be edited by hand: change the ADR and regenerate. Its files are scanned for planted instructions like the other generated text in `.ai`.
 
 ## Generated files
 
-- `architecture-fitness.gradle.kts`: a root-project script with one task, `architectureFitness`. The task reads the
-  declared project dependencies of every project and fails the build with one line per forbidden dependency. When the
-  root project has a `check` task, `check` depends on it. The task starts no process and reads no network. It is
-  written for the Gradle 8 API and does not support the configuration cache.
-- `ArchitectureFitnessTest.kt`: a Konsist unit test. Package rules check imports directly; module rules compare the
+- `architecture-fitness.gradle.kts` (only when there is at least one `module-no-dep` rule): a root-project script with
+  one task, `architectureFitness`. The task reads the declared project dependencies of every project
+  (`ProjectDependency.path`) and fails the build with one line per forbidden dependency. When the root project applies
+  the `base` plugin, `check` depends on it. The task starts no process and reads no network. It needs Gradle 8.11 or
+  newer and does not support the configuration cache.
+- `ArchitectureFitnessTest.kt` (only when there is at least one rule, because a JUnit class without tests fails): a
+  Konsist unit test. Package rules check imports directly; module rules compare the
   imports of each matching module with the packages declared in the forbidden modules (module directories are taken
   from the Gradle settings when the file is generated). The header lists the Konsist calls it relies on; check them
   against the Konsist version in use.
 - `verify-commands.json`: the fixed verification commands for these checks (`./gradlew architectureFitness` and the
-  Konsist test), for the agent loop. It holds no project-derived text.
+  Konsist test), for the agent loop. It holds no project-derived text and is the same whichever files were generated.
 - `README.md`: the rule table and how to apply the files.
 
 ## Safety rules
