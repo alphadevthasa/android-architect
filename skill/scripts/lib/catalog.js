@@ -15,6 +15,8 @@ const SEVERITIES = ['critical', 'high', 'medium', 'low'];
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 export const DEFAULT_CONTENT_GLOB = '**/*.{kt,java}';
 const DEFAULT_DIR = new URL('../../catalog/', import.meta.url);
+/** Directory of the migration playbooks shipped with the catalog. */
+export const playbooksDir = new URL('playbooks/', DEFAULT_DIR);
 
 export class CatalogError extends Error {
   constructor(errors) {

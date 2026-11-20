@@ -131,7 +131,7 @@ const BUCKET_TITLES = {
 
 /** Markdown for a buildFeatureMap result: notes, one table per bucket, then the reasons per feature. */
 /** One line of Markdown-safe text: whitespace collapsed, pipes escaped, no leading heading, quote or list marker. */
-const mdText = (s) => {
+export const mdText = (s) => {
   const t = String(s)
     .replace(/[\u0000-\u0008\u000e-\u001f\u007f-\u009f]/g, '')
     .replace(/[\s\u2028\u2029]+/g, ' ')

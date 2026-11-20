@@ -25,13 +25,20 @@ function scalar(raw, file, lineNo) {
   return v;
 }
 
-export function parseAdr(text, file) {
+/**
+ * Splits `---` front matter from the body and parses it with the strict scalar grammar above.
+ * `keys` is the allowed key set, `listKeys` the keys that hold "- item" lists, `required` keys that must be non-empty.
+ * Returns { data, quoted, bodyStart, body }: `data` has every key (lists default to [], scalars to ''), `quoted` is the
+ * set of scalar keys written with double quotes, `bodyStart` the 1-based line number of the first body line.
+ */
+export function parseFrontMatter(text, file, { keys, listKeys = [], required = [] }) {
   const lines = String(text).replace(/\r\n?/g, '\n').split('\n');
   if (lines[0] !== '---') throw new Error(`${file}: missing front matter`);
   const end = lines.indexOf('---', 1);
   if (end === -1) throw new Error(`${file}: unterminated front matter`);
 
-  const out = { id: '', title: '', status: '', date: '', dimension: '', target: '', reopenIf: [], reason: '' };
+  const out = Object.fromEntries(keys.map((k) => [k, listKeys.includes(k) ? [] : '']));
+  const quoted = new Set();
   const seen = new Set();
   let listKey = null;
   for (let i = 1; i < end; i++) {
@@ -48,24 +55,30 @@ export function parseAdr(text, file) {
     const m = /^([A-Za-z][A-Za-z0-9]*):(?:\s+(.*)|\s*)$/.exec(line);
     if (!m) throw new Error(`${file}: line ${lineNo}: expected "key: value"`);
     const key = m[1];
-    if (!KEYS.includes(key)) throw new Error(`${file}: line ${lineNo}: unknown key "${key}"`);
+    if (!keys.includes(key)) throw new Error(`${file}: line ${lineNo}: unknown key "${key}"`);
     if (seen.has(key)) throw new Error(`${file}: line ${lineNo}: duplicate key "${key}"`);
     seen.add(key);
     listKey = null;
-    if (key === 'reopenIf') {
+    if (listKeys.includes(key)) {
       const rest = (m[2] ?? '').trim();
       if (rest !== '') {
         scalar(rest, file, lineNo);
-        throw new Error(`${file}: line ${lineNo}: reopenIf must be a list of "- item" lines`);
+        throw new Error(`${file}: line ${lineNo}: ${key} must be a list of "- item" lines`);
       }
-      listKey = 'reopenIf';
+      listKey = key;
     } else {
       out[key] = scalar(m[2] ?? '', file, lineNo);
+      if ((m[2] ?? '').trim()[0] === '"') quoted.add(key);
     }
   }
-  for (const k of REQUIRED) {
-    if (out[k] === '') throw new Error(`${file}: missing required key "${k}"`);
+  for (const k of required) {
+    if (out[k] === '' || (Array.isArray(out[k]) && out[k].length === 0)) throw new Error(`${file}: missing required key "${k}"`);
   }
+  return { data: out, quoted, bodyStart: end + 2, body: lines.slice(end + 1).join('\n') };
+}
+
+export function parseAdr(text, file) {
+  const { data: out } = parseFrontMatter(text, file, { keys: KEYS, listKeys: ['reopenIf'], required: REQUIRED });
   if (!STATUSES.includes(out.status)) {
     throw new Error(`${file}: status must be one of ${STATUSES.join(', ')}, got "${out.status}"`);
   }
