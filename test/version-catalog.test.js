@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseVersionCatalog, resolveAlias } from '../skill/scripts/lib/version-catalog.js';
+import { parseVersionCatalog, resolveAlias, resolveBundle } from '../skill/scripts/lib/version-catalog.js';
 
 const TOML = `
 # comment
@@ -42,7 +42,7 @@ test('parses versions, libraries, plugins', () => {
   assert.equal(vc.libraries.reffed.version, '1.9.22');
   assert.equal(vc.libraries.prefer.version, '3.0');
   assert.deepEqual(vc.plugins.hilt, { id: 'com.google.dagger.hilt.android', version: '1.9.22' });
-  assert.equal(vc.bundles, undefined);
+  assert.deepEqual(vc.bundles, { net: ['okhttp', 'retrofit-core'] });
   assert.equal(vc.libraries.net, undefined);
 });
 
@@ -100,4 +100,16 @@ b = "x:b:1"
   assert.equal(vc.libraries.q.version, '3');
   assert.deepEqual(vc.libraries.y, { group: 'a', name: 'b#c', version: null });
   assert.equal(vc.libraries.b.version, '1');
+});
+
+test('resolveBundle expands bundles (one line or several) into libraries', () => {
+  const vc = parseVersionCatalog(TOML + '\n[bundles]\nwide = [\n  "okhttp", # c\n  "ghost-x",\n]\n');
+  const net = resolveBundle(vc, 'libs.bundles.net');
+  assert.equal(net.complete, true);
+  assert.deepEqual(net.members.map((m) => `${m.group}:${m.name}:${m.version}`), ['com.squareup.okhttp3:okhttp:4.12.0', 'com.squareup.retrofit2:retrofit:2.9.0']);
+  const wide = resolveBundle(vc, 'libs.bundles.wide');
+  assert.equal(wide.complete, false);
+  assert.deepEqual(wide.members.map((m) => m.alias), ['okhttp']);
+  assert.equal(resolveBundle(vc, 'libs.bundles.nope'), null);
+  assert.equal(resolveBundle(vc, 'libs.okhttp'), null);
 });

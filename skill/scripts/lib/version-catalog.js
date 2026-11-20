@@ -1,6 +1,7 @@
 // Minimal parser for the TOML subset used by gradle/libs.versions.toml.
 // Supports [section] headers and `key = value` lines where value is a string
-// or a single-line inline table. Anything else is skipped, never thrown on.
+// or a single-line inline table, plus [bundles] arrays of strings (one line or
+// several). Anything else is skipped, never thrown on.
 
 const norm = (k) => String(k).replace(/[-_.]/g, '-');
 
@@ -85,6 +86,20 @@ function parseValue(raw) {
   return undefined;
 }
 
+// An array of strings ("[\"a\", 'b',]"), or undefined.
+function parseStringArray(raw) {
+  const v = raw.trim();
+  if (!v.startsWith('[') || !v.endsWith(']')) return undefined;
+  const out = [];
+  for (const part of splitTop(v.slice(1, -1), ',')) {
+    if (part.trim() === '') continue;
+    const s = parseString(part);
+    if (s === null) return undefined;
+    out.push(s);
+  }
+  return out;
+}
+
 function versionOf(entry, versions) {
   let v = entry.version;
   if (v === undefined && entry['version.ref'] !== undefined) v = { ref: entry['version.ref'] };
@@ -99,14 +114,26 @@ function versionOf(entry, versions) {
 }
 
 export function parseVersionCatalog(text) {
-  const vc = { versions: {}, libraries: {}, plugins: {} };
+  const vc = { versions: {}, libraries: {}, plugins: {}, bundles: {} };
   const raw = { libraries: [], plugins: [] };
   let section = null;
   let skipDepth = 0; // inside a multi-line value we do not understand
+  let bundle = null; // a multi-line bundle array being collected: { key, text, depth }
 
   for (const rawLine of String(text ?? '').split(/\r?\n/)) {
     const line = stripComment(rawLine).trim();
     if (!line) continue;
+    if (bundle && /^\[[A-Za-z0-9_.-]+\]$/.test(line)) bundle = null; // unterminated array: drop it at the next header
+    if (bundle) {
+      bundle.text += ' ' + line;
+      bundle.depth += depthDelta(line);
+      if (bundle.depth <= 0) {
+        const list = parseStringArray(bundle.text);
+        if (list) vc.bundles[norm(bundle.key)] = list.map(norm);
+        bundle = null;
+      }
+      continue;
+    }
     if (skipDepth > 0) {
       skipDepth += depthDelta(line);
       if (skipDepth < 0) skipDepth = 0;
@@ -120,7 +147,13 @@ export function parseVersionCatalog(text) {
     const valText = line.slice(i + 1).trim();
     if (!key) continue;
     const open = depthDelta(valText);
+    if (open > 0 && section === 'bundles') { bundle = { key, text: valText, depth: open }; continue; }
     if (open > 0) { skipDepth = open; continue; }
+    if (section === 'bundles') {
+      const list = parseStringArray(valText);
+      if (list) vc.bundles[norm(key)] = list.map(norm);
+      continue;
+    }
     const val = parseValue(valText);
     if (val === undefined) continue;
     if (section === 'versions') {
@@ -170,4 +203,18 @@ export function resolveAlias(vc, accessor) {
   const alias = norm(parts.slice(1).join('.'));
   const l = Object.hasOwn(vc.libraries, alias) ? vc.libraries[alias] : null;
   return l ? { kind: 'library', group: l.group, name: l.name, version: l.version, alias } : null;
+}
+
+/**
+ * Resolve a `libs.bundles.<name>` accessor: { alias, members, complete } where members are the bundle's libraries
+ * ({ group, name, version, alias }) that resolve and complete is false when one does not; null for an unknown bundle.
+ */
+export function resolveBundle(vc, accessor) {
+  const parts = String(accessor ?? '').split('.');
+  if (parts[0] !== 'libs' || parts[1] !== 'bundles' || parts.length < 3) return null;
+  const alias = norm(parts.slice(2).join('.'));
+  const list = vc.bundles && Object.hasOwn(vc.bundles, alias) ? vc.bundles[alias] : null;
+  if (!list) return null;
+  const members = list.filter((m) => Object.hasOwn(vc.libraries, m)).map((m) => ({ ...vc.libraries[m], alias: m }));
+  return { alias, members, complete: members.length === list.length };
 }

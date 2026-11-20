@@ -161,3 +161,35 @@ test('root build file dependencies are scanned, including buildscript classpath'
     assert.deepEqual(rows, ['build.gradle:3', 'build.gradle:7']);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+const scanWithToml = (dep, toml) => {
+  const dir = project(dep);
+  try {
+    fs.mkdirSync(path.join(dir, 'gradle'));
+    fs.writeFileSync(path.join(dir, 'gradle', 'libs.versions.toml'), toml);
+    return detectStack(dir, catalog);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+};
+const BUNDLE_TOML = [
+  '[versions]', 'gson = "2.8.6"', '',
+  '[libraries]', 'gson = { module = "com.google.code.gson:gson", version.ref = "gson" }', 'core = "androidx.core:core:1.0.0"', '',
+  '[bundles]', 'json = ["gson", "core"]', 'multi = [', '  "gson",', '  "core",', ']', 'broken = ["gson", "nope"]', '',
+].join('\n');
+
+test('a version-catalog bundle is expanded into its libraries before the vulnerability check', () => {
+  for (const bundle of ['json', 'multi']) {
+    const p = scanWithToml(`implementation libs.bundles.${bundle}`, BUNDLE_TOML);
+    assert.deepEqual(p.security.unresolvedAliases, [], bundle);
+    assert.deepEqual(p.security.vulnerable.map((v) => [v.coord, v.version, v.file, v.line]), [['com.google.code.gson:gson', '2.8.6', 'app/build.gradle', 3]], bundle);
+  }
+});
+
+test('only truly unresolvable bundles stay unresolved aliases', () => {
+  let p = scanWithToml('implementation libs.bundles.broken', BUNDLE_TOML);
+  assert.deepEqual(p.security.unresolvedAliases.map((a) => a.alias), ['bundles.broken']);
+  assert.equal(p.security.vulnerable.length, 1, 'the resolvable member is still checked');
+  p = scanWithToml('implementation libs.bundles.unknown', BUNDLE_TOML);
+  assert.deepEqual(p.security.unresolvedAliases.map((a) => a.alias), ['bundles.unknown']);
+});

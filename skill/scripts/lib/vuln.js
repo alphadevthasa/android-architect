@@ -52,7 +52,8 @@ export function parseRange(range) {
  * `units` are `{ file, build }` (modules plus the root build file). Rows are
  * one per unit per dependency. A dependency whose version is missing,
  * unresolved or dynamic is never reported safe: its coord goes to
- * `unresolvedChecks`. Alias/bundle dependencies with unknown coordinates go to
+ * `unresolvedChecks`. Bundles are checked through their libraries. Alias/bundle
+ * dependencies with unknown coordinates (a bundle: any of its libraries) go to
  * `unresolvedAliases` (only when the catalog has advisories).
  */
 export function vulnerableDependencies(units, catalog) {
@@ -69,10 +70,17 @@ export function vulnerableDependencies(units, catalog) {
   const unresolved = new Set();
   const aliases = new Map();
   if (advisories.size === 0) return { vulnerable, unresolvedChecks: [], unresolvedAliases: [] };
+  const addAlias = (dep, file) => aliases.set(`${dep.alias}\0${file}\0${dep.line}`, { alias: dep.alias, file, line: dep.line });
   for (const u of units) {
-    for (const dep of u.build?.dependencies ?? []) {
+    // A version-catalog bundle is checked through its libraries; it is unresolved only when one of them is unknown.
+    const deps = (u.build?.dependencies ?? []).flatMap((dep) => {
+      if (!dep.bundle) return [dep];
+      if (!dep.bundle.complete) addAlias(dep, u.file);
+      return dep.bundle.members.map((m) => ({ ...m, line: dep.line }));
+    });
+    for (const dep of deps) {
       if (!dep.group || !dep.name) {
-        if (dep.alias && !dep.project) aliases.set(`${dep.alias}\0${u.file}\0${dep.line}`, { alias: dep.alias, file: u.file, line: dep.line });
+        if (dep.alias && !dep.project) addAlias(dep, u.file);
         continue;
       }
       const coord = `${dep.group}:${dep.name}`;

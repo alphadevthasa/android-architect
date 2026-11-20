@@ -2,7 +2,7 @@
 // Line-oriented scanner with brace-depth tracking; not a Groovy/Kotlin grammar.
 // Never throws: unparseable input just yields fewer results.
 
-import { resolveAlias } from './version-catalog.js';
+import { resolveAlias, resolveBundle } from './version-catalog.js';
 
 const KEYWORDS = new Set(['val', 'var', 'def', 'if', 'else', 'for', 'while', 'return', 'exclude', 'because', 'println', 'import', 'package']);
 // A bare reference such as deps.retrofit or rootProject.ext.deps.retrofit.
@@ -233,7 +233,16 @@ function parseNotation(rest, configuration, vc, lookup, line) {
       const { version, unresolved } = finishVersion(r.version, lookup);
       return { configuration, group: r.group, name: r.name, version, unresolved, alias: r.alias, line };
     }
-    return { configuration, group: null, name: null, version: null, unresolved: true, alias: accessor.replace(/^libs\./, ''), line };
+    const dep = { configuration, group: null, name: null, version: null, unresolved: true, alias: accessor.replace(/^libs\./, ''), line };
+    const b = vc && accessor.startsWith('libs.bundles.') ? resolveBundle(vc, accessor) : null;
+    // A known bundle keeps its unresolved row and carries its libraries, for checks that look at coordinates.
+    if (b) {
+      dep.bundle = {
+        complete: b.complete,
+        members: b.members.map((m) => ({ group: m.group, name: m.name, ...finishVersion(m.version, lookup), alias: m.alias })),
+      };
+    }
+    return dep;
   }
 
   if (/^(?:group|name)\b/.test(rest)) {
