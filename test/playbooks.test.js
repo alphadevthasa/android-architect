@@ -99,9 +99,11 @@ const profileWith = (extra = {}) => ({
 
 test('applyPlaybook on legacy-java-mvp: present source gives real units and the decision tag', () => {
   const p = parse(GOOD);
-  const r = applyPlaybook(p, detectStack(LEGACY, catalog), catalog);
+  const r = applyPlaybook(p, detectStack(LEGACY, catalog), catalog, { root: LEGACY });
   assert.equal(r.applicable, true);
   assert.ok(r.cutoverUnits.length > 0);
+  assert.ok(r.buildFiles.length > 0);
+  for (const f of r.buildFiles) assert.ok(!r.cutoverUnits.some((u) => u.file === f), f);
   for (const u of r.cutoverUnits) assert.ok(fs.existsSync(path.join(LEGACY, u.file)), u.file);
   assert.ok(r.tags.includes('decision'));
   assert.equal(r.gated, true);
@@ -116,36 +118,93 @@ test('applyPlaybook: absent source is not applicable, with the reason and no uni
   assert.deepEqual(r.cutoverUnits, []);
 });
 
-test('applyPlaybook: owning module is the longest dir prefix, units are sorted and deduplicated', () => {
-  const r = applyPlaybook(parse(GOOD), profileWith(), catalog);
+const M = (file, line, kind = 'source') => ({ file, line, kind, signal: 's' });
+
+test('applyPlaybook: owning module is the longest dir prefix, units are per file, sorted; build files are separate', () => {
+  const matches = [M('app/core/Api.kt', 3), M('app/Main.kt', 9), M('app/Main.kt', 12), M('build.gradle', 1, 'build'), M('app/build.gradle', 4, 'build'), M('app/src/main/res/layout/a.xml', null, 'resource')];
+  const r = applyPlaybook(parse(GOOD), profileWith(), catalog, { matches });
   assert.deepEqual(r.cutoverUnits, [
     { file: 'app/Main.kt', line: 9, module: ':app' },
     { file: 'app/core/Api.kt', line: 3, module: ':app:core' },
-    { file: 'build.gradle', line: 1, module: ':' },
+    { file: 'app/src/main/res/layout/a.xml', line: null, module: ':app' },
   ]);
+  assert.deepEqual(r.buildFiles, ['app/build.gradle', 'build.gradle']);
   assert.equal(r.moreUnits, 0);
+  assert.equal(r.totalUnits, 2);
 });
 
-test('applyPlaybook caps units and reports the rest', () => {
-  const profile = profileWith();
-  profile.dimensions.networking.entries[0].evidence = Array.from({ length: MAX_UNITS + 5 }, (_, i) => ({ file: `app/F${String(i).padStart(4, '0')}.kt`, line: 1, signal: 's' }));
-  const r = applyPlaybook(parse(GOOD), profile, catalog);
+test('applyPlaybook caps units and build files and reports the rest', () => {
+  const matches = [
+    ...Array.from({ length: MAX_UNITS + 5 }, (_, i) => M(`app/F${String(i).padStart(4, '0')}.kt`, 1)),
+    ...Array.from({ length: MAX_UNITS + 2 }, (_, i) => M(`m${String(i).padStart(4, '0')}/build.gradle`, 1, 'build')),
+  ];
+  const r = applyPlaybook(parse(GOOD), profileWith(), catalog, { matches });
   assert.equal(r.cutoverUnits.length, MAX_UNITS);
   assert.equal(r.moreUnits, 5);
+  assert.equal(r.buildFiles.length, MAX_UNITS);
+  assert.equal(r.moreBuildFiles, 2);
+});
+
+function makeProject(dir, n) {
+  fs.mkdirSync(path.join(dir, 'app/src/main/java/x'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'settings.gradle'), "include ':app'\n");
+  fs.writeFileSync(path.join(dir, 'app/build.gradle'), 'dependencies { implementation "com.squareup.retrofit2:retrofit:2.9.0" }\n');
+  for (let i = 0; i < n; i++) {
+    fs.writeFileSync(path.join(dir, `app/src/main/java/x/A${String(i).padStart(3, '0')}.kt`), 'import retrofit2.Retrofit\n');
+  }
+}
+
+test('real detectStack output: all matching files are listed (not a 5-row sample), the gradle file is a build file', () => {
+  const proj = path.join(tmp, 'real');
+  makeProject(proj, 8);
+  const profile = detectStack(proj, catalog);
+  assert.equal(profile.dimensions.networking.entries.find((e) => e.id === 'okhttp-retrofit').evidence.length, 5);
+  const r = applyPlaybook(parse(GOOD), profile, catalog, { root: proj });
+  assert.equal(r.cutoverUnits.length, 8);
+  assert.deepEqual(r.buildFiles, ['app/build.gradle']);
+  assert.ok(r.cutoverUnits.every((u) => u.module === ':app' && u.line === 1));
+  assert.equal(r.totalUnits, 8);
+  assert.deepEqual(applyPlaybook(parse(GOOD), profile, catalog, { root: proj }), r);
+});
+
+test('real detectStack output: 250 matching files are capped at 200 with moreUnits 50', () => {
+  const proj = path.join(tmp, 'big');
+  makeProject(proj, 250);
+  const r = applyPlaybook(parse(GOOD), detectStack(proj, catalog), catalog, { root: proj });
+  assert.equal(r.cutoverUnits.length, MAX_UNITS);
+  assert.equal(r.moreUnits, 50);
+  assert.equal(r.totalUnits, 250);
+});
+
+test('a 1 MB single-line source file does not stall unit collection', () => {
+  const proj = path.join(tmp, 'wide');
+  makeProject(proj, 1);
+  fs.writeFileSync(path.join(proj, 'app/src/main/java/x/Wide.kt'), 'val s = "' + 'a'.repeat(1_000_000) + '"\n');
+  const t = Date.now();
+  const r = applyPlaybook(parse(GOOD), detectStack(proj, catalog), catalog, { root: proj });
+  assert.equal(r.cutoverUnits.length, 1);
+  assert.ok(Date.now() - t < 5000);
+});
+
+test('kmpOnly without a worthIf for kmp adds a note on a non-KMP project', () => {
+  const p = parse(GOOD.replace('worthIf:\n  - present:kmp\n', 'worthIf:\n'));
+  const r = applyPlaybook(p, profileWith(), catalog, { matches: [] });
+  assert.equal(r.worth.ok, false);
+  assert.match(r.worth.notes[0], /^kmpOnly: this playbook only pays off with KMP/);
 });
 
 test('worthIf present:kmp is false with a note without KMP and true with it', () => {
   const p = parse(GOOD);
-  const no = applyPlaybook(p, profileWith(), catalog);
+  const no = applyPlaybook(p, profileWith(), catalog, { matches: [] });
   assert.equal(no.worth.ok, false);
   assert.match(no.worth.notes[0], /^worth-it condition not met: present:kmp\. Retrofit to Ktor is worth it mainly with Kotlin Multiplatform/);
-  const yes = applyPlaybook(p, profileWith({ kmp: { entries: [{ id: 'kmp', share: null, units: 0, evidence: [] }] } }), catalog);
+  const yes = applyPlaybook(p, profileWith({ kmp: { entries: [{ id: 'kmp', share: null, units: 0, evidence: [] }] } }), catalog, { matches: [] });
   assert.equal(yes.worth.ok, true);
   assert.deepEqual(yes.worth.notes, []);
 });
 
 test('irreversible adds the irreversible tag', () => {
-  const r = applyPlaybook(parse(GOOD.replace('irreversible: false', 'irreversible: true')), profileWith(), catalog);
+  const r = applyPlaybook(parse(GOOD.replace('irreversible: false', 'irreversible: true')), profileWith(), catalog, { matches: [] });
   assert.deepEqual(r.tags, ['irreversible', 'decision']);
 });
 
@@ -186,6 +245,8 @@ test('CLI: apply prints json and escaped markdown for a project', () => {
   const md = run(['apply', 'okhttp-retrofit', 'ktor-client', LEGACY, '--dir', tmp, '--format', 'md']).stdout;
   assert.match(md, /## Cutover units/);
   assert.match(md, /ApiModule\.java/);
+  assert.match(md, /cutover files \(profile counts \d+ units\)/);
+  assert.match(md, /## Build files to update/);
 });
 
 test('CLI: hostile file names in evidence cannot break out of a Markdown table row', () => {
@@ -193,13 +254,14 @@ test('CLI: hostile file names in evidence cannot break out of a Markdown table r
   fs.mkdirSync(path.join(proj, 'app/src'), { recursive: true });
   fs.writeFileSync(path.join(proj, 'settings.gradle'), "include ':app'\n");
   fs.writeFileSync(path.join(proj, 'app/build.gradle'), 'dependencies { implementation "com.squareup.retrofit2:retrofit:2.9.0" }\n');
-  fs.writeFileSync(path.join(proj, 'app/src/a|b\n# evil.kt'), 'import retrofit2.Retrofit\n');
+  fs.writeFileSync(path.join(proj, 'app/src/a|b\n# evil\u202e.kt'), 'import retrofit2.Retrofit\n');
   const dir = path.join(tmp, 'pb');
   fs.mkdirSync(dir);
   fs.writeFileSync(path.join(dir, 'okhttp-retrofit--to--ktor-client.md'), GOOD);
   const md = run(['apply', 'okhttp-retrofit', 'ktor-client', proj, '--dir', dir, '--format', 'md']).stdout;
   assert.doesNotMatch(md, /^# evil/m);
-  assert.match(md, /a\\\|b # evil\.kt/);
+  assert.match(md, /a\\\|b # evil \.kt/);
+  assert.doesNotMatch(md, /[\u202e\u2028]/);
 });
 
 test('the shipped playbooks folder is vendored into .ai/tools and covered by the tool hashes', () => {

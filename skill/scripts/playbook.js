@@ -10,7 +10,8 @@ import { loadCatalog } from './lib/catalog.js';
 import { loadCatalogWithOverrides } from './lib/overrides.js';
 import { detectStack } from './lib/detect.js';
 import { loadPlaybooks, validatePlaybooks, applyPlaybook, playbooksDir, SECTIONS } from './lib/playbooks.js';
-import { mdText } from './lib/knowledge.js';
+import { mdText, stripUnsafe } from './lib/knowledge.js';
+import { oneLine } from './lib/overrides.js';
 import { redact, redactJson } from './lib/redact.js';
 
 const USAGE = 'usage: node playbook.js list | show <id> | apply <from> <to> <projectRoot> [--format json|md] [--dir <playbooks>]';
@@ -40,7 +41,7 @@ function parseArgs(argv, defaults) {
 }
 
 // Body text keeps its line structure but loses control characters.
-const body = (s) => String(s).replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, '');
+const body = (s) => stripUnsafe(String(s).replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, ''));
 const summary = (p) => ({ id: p.id, dimension: p.dimension, from: p.from, to: p.to, title: p.title, irreversible: p.irreversible, kmpOnly: p.kmpOnly, verified: p.verified, asOf: p.asOf });
 const pairs = (list) => (list.length === 0 ? 'no playbooks are installed' : list.map((p) => `${p.from} -> ${p.to}`).join('\n'));
 
@@ -66,12 +67,18 @@ function renderApply(p, r) {
   for (const n of r.worth.notes) out.push(`- ${mdText(n)}`);
   if (r.worth.notes.length > 0) out.push('');
   out.push(`Tags: ${r.tags.length === 0 ? 'none' : r.tags.join(', ')}${r.gated ? ' (gated: needs a human decision)' : ''}`, '');
-  out.push('## Cutover units', '');
-  if (r.cutoverUnits.length === 0) out.push('none');
+  const listed = r.cutoverUnits.length;
+  out.push(`## Cutover units`, '', `${listed + r.moreUnits} cutover files (profile counts ${r.totalUnits} units)`, '');
+  if (listed === 0) out.push('none');
   else {
     out.push('| File | Line | Module |', '| --- | --- | --- |');
     for (const u of r.cutoverUnits) out.push(`| ${mdText(u.file)} | ${u.line ?? '-'} | ${mdText(u.module ?? '-')} |`);
     if (r.moreUnits > 0) out.push('', `... and ${r.moreUnits} more`);
+  }
+  if (r.buildFiles.length > 0) {
+    out.push('', '## Build files to update', '');
+    for (const f of r.buildFiles) out.push(`- ${mdText(f)}`);
+    if (r.moreBuildFiles > 0) out.push(`- ... and ${r.moreBuildFiles} more`);
   }
   out.push('', '## Security checklist', '');
   for (const c of r.securityChecklist) out.push(`- ${mdText(c)}`);
@@ -121,14 +128,12 @@ export function main(argv, { playbooksDir: dirOpt } = {}) {
   let result;
   try {
     const catalog = loadCatalogWithOverrides(undefined, root).catalog;
-    result = applyPlaybook(pb, detectStack(root, catalog), catalog);
+    result = applyPlaybook(pb, detectStack(root, catalog), catalog, { root });
   } catch (e) {
     fail(1, redact(String(e.message)).text);
   }
   print(opts.format === 'md' ? renderApply(pb, result) : JSON.stringify(redactJson({ playbook: summary(pb), ...result }), null, 2) + '\n');
 }
-
-const oneLine = (s) => String(s).replace(/\s+/g, ' ').trim();
 
 const isMain = () => {
   try {

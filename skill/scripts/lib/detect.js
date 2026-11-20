@@ -391,8 +391,8 @@ function applyFileExclusions(dimId, accs) {
   }
 }
 
-/** Map an Android project onto every catalog dimension. */
-export function detectStack(root, catalog) {
+/** The shared detection context: gitignore-filtered files, lazy reader, modules and build units. */
+function buildContext(root) {
   const files = listFiles(root, { gitignore: true });
   const read = makeReader(root);
   const modules = discoverModules(root, files);
@@ -409,21 +409,61 @@ export function detectStack(root, catalog) {
       return globCache.get(g);
     },
   };
+  return { ctx, files, read, modules, moduleOf: makeModuleOf(modules) };
+}
 
-  const moduleOf = makeModuleOf(modules);
+/** Matches of every entry of a dimension after file exclusions and supersede rules (not yet capped). */
+function dimensionAccs(dim, ctx, moduleOf) {
+  const accs = new Map();
+  for (const entry of dim.entries) {
+    const acc = entry.detect.computed ? evaluateComputed(dim.id, entry.id, ctx) : evaluateEntry(entry, ctx);
+    if (acc) accs.set(entry.id, acc);
+  }
+  applyFileExclusions(dim.id, accs);
+  return applySupersede(dim, accs, moduleOf);
+}
+
+const BUILD_NAME = /^(build|settings)\.gradle(\.kts)?$|\.toml$/;
+function matchKind(ev) {
+  if (/^(gradle|plugin) /.test(ev.signal) || BUILD_NAME.test(path.posix.basename(ev.file))) return 'build';
+  if (ev.signal.startsWith('manifest ')) return 'manifest';
+  return SOURCE_EXT.has(extOf(ev.file)) ? 'source' : 'resource';
+}
+
+/**
+ * Every detection match of one catalog entry, without the evidence cap of detectStack: [{ file, line|null, kind, signal }]
+ * sorted by file then line. kind is build (gradle/plugins/build files), manifest, resource (XML and other files) or source.
+ * Uses the same files, signals, exclusions and supersede rules as detectStack, so the entry is present here exactly when
+ * detectStack reports it.
+ */
+export function collectEntryMatches(root, catalog, dimId, entryId) {
+  const dim = catalog.dimensions.find((d) => d.id === dimId);
+  if (dim === undefined || dim.id === COMPLIANCE_DIM) return [];
+  const { ctx, moduleOf } = buildContext(root);
+  const acc = dimensionAccs(dim, ctx, moduleOf).get(entryId);
+  if (acc === undefined) return [];
+  const seen = new Set();
+  const out = [];
+  for (const m of acc.matches) {
+    const key = `${m.ev.file}\0${m.ev.line}\0${m.ev.signal}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ file: m.ev.file, line: m.ev.line, kind: matchKind(m.ev), signal: m.ev.signal });
+  }
+  return out.sort((a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : (a.line ?? 0) - (b.line ?? 0)));
+}
+
+/** Map an Android project onto every catalog dimension. */
+export function detectStack(root, catalog) {
+  const { ctx, files, read, modules, moduleOf } = buildContext(root);
   const sdk = sdkSummary(modules);
   const dimensions = {};
   for (const dim of catalog.dimensions) {
     if (dim.id === COMPLIANCE_DIM) continue; // reported in profile.compliance
-    const accs = new Map();
-    for (const entry of dim.entries) {
-      const acc = entry.detect.computed ? evaluateComputed(dim.id, entry.id, ctx) : evaluateEntry(entry, ctx);
-      if (acc) accs.set(entry.id, acc);
-    }
-    applyFileExclusions(dim.id, accs);
+    const accs = dimensionAccs(dim, ctx, moduleOf);
     const computed = new Set(dim.entries.filter((e) => e.detect.computed).map((e) => e.id));
     const rows = [];
-    for (const [id, acc] of applySupersede(dim, accs, moduleOf)) {
+    for (const [id, acc] of accs) {
       const units = unitCount(acc);
       if (units > 0) rows.push({ id, units, evidence: sortEvidence(acc.matches.map((m) => m.ev)), flag: computed.has(id) });
     }

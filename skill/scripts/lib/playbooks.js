@@ -4,6 +4,8 @@ import path from 'node:path';
 import { parseFrontMatter, reopenHolds } from './adr.js';
 import { presentEntries } from './candidates.js';
 import { playbooksDir } from './catalog.js';
+import { collectEntryMatches } from './detect.js';
+import { oneLine } from './overrides.js';
 
 export { playbooksDir };
 
@@ -144,18 +146,20 @@ export function validatePlaybooks(playbooks, catalog) {
   return errs;
 }
 
-const oneLine = (s) => String(s).replace(/\s+/g, ' ').trim();
-
 /**
  * Apply a playbook to a profile. Never invents units: when `from` is not detected the result is not applicable
- * and has no cutover units.
+ * and has no cutover units. Units come from the uncapped detection matches of the `from` entry (`opts.matches`, or
+ * computed from `opts.root`): one unit per source/manifest/resource file (first matching line, owning module); build
+ * files are listed separately in `buildFiles`. Both lists are capped at MAX_UNITS with `moreUnits` / `moreBuildFiles`.
+ * `totalUnits` is the profile's own unit count for the entry, as a cross-check.
  */
-export function applyPlaybook(playbook, profile, catalog) {
+export function applyPlaybook(playbook, profile, catalog, { root, matches } = {}) {
   const tags = [];
   if (playbook.irreversible) tags.push('irreversible');
   if (playbook.securityChecklist.length > 0) tags.push('decision');
   const base = {
-    cutoverUnits: [], moreUnits: 0, gated: tags.length > 0, tags, securityChecklist: [...playbook.securityChecklist],
+    cutoverUnits: [], moreUnits: 0, buildFiles: [], moreBuildFiles: 0, totalUnits: 0,
+    gated: tags.length > 0, tags, securityChecklist: [...playbook.securityChecklist],
   };
   const fromEntry = presentEntries(profile, playbook.dimension).find((e) => e.id === playbook.from);
   if (fromEntry === undefined) {
@@ -163,30 +167,36 @@ export function applyPlaybook(playbook, profile, catalog) {
   }
 
   const notes = [];
+  const intro = oneLine(playbook.sections['When it is worth it'].split('\n')[0]).slice(0, 300);
   for (const cond of playbook.worthIf) {
     if (reopenHolds(cond, profile)) continue;
-    const intro = oneLine(playbook.sections['When it is worth it'].split('\n')[0]).slice(0, 300);
     notes.push(`worth-it condition not met: ${cond}${intro === '' ? '' : `. ${intro}`}`);
   }
+  if (playbook.kmpOnly && !reopenHolds('present:kmp', profile) && !playbook.worthIf.includes('present:kmp')) {
+    notes.push('kmpOnly: this playbook only pays off with KMP; kmp not detected');
+  }
 
+  const all = matches ?? (root === undefined ? [] : collectEntryMatches(root, catalog, playbook.dimension, playbook.from));
   const modules = [...(profile.modules ?? [])].sort((a, b) => b.dir.length - a.dir.length);
   const owner = (file) => modules.find((m) => m.dir === '' || file === m.dir || file.startsWith(m.dir + '/'))?.path ?? null;
-  const seen = new Set();
-  const units = [];
-  for (const ev of fromEntry.evidence ?? []) {
-    if (typeof ev?.file !== 'string') continue;
-    const line = Number.isInteger(ev.line) ? ev.line : null;
-    const key = `${ev.file}\n${line}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    units.push({ file: ev.file, line, module: owner(ev.file) });
+  const byFile = new Map();
+  const build = new Set();
+  for (const m of all) {
+    if (typeof m?.file !== 'string') continue;
+    if (m.kind === 'build') build.add(m.file);
+    else if (!byFile.has(m.file)) byFile.set(m.file, Number.isInteger(m.line) ? m.line : null);
   }
-  units.sort((a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : (a.line ?? 0) - (b.line ?? 0)));
+  const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+  const units = [...byFile].sort(([a], [b]) => cmp(a, b)).map(([file, line]) => ({ file, line, module: owner(file) }));
+  const buildFiles = [...build].sort(cmp);
   return {
     applicable: true,
     worth: { ok: notes.length === 0, notes },
     ...base,
     cutoverUnits: units.slice(0, MAX_UNITS),
     moreUnits: Math.max(0, units.length - MAX_UNITS),
+    buildFiles: buildFiles.slice(0, MAX_UNITS),
+    moreBuildFiles: Math.max(0, buildFiles.length - MAX_UNITS),
+    totalUnits: fromEntry.units ?? 0,
   };
 }
