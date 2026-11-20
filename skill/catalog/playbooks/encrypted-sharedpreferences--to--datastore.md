@@ -36,7 +36,7 @@ One safe ordering applies: (1) the migration is one-way per file with a single w
 4. Implement the seam on DataStore with that layer, and keep the EncryptedSharedPreferences implementation in the code side by side behind a flag that selects one store per file. Never write the same value to both stores.
 5. Write a custom one-time `DataMigration`: read each value from EncryptedSharedPreferences, write it through the encrypting DataStore, record a "migrated" marker inside the DataStore, return `false` from `shouldMigrate` once it exists, and leave the old file untouched in `cleanUp`. The built-in `SharedPreferencesMigration` expects a plain file and cannot read the encrypted one.
 6. Do the per-unit cutover: move one encrypted file or one settings area at a time, with every reader and writer of that file switching in the same release.
-7. After verification and a full release cycle, delete the old implementation: the EncryptedSharedPreferences code, the old file (`Context.deleteSharedPreferences(name)`) and the flag, plus the leftover Tink keyset preferences file (`__androidx_security_crypto_encrypted_prefs__`) that the old library created. Remove the old master key alias and the security-crypto dependency only after every file and `EncryptedFile` that used that alias is migrated and deleted (see Security checklist).
+7. After verification and a full release cycle, delete the old implementation: the EncryptedSharedPreferences code, the old file (`Context.deleteSharedPreferences(name)`) and the flag. EncryptedSharedPreferences keeps its key and value keysets inside its own file under reserved keys, so `deleteSharedPreferences(name)` removes them with the file. The separate shared keyset file `__androidx_security_crypto_encrypted_file_pref__` belongs to `EncryptedFile`: delete it only when no `EncryptedFile` remains in the app. Remove the old master key alias and the security-crypto dependency only after every file and `EncryptedFile` that used that alias is migrated and deleted (see Security checklist).
 
 ## Pitfalls
 
@@ -60,7 +60,7 @@ One safe ordering applies: (1) the migration is one-way per file with a single w
 
 - The new store is not encrypted by default, so encryption is implemented explicitly with Tink and an Android Keystore key, and a test asserts that raw bytes on disk do not contain the plaintext value.
 - Keystore key handling: a new key alias, non-exportable key, no key bytes in logs or preferences. The old master key alias is deleted only after every file (and any `EncryptedFile`) that used it has been migrated and deleted.
-- The old EncryptedSharedPreferences file is deleted after a verified migration and the deletion release (`Context.deleteSharedPreferences(name)`), together with any backup copy.
+- The old EncryptedSharedPreferences file is deleted after a verified migration and the deletion release (`Context.deleteSharedPreferences(name)`, which also removes the keysets stored inside it), together with any backup copy. The shared `EncryptedFile` keyset file is left in place while any `EncryptedFile` remains.
 - Backup rules exclude the new DataStore file, and `android:allowBackup` and `dataExtractionRules` are reviewed.
 - Decryption failures for credentials and tokens force re-authentication; they are logged without the value or key material.
 

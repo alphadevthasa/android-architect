@@ -53,7 +53,7 @@ One safe ordering applies: (1) the migration is one-way per file, with a single 
 
 ## Tests
 
-- Migration test: create a SharedPreferences file with legacy values of every type, build the DataStore with the migration, read each key, and assert the values and that the old file is emptied.
+- Migration test: create a SharedPreferences file with legacy values of every type, build the DataStore with the migration, read each key, and assert the values and that the old file is deleted (the built-in cleanup removes the migrated keys and deletes the file once it is empty).
 - Upgrade test on a device or emulator image: install the old build, set values, update to the new build, assert the values.
 - Contract tests on the seam against both implementations during the side-by-side phase.
 - A test that two instances for the same file are not created (DI graph test).

@@ -125,7 +125,9 @@ test('object-database copies switch every read and write at the marker; sqldelig
     assert.match(steps, /write gate/, id);
   }
   const sd = byId.get('room--to--sqldelight');
-  assert.match(sd.sections.Steps, /keep the rollback flag/);
-  assert.match(sd.sections.Steps, /10\. In the last step[^\n]*the flag/);
-  assert.match(sd.sections.Rollback, /Step 10, the very last step/);
+  assert.match(sd.sections.Steps, /8\.[^\n]*ends the flag-flip window/);
+  assert.match(sd.sections.Steps, /9\.[^\n]*no longer created[^\n]*never two connection owners/);
+  assert.match(sd.sections.Steps, /10\. Step 10 deletes dead code only/);
+  assert.match(sd.sections.Rollback, /three windows/i);
+  assert.match(sd.sections.Rollback, /never use `fallbackToDestructiveMigration`/i);
 });
