@@ -236,3 +236,64 @@ export function loadCatalog(dir = DEFAULT_DIR) {
     },
   };
 }
+
+const SCORING_WEIGHTS = ['isolation', 'size', 'tests', 'churn', 'risk', 'proximity'];
+const MAX_KEYWORD = 40;
+const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
+
+/**
+ * Load and strictly validate scoring.json (feature prioritization weights, risk keywords, bucket
+ * thresholds, size bands) from a catalog directory (path or URL). Throws an Error whose message
+ * lists every problem, each prefixed with `scoring.json:`.
+ */
+export function loadScoring(dir = DEFAULT_DIR) {
+  const base = dir instanceof URL ? dir : pathToFileURL(path.resolve(String(dir)) + path.sep);
+  const errs = [];
+  let data;
+  try {
+    data = JSON.parse(fs.readFileSync(new URL('scoring.json', base), 'utf8'));
+  } catch (e) {
+    throw new Error(`scoring.json: cannot read or parse (${e.code ?? e.message})`);
+  }
+  if (!isObj(data)) throw new Error('scoring.json: must be a JSON object');
+  if (data.schemaVersion !== 1) errs.push('scoring.json: schemaVersion must be 1');
+  if (!isStr(data.asOf)) errs.push('scoring.json: asOf must be a non-empty string');
+  if (!isObj(data.weights)) {
+    errs.push('scoring.json: weights must be an object');
+  } else {
+    let sum = 0;
+    let ok = true;
+    for (const k of SCORING_WEIGHTS) {
+      const v = data.weights[k];
+      if (!isNum(v) || v < 0) {
+        errs.push(`scoring.json: weights.${k} must be a number >= 0`);
+        ok = false;
+      } else sum += v;
+    }
+    for (const k of Object.keys(data.weights)) {
+      if (!SCORING_WEIGHTS.includes(k)) errs.push(`scoring.json: unknown weight ${k}`);
+    }
+    if (ok && Math.abs(sum - 1) > 1e-6) errs.push(`scoring.json: weights must sum to 1 (got ${sum})`);
+  }
+  if (!isObj(data.riskKeywords)) {
+    errs.push('scoring.json: riskKeywords must be an object');
+  } else {
+    for (const level of ['high', 'medium']) {
+      const list = data.riskKeywords[level];
+      if (!Array.isArray(list) || !list.every((w) => isStr(w) && w.length <= MAX_KEYWORD)) {
+        errs.push(`scoring.json: riskKeywords.${level} must be an array of strings of at most ${MAX_KEYWORD} characters`);
+      }
+    }
+  }
+  const b = data.buckets;
+  if (!isObj(b) || !isNum(b.first) || !isNum(b.next)) errs.push('scoring.json: buckets.first and buckets.next must be numbers');
+  else if (!(b.first > b.next)) errs.push('scoring.json: buckets.first must be greater than buckets.next');
+  const s = data.sizeBands;
+  if (!isObj(s) || !isNum(s.smallLoc) || !isNum(s.mediumLoc) || !isNum(s.largeLoc)) {
+    errs.push('scoring.json: sizeBands.smallLoc, mediumLoc and largeLoc must be numbers');
+  } else if (!(s.smallLoc > 0 && s.smallLoc < s.mediumLoc && s.mediumLoc < s.largeLoc)) {
+    errs.push('scoring.json: sizeBands must satisfy 0 < smallLoc < mediumLoc < largeLoc');
+  }
+  if (errs.length) throw new Error(errs.join('\n'));
+  return data;
+}

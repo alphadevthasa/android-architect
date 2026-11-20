@@ -31,7 +31,8 @@ test('every knowledge file starts with the header', () => {
   ]);
   for (const [k, v] of Object.entries(out)) assert.ok(v.startsWith(HEADER + '\n\n'), k);
   assert.ok(out['knowledge/stack-profile.md'].includes('# Android stack profile'));
-  assert.ok(out['knowledge/feature-map.md'].includes('TODO: feature scores arrive with the "prioritize" command in a later version.'));
+  assert.ok(out['knowledge/feature-map.md'].includes('# Feature map'));
+  assert.ok(!out['knowledge/feature-map.md'].includes('TODO'));
 });
 
 test('module-map has mermaid graph and every module', () => {

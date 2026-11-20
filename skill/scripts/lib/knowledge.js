@@ -123,8 +123,41 @@ function renderDependencies(modules) {
   return out.join('\n').replace(/\n+$/, '\n');
 }
 
+const BUCKET_TITLES = {
+  first: 'First: pilot candidates',
+  next: 'Next: after the pilot',
+  last: 'Last: needs preparation or has high risk',
+};
+
+/** Markdown for a buildFeatureMap result: notes, one table per bucket, then the reasons per feature. */
+export function renderFeatureMap(map) {
+  const out = ['# Feature map', ''];
+  if (!map) return out.concat('The feature map was not computed for this run.', '').join('\n');
+  out.push('Candidates ranked for migration by a tunable score (weights and thresholds: `catalog/scoring.json`).', '');
+  if (map.fallback === 'packages') out.push('No feature modules or `feature/<name>` packages found: units are top-level packages.', '');
+  else if (map.fallback === 'app') out.push('No feature structure found: the whole project is one unit.', '');
+  if (!map.churnAvailable) out.push('Git history is not available: churn is not part of the score.', '');
+  for (const bucket of ['first', 'next', 'last']) {
+    const list = map.features.filter((f) => f.bucket === bucket);
+    out.push(`## ${BUCKET_TITLES[bucket]}`, '');
+    if (list.length === 0) {
+      out.push('None.', '');
+      continue;
+    }
+    out.push('| feature | kind | score | risk | loc | tests | fan-in | fan-out | churn | proximity |', '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |');
+    for (const f of list) {
+      const row = [f.name, f.kind, f.score, f.risk, f.loc, f.testFiles, f.fanIn, f.fanOut, f.churn ?? 'n/a', f.proximity];
+      out.push(`| ${row.map(cell).join(' | ')} |`);
+    }
+    out.push('');
+    for (const f of list) out.push(`- ${oneLine(f.name)}: ${f.reasons.map(oneLine).join('; ')}`);
+    out.push('');
+  }
+  return out.join('\n').replace(/\n+$/, '\n');
+}
+
 /** Render the generated knowledge files, keyed by path relative to `.ai/`. */
-export function renderKnowledge(profile, modules, catalog, meta) {
+export function renderKnowledge(profile, modules, catalog, meta, featureMap = null) {
   const header = generatedHeader(meta);
   const withHeader = (body) => `${header}\n\n${body}`;
   return {
@@ -132,8 +165,6 @@ export function renderKnowledge(profile, modules, catalog, meta) {
     'knowledge/architecture-current.md': withHeader(renderArchitecture(profile, catalog)),
     'knowledge/module-map.md': withHeader(renderModuleMap(modules)),
     'knowledge/dependencies.md': withHeader(renderDependencies(modules)),
-    'knowledge/feature-map.md': withHeader(
-      '# Feature map\n\nTODO: feature scores arrive with the "prioritize" command in a later version.\n',
-    ),
+    'knowledge/feature-map.md': withHeader(renderFeatureMap(featureMap)),
   };
 }

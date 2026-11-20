@@ -24,7 +24,7 @@ const KAPT_PLUGINS = new Set(['kotlin-kapt', 'org.jetbrains.kotlin.kapt']);
 // :core:data is a shared library module, not layer-based modularization.
 const LAYER_NAMES = new Set(['data', 'domain', 'presentation']);
 const LIBRARY_PLUGINS = new Set(['com.android.library', 'java-library', 'org.jetbrains.kotlin.jvm']);
-const FEATURE_SEGMENT = /^features?([-_].+)?$/;
+export const FEATURE_SEGMENT = /^features?([-_].+)?$/;
 // An entry whose file units are dropped where a more specific entry of the
 // same dimension matched the same file (a plain ViewModel that already uses
 // LiveData or a StateFlow UI state is that pattern, not plain MVVM).
@@ -179,7 +179,7 @@ function evaluateEntry(entry, ctx) {
   return acc;
 }
 
-function moduleSegments(m) {
+export function moduleSegments(m) {
   return m.path.split(':').filter(Boolean);
 }
 

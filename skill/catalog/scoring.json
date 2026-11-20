@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "asOf": "2026-11-20",
+  "weights": {
+    "isolation": 0.25,
+    "size": 0.2,
+    "tests": 0.2,
+    "churn": 0.1,
+    "risk": 0.15,
+    "proximity": 0.1
+  },
+  "riskKeywords": {
+    "high": ["auth", "login", "payment", "onboarding", "transfer", "kyc", "checkout", "wallet"],
+    "medium": ["profile", "settings", "notification", "account"]
+  },
+  "buckets": { "first": 65, "next": 50 },
+  "sizeBands": { "smallLoc": 200, "mediumLoc": 500, "largeLoc": 1000 }
+}

@@ -8,7 +8,9 @@ import { candidatePaths } from './candidates.js';
 import { discoverModules } from './modules.js';
 import { listFiles } from './walk.js';
 import { buildIndex } from './indexer.js';
-import { headCommit, gitDir, topLevel, addToExclude, changedSince } from './git.js';
+import { headCommit, gitDir, topLevel, addToExclude, changedSince, churnByPath } from './git.js';
+import { loadScoring } from './catalog.js';
+import { buildFeatureMap } from './features.js';
 import { sha256File, hashTree, regularFiles } from './hash.js';
 import { MANIFEST_SCHEMA_VERSION, readManifest, writeManifest } from './manifest.js';
 import { readTemplate, renderReadme, renderKnowledge } from './knowledge.js';
@@ -208,6 +210,9 @@ export function writeAiDir(
   const files = pointersCreated ? listFiles(root, { gitignore: true }) : loaded.listed;
   const profile = !pointersCreated && prepared?.profile ? prepared.profile : detectStack(root, catalog);
   const modules = discoverModules(root, files);
+  // One feature-map computation per run, shared by the knowledge files.
+  const scoringDir = fs.existsSync(path.join(catalogDir, 'scoring.json')) ? catalogDir : undefined;
+  const featureMap = buildFeatureMap(root, { profile, scoring: loadScoring(scoringDir), churn: churnByPath(root) });
   const date = now.toISOString().slice(0, 10);
   const mode = local ? 'local' : 'committed';
   const meta = { date, commit, catalogVersion: catalog.catalogVersion };
@@ -218,7 +223,7 @@ export function writeAiDir(
     templatesDir,
   );
   putRedacted('README.md', isMember ? hubWorkflows(readme, workspace.hub) + memberNote(workspace.hub) : readme);
-  for (const [rel, text] of Object.entries(renderKnowledge(profile, modules, catalog, meta))) putRedacted(rel, text);
+  for (const [rel, text] of Object.entries(renderKnowledge(profile, modules, catalog, meta, featureMap))) putRedacted(rel, text);
   const candidates = candidatePaths(profile, catalog);
   const renderCandidates = (generatedAt) =>
     JSON.stringify(redactJson({ catalogVersion: catalog.catalogVersion, generatedAt, candidates }), null, 2) + '\n';
