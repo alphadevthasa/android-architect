@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { execFileSync } from 'node:child_process';
 import { loadCatalog } from '../skill/scripts/lib/catalog.js';
 import { detectStack } from '../skill/scripts/lib/detect.js';
 import { renderProfileMarkdown } from '../skill/scripts/lib/report.js';
@@ -160,5 +161,39 @@ test('rubric names every signal id', () => {
   const rubric = fs.readFileSync(path.join(here, '..', 'skill', 'references', 'rubric-security.md'), 'utf8');
   for (const id of ['cleartext-traffic', 'debuggable-release', 'allow-backup', 'exported-component', 'webview-js-interface', 'webview-file-access', 'hardcoded-secret', 'minify-disabled-release', 'sensitive-log']) {
     assert.ok(rubric.includes(`\`${id}\``), `rubric must name ${id}`);
+  }
+});
+
+test('findings are capped at 50 per id in the profile, with full counts (100k log lines)', () => {
+  // 100 files of 1000 lines (each file stays below the reader's size cap).
+  const body = `package a\nfun f() {\n${Array.from({ length: 1000 }, (_, i) => `    Log.d("T", "token ${i}")`).join('\n')}\n}\n`;
+  const sources = Object.fromEntries(Array.from({ length: 100 }, (_, i) => [`app/src/main/java/a/Noisy${String(i).padStart(3, '0')}.kt`, body]));
+  const dir = project({
+    ...sources,
+    'settings.gradle': "include ':app'\n",
+    'app/build.gradle': "plugins { id 'com.android.application' }\n",
+    'app/src/main/AndroidManifest.xml': '<manifest xmlns:android="http://schemas.android.com/apk/res/android">\n  <application android:usesCleartextTraffic="true" />\n</manifest>\n',
+  });
+  try {
+    const started = Date.now();
+    const out = execFileSync(process.execPath, ['--import', path.join(here, 'helpers', 'no-network.mjs'), path.join(here, '..', 'skill', 'scripts', 'scan.js'), dir], {
+      encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
+    });
+    assert.ok(Date.now() - started < 60000, 'scan finishes');
+    assert.ok(out.length < 200 * 1024, `scan JSON stays small (${out.length} bytes)`);
+    const p = JSON.parse(out);
+    const logs = p.security.findings.filter((f) => f.id === 'sensitive-log');
+    assert.equal(logs.length, 50);
+    assert.deepEqual(logs.map((f) => `${f.file}:${f.line}`), Array.from({ length: 50 }, (_, i) => `app/src/main/java/a/Noisy000.kt:${i + 3}`), 'first 50 in stable order');
+    assert.equal(p.security.findings[0].id, 'cleartext-traffic', 'highest severity first');
+    assert.deepEqual(p.security.counts, { 'cleartext-traffic': 1, 'sensitive-log': 100000 });
+    const md = renderProfileMarkdown(p, catalog);
+    assert.match(md, /- sensitive-log: 100000 \(showing first 50\)/);
+    assert.match(md, /- cleartext-traffic: 1\n/);
+    const arch = renderKnowledge(p, discoverModules(dir, listFiles(dir)), catalog, { date: '2026-11-20', commit: null, catalogVersion: catalog.catalogVersion })['knowledge/architecture-current.md'];
+    assert.match(arch, /- high: 1, medium: 0, low: 100000/);
+    assert.match(arch, /sensitive-log: 100000 \(showing first 50\)/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });

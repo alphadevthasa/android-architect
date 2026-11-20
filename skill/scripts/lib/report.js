@@ -1,4 +1,5 @@
 import { loadCatalog } from './catalog.js';
+import { findingCountLines } from './security.js';
 
 const pct = (share, units) => (Math.round(share * 100) === 0 && units > 0 ? '<1%' : `${Math.round(share * 100)}%`);
 const where = (e) => (e.line === null || e.line === undefined ? e.file : `${e.file}:${e.line}`);
@@ -34,6 +35,7 @@ export function renderProfileMarkdown(profile, catalog = loadCatalog()) {
   const findings = profile.security?.findings ?? [];
   out.push('', '## Security', '');
   if (findings.length === 0) out.push('- no security signals found');
+  out.push(...findingCountLines(profile.security));
   for (const f of findings) out.push(`- [${f.severity}] ${f.id}: ${f.file}:${f.line} (${f.detail})`);
   for (const v of profile.security?.vulnerable ?? []) {
     out.push(`- [${v.severity}] ${v.id}: ${v.coord}:${v.version} at ${v.file}:${v.line} (${v.summary}; ${v.source})`);

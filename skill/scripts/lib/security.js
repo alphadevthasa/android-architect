@@ -171,3 +171,37 @@ export function securityFindings(ctx) {
       a.line - b.line ||
       (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 }
+
+export const MAX_FINDINGS_PER_ID = 50;
+
+/**
+ * The profile form of securityFindings(): at most `max` findings per id (they arrive sorted by severity, file and line,
+ * so the first ones are kept) plus counts { <id>: n } of every finding, ids sorted.
+ */
+export function summarizeFindings(all, max = MAX_FINDINGS_PER_ID) {
+  const counts = {};
+  const findings = [];
+  for (const f of all) {
+    counts[f.id] = (counts[f.id] ?? 0) + 1;
+    if (counts[f.id] <= max) findings.push(f);
+  }
+  const sorted = Object.fromEntries(Object.keys(counts).sort().map((id) => [id, counts[id]]));
+  return { findings, counts: sorted };
+}
+
+/** Markdown list lines "- <id>: <n>" per finding id, with "(showing first N)" where the profile holds fewer. */
+export function findingCountLines(security) {
+  const shown = {};
+  for (const f of security?.findings ?? []) shown[f.id] = (shown[f.id] ?? 0) + 1;
+  return Object.entries(security?.counts ?? {}).map(
+    ([id, n]) => `- ${id}: ${n}${n > (shown[id] ?? 0) ? ` (showing first ${shown[id] ?? 0})` : ''}`,
+  );
+}
+
+/** Number of findings of one severity, from the uncapped counts when the profile has them. */
+export function severityCount(security, severity) {
+  const findings = security?.findings ?? [];
+  if (!security?.counts) return findings.filter((f) => f.severity === severity).length;
+  const ids = new Set(findings.filter((f) => f.severity === severity).map((f) => f.id));
+  return [...ids].reduce((sum, id) => sum + (security.counts[id] ?? 0), 0);
+}

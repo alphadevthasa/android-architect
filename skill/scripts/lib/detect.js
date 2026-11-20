@@ -4,7 +4,7 @@ import { listFiles, readLines } from './walk.js';
 import { discoverModules } from './modules.js';
 import { globToRegExp } from './glob.js';
 import { DEFAULT_CONTENT_GLOB } from './catalog.js';
-import { securityFindings } from './security.js';
+import { securityFindings, summarizeFindings } from './security.js';
 import { compareVersions } from './version.js';
 import { vulnerableDependencies } from './vuln.js';
 
@@ -454,6 +454,6 @@ export function detectStack(root, catalog) {
     modules: modules.map((m) => ({ path: m.path, dir: m.dir, projectDeps: m.projectDeps })),
     dimensions,
     compliance: evaluateCompliance(sdk, catalog),
-    security: { findings: securityFindings(ctx), ...vulnerableDependencies(ctx.buildUnits, catalog) },
+    security: { ...summarizeFindings(securityFindings(ctx)), ...vulnerableDependencies(ctx.buildUnits, catalog) },
   };
 }

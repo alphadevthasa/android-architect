@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { renderProfileMarkdown } from './report.js';
 import { oneLine } from './overrides.js';
+import { findingCountLines, severityCount } from './security.js';
 
 const DEFAULT_TEMPLATES = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'templates', 'ai');
 const PLACEHOLDERS = ['toolVersion', 'catalogVersion', 'date', 'commit', 'mode', 'workspace'];
@@ -69,9 +70,10 @@ function renderArchitecture(profile, catalog) {
     for (const c of unknown) out.push(line(c));
   }
   const findings = profile.security?.findings ?? [];
-  const count = (sev) => findings.filter((f) => f.severity === sev).length;
+  const count = (sev) => severityCount(profile.security, sev);
   out.push('', '## Security signals', '');
   out.push(`- high: ${count('high')}, medium: ${count('medium')}, low: ${count('low')}`);
+  out.push(...findingCountLines(profile.security));
   for (const f of findings.slice(0, 10)) out.push(`- [${f.severity}] ${f.id}: ${f.file}:${f.line} (${f.detail})`);
   const vulnerable = profile.security?.vulnerable ?? [];
   if (vulnerable.length) {
