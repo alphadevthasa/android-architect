@@ -313,3 +313,17 @@ test('a broken scoring.json does not abort writeAiDir and is noted in feature-ma
   assert.match(md, /feature map not computed: scoring\.json:/);
   assert.ok(!md.includes('TODO'));
 });
+
+test('a large feature is never first, a medium one with tests still is', () => {
+  const test2 = { 'src/test/kotlin/com/x/ATest.kt': 'package com.x\n\nclass ATest\n', 'src/test/kotlin/com/x/BTest.kt': 'package com.x\n\nclass BTest\n' };
+  const medium = 'package com.x\n' + 'val x = 1\n'.repeat(300);
+  const dir = scratch({
+    huge: { ...test2, 'src/main/kotlin/com/x/Big.kt': 'package com.x\n' + '// padding line\n'.repeat(2 * 1024 * 1024 / 16) },
+    orders: { ...test2, 'src/main/kotlin/com/x/O.kt': medium },
+  });
+  const m = map(dir);
+  assert.equal(by(m, 'huge').bucket, 'next');
+  assert.ok(by(m, 'huge').reasons.includes('large feature: not a pilot'));
+  assert.equal(by(m, 'orders').bucket, 'first');
+  assert.ok(!by(m, 'orders').reasons.includes('large feature: not a pilot'));
+});

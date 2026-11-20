@@ -48,7 +48,7 @@ const round1 = (n) => Math.round(n * 10) / 10;
  *   over features (higher churn = faster payoff); files over 1 MB are not read: LOC is estimated as bytes / 40;
  *   risk low 1, medium 0.5, high 0 (a penalty); proximity as above.
  * score = 100 * sum(weight * input) / sum(weights used). Without git history the churn weight is dropped and the
- * rest renormalised. A high-risk feature is capped to `next`.
+ * rest renormalised. A high-risk feature, or one above sizeBands.largeLoc, is capped to `next`.
  */
 
 function srcPath(rel) {
@@ -394,6 +394,10 @@ export function buildFeatureMap(root, { profile, scoring, churn = null }) {
     if (r.risk === 'high' && bucket === 'first') {
       bucket = 'next';
       reasons.push('capped to next: high-risk features are not pilot candidates');
+    }
+    if (size.huge && bucket === 'first') {
+      bucket = 'next';
+      reasons.push('large feature: not a pilot');
     }
     const { uiFiles, bigFiles, ...rest } = r; // eslint-disable-line no-unused-vars
     return { ...rest, score, bucket, reasons };
