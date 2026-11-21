@@ -55,7 +55,7 @@ test('SKILL.md has the six required sections in order', () => {
     '## Scripts',
     '## Command: audit',
     '## Command: recommend',
-    '## Not available to the agent',
+    '## Command: run (terminal only)',
   ];
   const positions = required.map((h) => headings.indexOf(h));
   for (let i = 0; i < required.length; i++) assert.ok(positions[i] >= 0, `missing heading ${required[i]}`);
@@ -64,18 +64,17 @@ test('SKILL.md has the six required sections in order', () => {
   }
 });
 
-test('Not available to the agent: run is described, the agent never runs it', () => {
+test('Command: run: described as a terminal command the agent never starts', () => {
   const body = readSkill();
-  const section = body.slice(body.indexOf('## Not available to the agent'));
+  const section = body.slice(body.indexOf('## Command: run (terminal only)'));
   assert.match(section, /`run` \(`scripts\/run\.js`/);
-  assert.match(section, /The agent never runs it/);
+  assert.match(section, /You never run it/);
   assert.match(section, /only the user starts it, from a terminal/);
   assert.match(section, /there is no `--yes`/);
   assert.match(section, /git diff/);
   assert.match(section, /git status/);
   assert.match(section, /Never take or pass that hash for them/);
   assert.match(body, /Never run `run\.js`/);
-  for (const h of body.split('\n').filter((l) => l.startsWith('## '))) assert.doesNotMatch(h, /Command: run/);
 });
 
 test('run docs: every flag in SKILL.md, README and the CLI usage exists in the run.js parser, and every parser flag is documented', async () => {
@@ -85,7 +84,7 @@ test('run docs: every flag in SKILL.md, README and the CLI usage exists in the r
   const start = readme.indexOf('### Autonomous runs');
   assert.ok(start > 0, 'README needs an Autonomous runs section');
   const section = readme.slice(start, readme.indexOf('### Limits of the run loop'));
-  const skillRun = readSkill().slice(readSkill().indexOf('## Not available to the agent'));
+  const skillRun = readSkill().slice(readSkill().indexOf('## Command: run (terminal only)'));
   const docs = { 'README section': section, 'SKILL section': skillRun, 'run.js USAGE': USAGE };
   for (const [name, text] of Object.entries(docs)) {
     for (const m of text.matchAll(/(?<![\w-])--([a-z][a-z-]*)/g)) {
@@ -182,7 +181,7 @@ test('I7: SKILL.md ground rules, recommend loop and profile notes', () => {
   assert.match(rule5, /\[REDACTED:<kind>\]/);
   assert.match(rule5, /signingConfigs/);
   assert.match(rule5, /git-ignored/);
-  const rec = body.slice(body.indexOf('## Command: recommend'), body.indexOf('## Not available to the agent'));
+  const rec = body.slice(body.indexOf('## Command: recommend'), body.indexOf('## Command: run (terminal only)'));
   assert.match(rec, /If `<tmp>` does not exist yet, create it as in audit step 1/);
   assert.match(rec, /Exit 2 because your own recommendations JSON is malformed[^\n]*counts as an attempt/);
   assert.match(rec, /more than 5 times in total/);
@@ -303,12 +302,11 @@ test('M3: README documents redaction, doctor --root and the roadmap', () => {
   assert.ok(readme.includes('doctor --root'));
   assert.match(readme, /Done:[^\n]*M3/);
   assert.match(readme, /Done:[^\n]*M4/);
-  assert.match(readme, /- M5:[^\n]*`run` loop/);
+  assert.match(readme, /^## Status$/m);
+  assert.doesNotMatch(readme, /^## Roadmap$/m);
 });
 
-test('M4: package.json version is 0.4.0 and the changelog covers it', () => {
-  const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
-  assert.equal(pkg.version, '0.4.0');
+test('M4: the changelog still covers 0.4.0 and 0.3.0', () => {
   const log = fs.readFileSync(new URL('../CHANGELOG.md', import.meta.url), 'utf8');
   assert.match(log, /## \[0\.4\.0\] - Unreleased\n\n### Tool\n\n- /);
   const section = log.slice(log.indexOf('## [0.4.0]'), log.indexOf('## [0.3.0]'));
@@ -396,4 +394,77 @@ test('M4: fitness docs match what generateFitness writes with and without rules'
   assert.match(sec, /`verify-commands\.json` and `README\.md` always/);
   assert.match(sec, /`architecture-fitness\.gradle\.kts` only when at least one `module-no-dep` rule exists/);
   assert.match(sec, /`ArchitectureFitnessTest\.kt` only when at least one rule exists/);
+});
+
+// ---- M5 documentation facts, derived from code ----
+
+const readRepo = (f) => fs.readFileSync(new URL(`../${f}`, import.meta.url), 'utf8');
+const pkgJson = () => JSON.parse(readRepo('package.json'));
+
+test('M5: package.json version is 0.5.0 and the changelog covers it', () => {
+  assert.equal(pkgJson().version, '0.5.0');
+  const log = readRepo('CHANGELOG.md');
+  assert.match(log, /^## \[0\.5\.0\] - (?:Unreleased|\d{4}-\d{2}-\d{2})$/m);
+  const section = log.slice(log.indexOf('## [0.5.0]'), log.indexOf('## [0.4.0]'));
+  assert.match(section, /unverified/i);
+  for (const h of ['### Added', '### Changed', '### Security', '### Unverified']) assert.ok(section.includes(h), h);
+  for (const s of ['--dry-run', '--approve-build-changes', 'eval', 'release']) assert.ok(section.includes(s), s);
+});
+
+test('M5: README install and update examples use the package version', () => {
+  const readme = readRepo('README.md');
+  const v = pkgJson().version;
+  const pins = [...readme.matchAll(/android-architect@(\S+)/g)].map((m) => m[1]);
+  assert.ok(pins.length >= 2);
+  for (const p of pins) assert.equal(p, v, `README pins ${p}`);
+  assert.ok(readme.includes(`-> ${v} (catalog`), 'the update example shows the current version');
+  assert.ok(!/android-architect@0\.4\.0/.test(readme));
+});
+
+test('M5: the README exit-code table equals the exported table', async () => {
+  const { EXIT, OUTCOME_EXIT } = await import('../skill/scripts/lib/runcli.js');
+  const readme = readRepo('README.md');
+  const from = readme.indexOf('Exit codes (the table lives in');
+  assert.ok(from > 0);
+  const rows = [...readme.slice(from).split('\n\n')[1].split('\n')].filter((l) => /^\| \d+ \|/.test(l));
+  const documented = new Map();
+  for (const row of rows) {
+    const cells = row.split('|').map((c) => c.trim());
+    const code = Number(cells[1]);
+    const outcomes = [...cells[2].matchAll(/`([a-z-]+)`/g)].map((m) => m[1]);
+    for (const o of outcomes) documented.set(o, code);
+    if (cells[2].startsWith('`') === false) assert.equal(code, EXIT.REFUSED, 'only the refused row also names a usage error');
+  }
+  for (const [outcome, code] of Object.entries(OUTCOME_EXIT)) {
+    assert.equal(documented.get(outcome), code, `README exit code for ${outcome}`);
+  }
+  for (const o of documented.keys()) assert.ok(Object.hasOwn(OUTCOME_EXIT, o), `README names unknown outcome ${o}`);
+  assert.deepEqual(new Set(rows.map((r) => Number(r.split('|')[1]))), new Set(Object.values(EXIT)));
+});
+
+test('M5: SKILL no longer lists unavailable commands, explains run and setup mentions the plan and run config', () => {
+  const skill = readSkill();
+  assert.ok(!/Not yet available/i.test(skill));
+  const run = skill.slice(skill.indexOf('## Command: run'));
+  assert.match(run, /never (?:run|start)s? it/i);
+  assert.match(run, /explicit go/);
+  const setup = skill.slice(skill.indexOf('## Command: setup'), skill.indexOf('## Command: refresh'));
+  assert.match(setup, /migration-plan\.js[^\n]*--write/);
+  assert.match(setup, /\.ai\/run\.config\.json/);
+  assert.ok(fs.existsSync(path.join(skillDir, 'templates/ai/run.config.json')));
+});
+
+test('M5: README keeps the no-telemetry wording consistent with SECURITY.md and links CONTRIBUTING', () => {
+  const readme = readRepo('README.md');
+  const sec = readRepo('SECURITY.md');
+  assert.match(sec, /own code makes no network requests/);
+  const tele = readme.slice(readme.indexOf('## No telemetry'), readme.indexOf('## Contributing and releases'));
+  assert.match(tele, /own code makes no network requests/);
+  for (const s of ['agent CLI', 'git', 'verification commands']) assert.ok(tele.includes(s), s);
+  assert.ok(!/makes no network requests, and has no dependencies/.test(readme), 'the blanket claim is gone');
+  assert.ok(readme.includes('[CONTRIBUTING.md](CONTRIBUTING.md)'));
+  assert.match(readme, /npm run eval/);
+  assert.equal(pkgJson().scripts.eval.includes('eval.test.js'), true);
+  assert.match(readme, /Autonomous run: what it can and cannot guarantee/);
+  assert.match(readRepo('CONTRIBUTING.md'), /If timing tests fail on a loaded machine/);
 });

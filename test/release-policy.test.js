@@ -291,7 +291,7 @@ test('npm pack contents, size budget and file sizes', () => {
 
 test('CHANGELOG has an entry for the package version', () => {
   const v = pkg.version.replace(/[.]/g, '\\.');
-  assert.match(read('CHANGELOG.md'), new RegExp(`^## \\[${v}\\]`, 'm'));
+  assert.match(read('CHANGELOG.md'), new RegExp(`^## \\[${v}\\] - (?:Unreleased|\\d{4}-\\d{2}-\\d{2})$`, 'm'));
 });
 
 test('CONTRIBUTING.md lists the release blockers and SECURITY.md the reporting path', () => {

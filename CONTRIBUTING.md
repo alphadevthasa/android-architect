@@ -28,6 +28,10 @@ Playbooks are `skill/catalog/playbooks/<from>--to--<to>.md`, with `from` and `to
 
 `npm run eval` runs `test/eval/eval.test.js`: golden profiles, candidate paths, guardrail rules and pinned real apps (if checked out). See `test/eval/README.md` for the format and how to add an app. It is deterministic and offline.
 
+### If timing tests fail on a loaded machine
+
+A few tests are timing-sensitive (the agent output flood and grandchild-kill tests, the 1 MB worst-case glob test, and the 1 MB linear-time redaction and reuse tests). On a machine under heavy load they can fail in a full `npm test` and pass alone. Re-run the failing files by themselves (for example `node --test --import ./test/helpers/no-network.mjs test/agent.test.js`), and run a clean `npm test` on a quiet machine before publishing. Thresholds are deliberately not loosened.
+
 ## CI and policy tests
 
 `.github/workflows/ci.yml` runs `npm test` (which includes the eval suite and the package policy) on Node 20 and 22 on Linux and one macOS job, with read-only permissions. `test/release-policy.test.js` checks the package contents and size budget, and parses both workflows (permissions, triggers, token scope, provenance, pinned actions). Change a workflow and the policy together, and keep its negative tests green.

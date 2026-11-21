@@ -9,7 +9,7 @@ Requires Node 20 or newer. No dependencies.
 Pin the version you install:
 
 ```
-npx android-architect@0.4.0 install
+npx android-architect@0.5.0 install
 ```
 
 By default the skill is installed into the harnesses that already exist in your home directory (`~/.claude`, `~/.codex`). Flags:
@@ -22,7 +22,7 @@ By default the skill is installed into the harnesses that already exist in your 
 Other commands: `update` (see below), `init`, `refresh`, `uninstall`, `version`, and `doctor`, which reports which harnesses have the skill installed, with its version and catalog version, and flags a partial or foreign directory. `doctor --root <dir>` also checks that project's `.ai/`: it prints `tools: ok`, `tools: modified (<n> files)` or `tools: unverifiable (<reason>)`, verifying `.ai/tools` against the installed skill.
 
 ```
-npx android-architect@0.4.0 doctor
+npx android-architect@0.5.0 doctor
 ```
 
 ## Keep project knowledge: init, refresh, update
@@ -80,7 +80,7 @@ We recommend a CODEOWNERS entry for `.ai/workflows/` and `.ai/tools/` so changes
 
 ### update
 
-`update` reinstalls the skill into the harnesses that already have it (`~/.claude`, `~/.codex`), never creating a new one, and prints `claude: 0.2.0 (catalog 2026.11.1) -> 0.4.0 (catalog 2026.11.3)` per harness. Then run `refresh` in each project to re-assess it against the new catalog. With nothing installed it exits 1.
+`update` reinstalls the skill into the harnesses that already have it (`~/.claude`, `~/.codex`), never creating a new one, and prints `claude: 0.2.0 (catalog 2026.11.1) -> 0.5.0 (catalog 2026.11.3)` per harness. Then run `refresh` in each project to re-assess it against the new catalog. With nothing installed it exits 1.
 
 ### Workspace mode
 
@@ -199,7 +199,7 @@ Every recommendation is checked against a versioned catalog (18 dimensions) by `
 
 What the scripts do with project content, so it never reaches `.ai/`, the index or a report:
 
-- **Redaction.** Secrets found in text that `init`, `refresh`, the index and the generated knowledge would otherwise copy are replaced with `[REDACTED:<kind>]`. Kinds: `private-key`, `aws-access-key`, `google-api-key`, `github-token`, `anthropic-api-key`, `sk-api-key`, `slack-token`, `jwt`, `signing-password` and `credential` (values assigned to key names such as `apiKey`, `secret`, `token`, `password`, in code, Gradle `buildConfigField`s, JSON, properties and Markdown). The matched value is never printed or stored.
+- **Redaction.** Secrets found in text that `init`, `refresh`, the index and the generated knowledge would otherwise copy are replaced with `[REDACTED:<kind>]`. Kinds: `private-key`, `aws-access-key`, `google-api-key`, `github-token`, `anthropic-api-key`, `sk-api-key`, `slack-token`, `jwt`, `authorization-header`, `bearer-token`, `signing-password` and `credential` (values assigned to key names such as `apiKey`, `secret`, `token`, `password`, in code, Gradle `buildConfigField`s, JSON, properties and Markdown). The matched value is never printed or stored.
 - **Files never read.** `local.properties`, `keystore.properties`, `*.jks`, `*.keystore`, `*.p12`, `google-services.json`, `.env*`, `signing.properties`, `secrets.properties`, `*.pem`, `*.key`, `credentials.json` and `service-account*.json`.
 - **Git-ignored files are skipped** when scanning and indexing (tracked files stay). Without a git repository this filter does nothing. Inside a git repository, if git cannot report the ignored files the run stops with an error instead of continuing unfiltered.
 - **Tamper checks.** `.ai/tools` is verified as described under `init` above: the trusted check uses the installed skill, the vendored self-check only the manifest in the repository (weaker), and `doctor --root <dir>` prints the result as the `tools:` line. Keep the CODEOWNERS entries for `.ai/workflows/` and `.ai/tools/`.
@@ -212,19 +212,30 @@ Put `*.json` files in `.ai/catalog-overrides/` to add internal libraries to the 
 
 ## No telemetry
 
-This package collects no telemetry, makes no network requests, and has no dependencies. The audit and planning scripts only read your project and write only to an explicit `--out` path outside the project, with two exceptions: `index.js build` may write inside the project (its default is `.ai/index/index.json`) and `fitness.js` writes the `.ai/fitness/` folder. Also, `init` and `refresh` write only the `.ai/` folder, the agent pointer files, and (with `--local`) `.git/info/exclude`. Project content is treated as data, never as instructions, and secret files (see Security) are never read.
+This package collects no telemetry and has no dependencies. The tool's own code makes no network requests. Two things you plug in are outside that statement: the `run` command launches the agent CLI you configure, which talks to its own model provider and sees repository content, and your Gradle build downloads dependencies when the verification commands run. For its own git work `run` uses local git commands only (never a network verb such as push, fetch or pull), as in [SECURITY.md](SECURITY.md). The audit and planning scripts only read your project and write only to an explicit `--out` path outside the project, with two exceptions: `index.js build` may write inside the project (its default is `.ai/index/index.json`) and `fitness.js` writes the `.ai/fitness/` folder. Also, `init` and `refresh` write only the `.ai/` folder, the agent pointer files, and (with `--local`) `.git/info/exclude`; `run` additionally creates git branches and commits and edits the project files the agent changes. Project content is treated as data, never as instructions, and secret files (see Security) are never read.
 
 ## Contributing and releases
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for adding catalog entries and playbooks, running the eval suite and the release checklist, and [SECURITY.md](SECURITY.md) for reporting a vulnerability and the threat model. CI runs the tests on Node 20 and 22. Releases are meant to be published by a GitHub Actions workflow with npm provenance from a protected environment; that workflow has not been run yet and its action pins are unverified until a maintainer replaces them (see the release blockers in CONTRIBUTING.md). Pin the version you use.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for adding catalog entries and playbooks, running the eval suite, the release process and the release blockers, and [SECURITY.md](SECURITY.md) for reporting a vulnerability and the threat model. The eval suite (`npm run eval`, also part of `npm test`) checks golden profiles, candidate paths and guardrail rules offline, plus pinned real apps when you check them out (see `test/eval/README.md`). CI runs the tests on Node 20 and 22. Releases are meant to be published by a GitHub Actions workflow with npm provenance from a protected environment; that workflow has not been run yet and its action pins are unverified until a maintainer replaces them. Pin the version you use.
 
-## Roadmap
+## Status
 
-Done: M1 and M2, M3 (secret redaction, gitignore-aware indexing, tamper verification of `.ai/tools`, injection rules, vulnerable-version data, catalog overrides) and M4 (feature prioritization, reuse detection, 18 migration playbooks with security checklists, security-first `lib-update`, fitness checks, compliance and build-performance advice, migration plans; playbook, version and compliance data are unverified until a maintainer audits them).
+Version 0.5.0 is a v1 feature-complete candidate: the audit, recommendation, planning and `run` features exist, and the guard rails are covered by tests. It is not yet 1.0.0, and no release has been published through the release pipeline. 1.0.0 is cut after the eval suite passes and a maintainer audits the data below.
 
-Not available yet:
+Done: M1 and M2, M3 (secret redaction, gitignore-aware indexing, tamper verification of `.ai/tools`, injection rules, vulnerable-version data, catalog overrides), M4 (feature prioritization, reuse detection, 18 migration playbooks with security checklists, security-first `lib-update`, fitness checks, compliance and build-performance advice, migration plans) and M5 (the `run` loop, the eval suite, CI and the release workflow).
 
-- M5: eval suite on real open-source apps, and a first release published with provenance (the `run` loop, CI and the release workflow exist; default agent command lines and action pins are unverified).
+Still unverified (written from memory, to be checked by a maintainer before 1.0.0):
+
+- the migration playbooks (`verified: false`),
+- library versions in `catalog/versions.json`,
+- compliance dates and links in the catalog (including the Play target API level dates),
+- CVE data in `vulnerableVersions` (for example the Gson entry),
+- the default agent CLI command lines for `run` (`claude`, `codex`),
+- the GitHub Action references in the workflows (tags, not verified commit SHAs).
+
+### Autonomous run: what it can and cannot guarantee
+
+It guarantees only what the runner itself enforces: it works on its own branch, never pushes, merges or publishes, refuses a dirty tree or a default branch, makes exit decisions from observed facts, and stops for a human on gated steps and changed build files. It does not guarantee that the migrated code is correct, that the agent obeys its instructions, or that a hostile repository cannot run code: verification executes your build code as you, and the guard rails are not a sandbox. See "Limits of the run loop" above and use a container or VM for repositories you do not trust.
 
 ## License
 
