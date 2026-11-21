@@ -1,4 +1,4 @@
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -12,7 +12,15 @@ const cli = path.join(root, 'bin/cli.js');
 const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
 const run = (args) => spawnSync(process.execPath, ['--import', helper, cli, ...args], { encoding: 'utf8' });
 const ok = (args) => execFileSync(process.execPath, ['--import', helper, cli, ...args], { encoding: 'utf8' });
-const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'aa-cli-'));
+const tmps = [];
+const tmp = () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'aa-cli-'));
+  tmps.push(d);
+  return d;
+};
+after(() => {
+  for (const d of tmps) fs.rmSync(d, { recursive: true, force: true });
+});
 
 test('install to existing harnesses only', () => {
   const home = tmp();

@@ -23,7 +23,7 @@
     "node": ">=20"
   },
   "scripts": {
-    "test": "node --test --import ./test/helpers/no-network.mjs ",
+    "test": "node --test --import ./test/helpers/no-network.mjs test/*.test.js test/eval/*.test.js",
     "eval": "node --test --import ./test/helpers/no-network.mjs test/eval/eval.test.js"
   }
 }

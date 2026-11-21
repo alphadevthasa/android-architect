@@ -135,7 +135,7 @@ Flags (budgets, the agent and the verification commands come from `.ai/run.confi
 - `--approve-build-changes <hash>`: repeatable (at most 20), each exactly 64 hex characters, read from the command line only (never from config, environment or files). See "Build files changed" below.
 - `--help`: usage and exit codes.
 
-There is deliberately no `--yes`. **First-use confirmation:** the first run in a clone prints what it will do and asks you to type `yes` at an interactive terminal. The text lists the full effective agent command and every verification command, one argument per line and never truncated (a config whose commands exceed 40 arguments or 300 characters per argument, or more than 10 verification commands, is refused instead of shown cut; invisible and control characters are shown as `\u{..}`), and a warning that the default command lines are unverified (check every flag against your agent CLI's current help), the warnings about missing permission restrictions, the verification commands that execute your project's Gradle build code as you, the names (never the values) of the environment variables from `agent.passEnv` that are copied to the agent and of those set by `agent.env`, the verification timeout, the protected branches, that `HOME` and `PATH` are inherited (so build code can read `~/.gradle`, `~/.ssh`, `~/.npmrc`), the budgets, the branch prefix, and that nothing is pushed, merged or published. Only the exact word `yes` confirms. A non-interactive stdin (CI, a pipe) never confirms: the run is refused with exit code 2, unless consent was already recorded for the same `.ai/run.config.json` bytes and agent command (recorded in the git folder, per clone; any change asks again). Declining the prompt (anything but `yes`, EOF or Ctrl-C) exits with code 2. Recorded consent applies to every non-interactive process in that clone, including a shell an AI agent controls: never leave consent recorded in a clone where an agent works unsupervised. With `--json`, a refusal also prints `{"outcome":"refused","reason":...,"exitCode":2}` on stdout (the plain text goes to stderr).
+There is deliberately no `--yes`. **First-use confirmation:** the first run in a clone prints what it will do and asks you to type `yes` at an interactive terminal. The text lists the full effective agent command and every verification command, one argument per line and never truncated (a config whose commands exceed 40 arguments or 300 characters per argument, or more than 10 verification commands, is refused instead of shown cut; invisible and control characters are shown as `\u{..}`), and a warning that the default command lines are unverified (check every flag against your agent CLI's current help), the warnings about missing permission restrictions, the verification commands that execute your project's Gradle build code as you, the names (never the values) of the environment variables from `agent.passEnv` that are copied to the agent, and the names and values (redacted and escaped) of those set by `agent.env`, the verification timeout, the protected branches, that `HOME` and `PATH` are inherited (so build code can read `~/.gradle`, `~/.ssh`, `~/.npmrc`), the budgets, the branch prefix, and that nothing is pushed, merged or published. Only the exact word `yes` confirms. A non-interactive stdin (CI, a pipe) never confirms: the run is refused with exit code 2, unless consent was already recorded for the same `.ai/run.config.json` bytes and agent command (recorded in the git folder, per clone; any change asks again). Declining the prompt (anything but `yes`, EOF or Ctrl-C) exits with code 2. Recorded consent applies to every non-interactive process in that clone, including a shell an AI agent controls: never leave consent recorded in a clone where an agent works unsupervised. With `--json`, a refusal also prints `{"outcome":"refused","reason":...,"exitCode":2}` on stdout (the plain text goes to stderr).
 
 The run loop is never vendored into `.ai/tools` (that folder can be changed by anyone who can change the repository): start it with `npx android-architect run` or the installed skill's `run.js`; a copy of `run.js` under `.ai/tools` refuses to run before it loads any library. That refusal is advisory against a hand-edited copy (which can simply skip it); the real controls are that the loop is not vendored and that `refresh` deletes stale vendored copies. Any displayed argument or value containing non-ASCII characters gets a notice line so look-alike file names stand out.
 
@@ -154,6 +154,31 @@ Exit codes (the table lives in `skill/scripts/lib/runcli.js`):
 | 7 | `failed` | The agent timed out or could not run, an internal error, an unknown outcome, or a finished run whose report could not be written. |
 
 The human summary shows the outcome, the reason, the branch, a per-step table and the report path (`.ai/runs/<run>/report.md`), and on every outcome except a refusal it repeats that nothing was pushed, merged or published and that you should review the branch. Raw agent output is never printed; everything shown is redacted and bounded. See "Limits of the run loop" below for what the guard rails do not cover. To stop a run, press Ctrl-C or create `.ai/STOP`.
+
+### run.config.json reference
+
+`.ai/run.config.json` is created once by `init` (user-owned, never overwritten). Unknown keys are rejected. Defaults below are those of the file `init` writes and of the built-in defaults.
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `schemaVersion` | `1` | Must be 1. |
+| `agent.kind` | `claude` | `claude`, `codex` or `custom`. |
+| `agent.command` | `["claude"]` | The agent argv. A bare kind name uses the built-in (unverified) command line; any longer list replaces it in full. |
+| `agent.requireArgs` | `[]` | Strings that must each appear as an exact element of the agent command, or the run refuses. |
+| `agent.passEnv` | `[]` | Names of variables copied from your environment (agent credential families only). |
+| `agent.env` | none | Behavior variables set for the agent (names and values shown at confirmation). |
+| `budgets.maxIterations` | `10` | Agent iterations per run. |
+| `budgets.maxTotalTokens` | `400000` | Token budget (see below). |
+| `budgets.maxTurnsPerStep` | `20` | Turn limit per step (see below). |
+| `budgets.maxWallClockMinutes` | `120` | Wall-clock budget for the whole run. |
+| `verification.commands` | `[["./gradlew","assembleDebug","testDebugUnitTest","lint"]]` | Argv arrays (1 to 10), run in order by the runner. |
+| `verification.timeoutSeconds` | `1800` | Timeout of each verification command. |
+| `branchPrefix` | `android-architect/run` | The run branch is `<branchPrefix>-<timestamp>`. |
+| `protectedBranches` | `[]` | Extra branch names the run refuses to start on, besides the default branches. |
+
+**Budgets.** The token budget is enforced from the usage the agent reports on a trusted final `result` line; without one, a per-iteration estimate of `maxTotalTokens / (maxIterations * 10)` is charged, so with the defaults the iteration budget trips first. `maxTurnsPerStep` applies only through the `{maxTurns}` placeholder, which the default `claude` command line contains; the default `codex` command line has no turn cap. If the wall-clock budget expires while the agent is running, the run ends as `budget` (exit 6).
+
+**Agent permissions are yours to configure.** The tool applies no permission profile of its own. The default `claude` and `codex` command lines are unverified and carry no permission flag, so a headless first run may end as `no-progress` until you add the flags your CLI needs through `agent.command` (and list them in `agent.requireArgs`, so the run refuses when they are missing).
 
 ### Limits of the run loop
 
@@ -223,6 +248,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for adding catalog entries and playbooks,
 Version 0.5.0 is a v1 feature-complete candidate: the audit, recommendation, planning and `run` features exist, and the guard rails are covered by tests. It is not yet 1.0.0, and no release has been published through the release pipeline. 1.0.0 is cut after the eval suite passes and a maintainer audits the data below.
 
 Done: M1 and M2, M3 (secret redaction, gitignore-aware indexing, tamper verification of `.ai/tools`, injection rules, vulnerable-version data, catalog overrides), M4 (feature prioritization, reuse detection, 18 migration playbooks with security checklists, security-first `lib-update`, fitness checks, compliance and build-performance advice, migration plans) and M5 (the `run` loop, the eval suite, CI and the release workflow).
+
+Smaller follow-ups and documented limits that do not block 0.5.0 are listed in [docs/superpowers/m5-followups.md](docs/superpowers/m5-followups.md).
 
 Still unverified (written from memory, to be checked by a maintainer before 1.0.0):
 

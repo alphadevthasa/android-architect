@@ -384,9 +384,16 @@ async function execute(argv, io) {
       return typeof a === 'string' && a.trim().toLowerCase() === 'yes';
     };
     // The statements ride inside confirmFirstUse so the trust line stays last; the same text is shown by --dry-run.
-    const stmts = statements(config, eff, { withWarnings: true });
+    // Built from the config the loop actually passes (o.config), not the one captured earlier, so what is shown is what runs.
     const baseGit = io.runOptions?.git ?? {};
-    const gitOver = { ...baseGit, confirmFirstUse: (r, o) => (baseGit.confirmFirstUse ?? confirmFirstUse)(r, { ...o, statements: stmts }) };
+    const gitOver = {
+      ...baseGit,
+      confirmFirstUse: (r, o) => {
+        const used = o?.config ?? config;
+        const usedEff = used === config ? eff : effectiveAgent(used);
+        return (baseGit.confirmFirstUse ?? confirmFirstUse)(r, { ...o, statements: statements(used, usedEff, { withWarnings: true }) });
+      },
+    };
     const loop = io.runLoop ?? defaultRunLoop;
     let res;
     try {

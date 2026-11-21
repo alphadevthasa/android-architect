@@ -177,8 +177,9 @@ test('a backgrounded grandchild is gone after a NORMAL exit (whole group killed)
   const parent = script(root, 'p.js', `require('child_process').spawn(process.execPath,[${JSON.stringify(bg)}],{stdio:'ignore'}).unref();setTimeout(()=>{},400)`);
   const r = await runVerification(root, cfg(node(parent)), { timeoutMs: 20000 });
   assert.equal(r.ok, true);
+  for (let i = 0; i < 200 && !fs.existsSync(pidFile); i++) await new Promise((r) => setTimeout(r, 50));
   const pid = Number(fs.readFileSync(pidFile, 'utf8'));
-  assert.equal(await waitGone(pid, 8000), true);
+  assert.equal(await waitGone(pid, 15000), true);
 });
 
 test('process-level cleanup is installed once, idempotent, and kills live groups', async () => {

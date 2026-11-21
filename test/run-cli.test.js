@@ -732,3 +732,24 @@ test('run.js imports no library statically and a refused vendored copy executes 
   assert.ok(!(c.stdout + c.stderr).includes('LIB-EXECUTED-AT-IMPORT'));
   assert.match(c.stderr, /installed skill/);
 });
+
+test('the consent statements are built from the config the loop passes, not an earlier copy', async () => {
+  const root = project(CHAIN, { config: CONFIG });
+  const used = loadRunConfig(root);
+  const changed = { ...used, budgets: { ...used.budgets, maxIterations: 7 }, agent: { ...used.agent, env: { CLAUDE_MODEL: 'model-from-changed-config' } } };
+  let shown = null;
+  const base = { confirmFirstUse: async (_r, o) => { shown = o.statements; return true; } };
+  await run(['--root', root], {
+    root: os.tmpdir(),
+    interactive: true,
+    runOptions: { git: base },
+    runLoop: async (r, o) => {
+      await o.git.confirmFirstUse(r, { confirm: async () => true, say: () => {}, config: changed, agentArgv: effectiveAgent(changed).argv });
+      return fakeResult();
+    },
+  });
+  assert.ok(Array.isArray(shown));
+  const text = shown.join('\n');
+  assert.match(text, /Budgets: 7 iterations/);
+  assert.match(text, /CLAUDE_MODEL=.*model-from-changed-config/);
+});

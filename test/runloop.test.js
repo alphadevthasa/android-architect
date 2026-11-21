@@ -893,3 +893,17 @@ test('an includeBuild the gate cannot read statically stops the loop (needs-huma
   assert.equal(verified, 0);
   assert.ok(!r.reason.includes(root));
 });
+
+test('an agent timeout at wall-clock budget expiry is the budget (exit 6 class), a plain timeout stays failed', async () => {
+  const timedOutReply = (opts) => reply(opts.step.id, 'done', { timedOut: true, exitCode: null, signal: 'SIGKILL', status: { ok: false, reason: 'timed out' } });
+  let t = Date.parse('2026-01-01T00:00:00Z');
+  const root = project();
+  const expired = await go(root, { now: () => t, agent: async (_r, _c, opts) => { t += 121 * 60_000; return timedOutReply(opts); } });
+  assert.equal(expired.outcome, 'budget');
+  assert.equal(expired.reason, REASONS.budget('maxWallClockMinutes', DEFAULT_RUN_CONFIG.budgets.maxWallClockMinutes));
+  t = Date.parse('2026-01-01T00:00:00Z');
+  const root2 = project();
+  const plain = await go(root2, { now: () => t, agent: async (_r, _c, opts) => { t += 5 * 60_000; return timedOutReply(opts); } });
+  assert.equal(plain.outcome, 'failed');
+  assert.equal(plain.reason, REASONS.agentTimeout);
+});

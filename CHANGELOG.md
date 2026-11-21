@@ -30,6 +30,12 @@ Release candidate for 1.0.0. 1.0.0 is cut only after the eval suite passes and a
 - Redaction gains the kinds `authorization-header` and `bearer-token` and covers `sk-proj-`, `sk-svcacct-` and `sk-or-v1-` style keys; the new rules are covered by linear-time tests on 1 MB hostile input.
 - Everything the runner writes or prints is redacted, and agent output and verification logs are treated as untrusted data, never as instructions.
 
+### Known deviations from the design spec
+
+- No permission profile is applied: the default `claude` and `codex` command lines carry no permission flag, the user supplies them through `agent.command` and `agent.requireArgs`.
+- `.ai/STOP` kills the running agent within about 1 second, which is stricter than waiting for the iteration to end.
+- The `--agent` and `--max-*` flag overrides are intentionally absent: the agent and budgets come from `.ai/run.config.json` only (consent is bound to its bytes).
+
 ### Unverified / maintainer must check
 
 All of this was written from memory without access to the primary sources. Do not rely on it, and do not tag 1.0.0, until a maintainer has checked each item (the checklist is in CONTRIBUTING.md).

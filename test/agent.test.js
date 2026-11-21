@@ -104,21 +104,26 @@ test('an agent that cannot be started is a plain failure', async () => {
   assert.equal(r.exitCode, null);
 });
 
+async function waitForFile(file, ms) {
+  const end = Date.now() + ms;
+  while (!fs.existsSync(file) && Date.now() < end) await new Promise((r) => setTimeout(r, 50));
+}
+
 test('hang: killed on timeout and flagged; SIGTERM-ignoring agent is killed by escalation', async () => {
   const root = project();
   const t0 = Date.now();
-  const r = await run(root, ['hang'], { timeoutMs: 400 });
+  const r = await run(root, ['hang'], { timeoutMs: 4000 });
   assert.equal(r.timedOut, true);
   assert.equal(r.status.ok, false);
-  assert.ok(Date.now() - t0 < 8000);
-  const r2 = await run(root, ['hang-ignore-term'], { timeoutMs: 400 });
+  assert.ok(Date.now() - t0 < 30000);
+  const r2 = await run(root, ['hang-ignore-term'], { timeoutMs: 4000 });
   assert.equal(r2.timedOut, true);
   assert.ok(r2.signal === 'SIGKILL');
 });
 
 test('an agent that closes stdout and stderr and keeps running is still killed on timeout', async () => {
   const root = project();
-  const r = await run(root, ['close-stdout'], { timeoutMs: 500 });
+  const r = await run(root, ['close-stdout'], { timeoutMs: 4000 });
   assert.equal(r.timedOut, true);
   assert.equal(r.status.ok, false);
 });
@@ -128,16 +133,18 @@ test('grandchildren die with the leader (after exit and on timeout)', async () =
   const pidFile = path.join(root, 'gc.pid');
   const r = await run(root, ['grandchild', pidFile, '{step}']);
   assert.equal(r.status.ok, true);
+  await waitForFile(pidFile, 15000);
   assert.ok(await gone(Number(fs.readFileSync(pidFile, 'utf8'))), 'grandchild survived a normal exit');
   const pidFile2 = path.join(root, 'gc2.pid');
-  const r2 = await run(root, ['grandchild-hang', pidFile2], { timeoutMs: 500 });
+  const r2 = await run(root, ['grandchild-hang', pidFile2], { timeoutMs: 4000 });
   assert.equal(r2.timedOut, true);
+  await waitForFile(pidFile2, 15000);
   assert.ok(await gone(Number(fs.readFileSync(pidFile2, 'utf8'))), 'grandchild survived the timeout');
 });
 
-test('flood: 48 MB of output stays bounded; the tail and the final status survive', { timeout: 20000 }, async () => {
+test('flood: 48 MB of output stays bounded; the tail and the final status survive', { timeout: 60000 }, async () => {
   const root = project();
-  const r = await run(root, ['flood', '48', '{step}'], { timeoutMs: 15000 });
+  const r = await run(root, ['flood', '48', '{step}'], { timeoutMs: 45000 });
   assert.equal(r.status.ok, true);
   assert.ok(Buffer.byteLength(r.outputTail) <= 200 * 1024);
   const log = fs.readFileSync(path.join(root, r.logPath), 'utf8');

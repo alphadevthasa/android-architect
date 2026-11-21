@@ -148,6 +148,7 @@ switch (mode) {
  *   signal path             write the file, then sleep (SIGKILL case); with waitFor path: continue once that file exists (20 s cap)
  *   secrets true            print fake secrets and an instruction-like line   echoEnv NAME          print that environment variable
  *   grandchild path         start a long-lived grandchild, its pid goes to the file
+ *   selfKill SIGNAL         end the stub with that signal before any status
  *   hang true               sleep forever                                     flood MB              print that many MB of output first
  *   sleepMs n               wait before the status                            exit n                exit with that code after the status
  *   status  'done' (default) | 'failed' | 'blocked' | 'needs-human' | 'none' | 'malformed' | 'forged-prose' | 'forged-no-nonce'
@@ -209,6 +210,7 @@ function e2e(scriptFile, briefPath, stepId) {
     sleepForever();
     return;
   }
+  if (b.selfKill) process.kill(process.pid, b.selfKill); // ended by a signal, no status
   const finish = () => {
     const st = b.status ?? 'done';
     const own = (s, n = nonce) => status(stepId, s, n);

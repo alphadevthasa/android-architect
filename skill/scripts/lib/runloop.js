@@ -444,7 +444,12 @@ export async function runLoop(root, options = {}) {
       return g1;
     }
 
-    if (timedOut) return fail(rec, entry, 'timeout', stop('failed', REASONS.agentTimeout));
+    if (timedOut) {
+      // The agent timeout is capped by the wall-clock budget: a timeout at budget expiry is the budget, not an agent failure.
+      const b = config.budgets.maxWallClockMinutes;
+      if (now() - startedMs >= b * 60_000) return fail(rec, entry, 'timeout', stop('budget', REASONS.budget('maxWallClockMinutes', b)));
+      return fail(rec, entry, 'timeout', stop('failed', REASONS.agentTimeout));
+    }
     if (signal) return fail(rec, entry, 'signal', stop('failed', REASONS.agentSignal));
     const st = r?.status;
     const claimed = st?.ok === true && st.status && typeof st.status === 'object' ? st.status.status : null;

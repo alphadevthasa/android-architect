@@ -679,12 +679,20 @@ test('a hostile run.config.json (push or publish in verification or agent argv) 
   }));
 });
 
-// ---------- hung agent (started at file load, bounded by the 1 minute wall-clock minimum) and the exit-code table ----------
-test('a hung agent is killed at the wall-clock deadline with its whole process group: failed (exit 7)', async () => {
-  const { root, r, ms } = await hangRun;
+test('failed: an agent ended by a signal stops the run (exit 7)', async () => {
+  const { root, r, j } = await scenario({ steps: ONE, script: { '*': { selfKill: 'SIGKILL' } } });
   assert.equal(r.code, EXIT.FAILED, r.stdout + r.stderr);
-  assert.equal(r.json.outcome, 'failed');
-  assert.match(r.json.reason, /timed out/);
+  assert.equal(j.outcome, 'failed');
+  assert.equal(subjects(root).length, 0);
+  await finish(root);
+});
+
+// ---------- hung agent (started at file load, bounded by the 1 minute wall-clock minimum) and the exit-code table ----------
+test('a hung agent is killed at the wall-clock deadline with its whole process group: budget (exit 6)', async () => {
+  const { root, r, ms } = await hangRun;
+  assert.equal(r.code, EXIT.LIMIT, r.stdout + r.stderr);
+  assert.equal(r.json.outcome, 'budget');
+  assert.match(r.json.reason, /maxWallClockMinutes/);
   assert.ok(ms >= 55000 && ms < 100000, `took ${ms} ms`);
   assert.equal(subjects(root).length, 0);
   assert.ok(runFiles(root).some((f) => f.endsWith('agent-1.log')));
