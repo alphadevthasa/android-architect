@@ -1,0 +1,74 @@
+{
+  "schemaVersion": 1,
+  "steps": [
+    {
+      "id": "s1-extract-api",
+      "title": "Extract the greeting API",
+      "track": "enabling",
+      "dimension": "ui",
+      "from": "legacy",
+      "to": "target",
+      "dependsOn": [],
+      "tags": [],
+      "verification": [],
+      "rollback": "revert the commit",
+      "evidence": []
+    },
+    {
+      "id": "s2-wire-ui",
+      "title": "Wire the UI to the API",
+      "track": "enabling",
+      "dimension": "ui",
+      "from": "legacy",
+      "to": "target",
+      "dependsOn": [
+        "s1-extract-api"
+      ],
+      "tags": [],
+      "verification": [],
+      "rollback": "revert the commit",
+      "evidence": []
+    },
+    {
+      "id": "s3-pick-store",
+      "title": "Pick the storage library",
+      "track": "enabling",
+      "dimension": "ui",
+      "from": "legacy",
+      "to": "target",
+      "dependsOn": [],
+      "tags": [
+        "decision"
+      ],
+      "verification": [],
+      "rollback": "revert the commit",
+      "evidence": []
+    },
+    {
+      "id": "s4-drop-legacy",
+      "title": "Drop the legacy module",
+      "track": "enabling",
+      "dimension": "ui",
+      "from": "legacy",
+      "to": "target",
+      "dependsOn": [],
+      "tags": [
+        "irreversible"
+      ],
+      "verification": [],
+      "rollback": "revert the commit",
+      "evidence": []
+    }
+  ],
+  "tracks": {
+    "enabling": [
+      "s1-extract-api",
+      "s2-wire-ui",
+      "s3-pick-store",
+      "s4-drop-legacy"
+    ],
+    "data": [],
+    "features": []
+  },
+  "notes": []
+}
