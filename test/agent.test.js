@@ -258,10 +258,12 @@ test('the adapter enforces the same agent.env name allowlist as the config valid
   }
 });
 
-test('an agent.env value longer than the 380-character consent line cap is refused at validation', () => {
+test('an agent.env value longer than the 380-character consent line cap minus the name and quotes is refused at validation', () => {
   const v = (value) => validateRunConfig({ schemaVersion: 1, agent: { kind: 'claude', command: ['claude'], env: { AGENT_MODEL: value } } }, project()).problems;
-  assert.deepEqual(v('a'.repeat(380)), []);
-  assert.ok(v('a'.repeat(381)).some((p) => /agent\.env\.AGENT_MODEL.*at most 380 characters/.test(p)));
+  // cap = 380 - 7 - name length (AGENT_MODEL is 11 characters)
+  assert.deepEqual(v('a'.repeat(362)), []);
+  assert.ok(v('a'.repeat(363)).some((p) => /agent\.env\.AGENT_MODEL.*at most 362 characters/.test(p)));
+  assert.ok(v('a'.repeat(380)).some((p) => /at most 362 characters/.test(p)));
 });
 
 test('a passEnv name that is set but empty or unset is simply not passed', () => {

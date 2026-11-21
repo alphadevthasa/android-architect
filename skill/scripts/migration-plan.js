@@ -20,6 +20,15 @@ import { redact, redactJson } from './lib/redact.js';
 import { writeAiFiles } from './lib/aidir.js';
 import { findTable } from './lib/runplan.js';
 
+// True when this script runs from a vendored <.ai>/tools/scripts copy (as opposed to a damaged installed skill).
+const vendoredCopy = () => {
+  try {
+    return /[\\/]\.ai[\\/]tools[\\/]scripts$/i.test(fs.realpathSync.native(path.dirname(fileURLToPath(import.meta.url))));
+  } catch {
+    return false;
+  }
+};
+
 const USAGE = 'usage: node migration-plan.js <root> --recs <file> [--profile <file>] [--adr-dir <dir>] [--format json|md] [--out <file>] [--write]';
 const BUILD_FILES = ['build.gradle', 'build.gradle.kts', 'settings.gradle', 'settings.gradle.kts', 'build.xml'];
 
@@ -154,7 +163,9 @@ export function main(argv) {
       process.exit(1);
     }
     if (!fs.existsSync(fileURLToPath(playbooksDir))) {
-      fail(1, 'the playbooks are not vendored into .ai/tools; run migration-plan.js from the installed skill (npx android-architect), not from a vendored copy');
+      fail(1, vendoredCopy()
+        ? 'the playbooks are not vendored into .ai/tools; run migration-plan.js from the installed skill (npx android-architect), not from a vendored copy'
+        : 'the playbooks folder of this android-architect install is missing; reinstall android-architect');
     }
     const playbooks = loadPlaybooks(fileURLToPath(playbooksDir));
     const errs = validatePlaybooks(playbooks, loadCatalog());

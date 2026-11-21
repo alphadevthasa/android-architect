@@ -659,3 +659,29 @@ test('CLI --out refuses a symlinked directory and gives a clean message when it 
     cleanup(out);
   }
 });
+
+test('CLI with a corrupt manifest fails closed: exit 1 for generation and --check, a pre-existing .ai/fitness is left untouched', () => {
+  const dir = project();
+  try {
+    // a manifest that might have marked this repo as a workspace member, now unreadable
+    for (const bad of ['{ "schemaVersion": 1, "workspace": { "role": "member" ', '{"schemaVersion":99,"workspace":{"role":"member"}}']) {
+      fs.writeFileSync(path.join(dir, '.ai/manifest.json'), bad);
+      fs.mkdirSync(path.join(dir, '.ai/fitness'), { recursive: true });
+      fs.writeFileSync(path.join(dir, '.ai/fitness/keep.txt'), 'mine');
+      const before = fs.readdirSync(path.join(dir, '.ai/fitness')).sort();
+      for (const args of [[dir], [dir, '--check']]) {
+        const r = cli(args);
+        assert.equal(r.status, 1, `${args.join(' ')}: ${r.stdout}`);
+        assert.match(r.stderr, /^cannot read \.ai\/manifest\.json: /);
+        assert.equal(r.stdout, '');
+        assert.equal(r.stderr.includes(dir), false);
+      }
+      assert.deepEqual(fs.readdirSync(path.join(dir, '.ai/fitness')).sort(), before);
+      assert.equal(fs.readFileSync(path.join(dir, '.ai/fitness/keep.txt'), 'utf8'), 'mine');
+      fs.rmSync(path.join(dir, '.ai/fitness'), { recursive: true });
+    }
+    assert.equal(fs.existsSync(path.join(dir, '.ai/fitness')), false);
+  } finally {
+    cleanup(dir);
+  }
+});

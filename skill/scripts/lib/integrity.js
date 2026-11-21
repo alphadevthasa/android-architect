@@ -112,9 +112,9 @@ export function verifyTools(root, { skillDir, catalogDir, toolVersion }) {
   }
   const diff = diffHashes(actual, expected);
   const status = diff.changed.length || diff.added.length || diff.removed.length ? 'modified' : 'ok';
-  const stale = diff.added.some((k) => k.startsWith('catalog/playbooks/') || k === 'catalog/recommendations.schema.md');
+  const stale = diff.added.some((k) => NOT_VENDORED_CATALOG.some((p) => k === `catalog/${p}` || k.startsWith(`catalog/${p.endsWith('/') ? p : `${p}/`}`)));
   return stale
-    ? { status, ...diff, reason: 'vendored playbooks are left over from an older android-architect (they are no longer vendored); run "refresh" with the installed android-architect to remove them' }
+    ? { status, ...diff, reason: 'vendored catalog files that are no longer vendored (the playbooks) are left over from an older android-architect (they are no longer vendored); run "refresh" with the installed android-architect to remove them' }
     : { status, ...diff };
 }
 

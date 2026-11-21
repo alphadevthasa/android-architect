@@ -3,7 +3,7 @@ import path from 'node:path';
 
 export const MANIFEST_SCHEMA_VERSION = 1;
 
-const FIX_ADVICE = 'fix or delete .ai/manifest.json by hand, or restore it from git';
+export const FIX_ADVICE = 'fix or delete .ai/manifest.json by hand, or restore it from git';
 /** One plain message (no absolute path, no parser text): refresh and init cannot repair a corrupt manifest, so they are not advised. */
 function manifestError(reason, advice = FIX_ADVICE) {
   return Object.assign(new Error(`cannot read .ai/manifest.json: ${reason}; ${advice}`), { manifestMessage: true });

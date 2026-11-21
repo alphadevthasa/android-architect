@@ -574,6 +574,10 @@ test('a vendored copy under .ai/tools refuses to run (in-process and as a real c
   assert.equal(isVendoredPath('/p/.ai/toolsx/run.js'), false);
   assert.equal(isVendoredPath('/p/.AI/TOOLS/scripts/run.js'), true);
   assert.equal(isVendoredPath('/p/.Ai/Tools/scripts/run.js'), true);
+  // only the exact vendored layout: a full skill below an ancestor .ai/tools directory is not a vendored copy
+  assert.equal(isVendoredPath('/p/.ai/tools/skill/scripts/run.js'), false);
+  assert.equal(isVendoredPath('/p/.ai/tools/anything/run.js'), false);
+  assert.equal(isVendoredPath('/p/.ai/tools/scripts/lib/runcli.js'), true);
   const root = project(CHAIN, { config: CONFIG });
   const r = await run(['--root', root, '--dry-run'], { root: os.tmpdir(), selfPath: '/p/.ai/tools/scripts/run.js' });
   assert.equal(r.code, 2);
@@ -585,6 +589,15 @@ test('a vendored copy under .ai/tools refuses to run (in-process and as a real c
   const c = spawnSync(process.execPath, [path.join(copy, 'run.js'), '--root', root, '--dry-run'], { encoding: 'utf8' });
   assert.equal(c.status, 2);
   assert.match(c.stderr, /installed skill/);
+});
+
+test('a full skill below an ancestor .ai/tools directory still runs', () => {
+  const root = project(CHAIN, { config: CONFIG });
+  const skill = path.join(root, '.ai/tools/skill');
+  fs.cpSync(path.join(ROOT, 'skill'), skill, { recursive: true });
+  const c = spawnSync(process.execPath, [path.join(skill, 'scripts/run.js'), '--root', root, '--dry-run'], { encoding: 'utf8' });
+  assert.doesNotMatch(c.stderr, /lives under \.ai\/tools/);
+  assert.equal(c.status, 0, c.stderr);
 });
 
 test('a case-variant .AI/TOOLS copy of run.js refuses to run (advisory vendored guard)', () => {
@@ -691,10 +704,19 @@ test('over-cap refusals name the section; 64-char names are shown whole', async 
   const refused = await run(['--root', big, '--dry-run'], { root: os.tmpdir() });
   assert.equal(refused.code, 2);
   // what validates is at most 380 characters; a value that only grows when escaped for display is still refused, never cut
-  const huge = project(CHAIN, { config: { agent: { kind: 'claude', command: ['claude'], env: { AGENT_MODEL: 'w'.repeat(381) } } } });
+  const longName = `${'N'.repeat(58)}_MODEL`; // 64 characters: 380 - 7 - 64 = 309 characters of value fit
+  const fits = project(CHAIN, { config: { agent: { kind: 'claude', command: ['claude'], env: { [longName]: 'v'.repeat(309) } } } });
+  const shownOk = await run(['--root', fits, '--dry-run'], { root: os.tmpdir() });
+  assert.equal(shownOk.code, 0, shownOk.all);
+  assert.ok(shownOk.out.includes(`  - ${longName}="${'v'.repeat(309)}"`));
+  const over = project(CHAIN, { config: { agent: { kind: 'claude', command: ['claude'], env: { [longName]: 'v'.repeat(310) } } } });
+  const overRun = await run(['--root', over, '--dry-run'], { root: os.tmpdir() });
+  assert.equal(overRun.code, 2);
+  assert.match(overRun.err, /must be a printable string of at most 309 characters/);
+  const huge = project(CHAIN, { config: { agent: { kind: 'claude', command: ['claude'], env: { AGENT_MODEL: 'w'.repeat(380) } } } });
   const refusedRaw = await run(['--root', huge, '--dry-run'], { root: os.tmpdir() });
   assert.equal(refusedRaw.code, 2);
-  assert.match(refusedRaw.err, /agent\.env\.AGENT_MODEL must be a printable string of at most 380 characters/);
+  assert.match(refusedRaw.err, /agent\.env\.AGENT_MODEL must be a printable string of at most 362 characters/);
   assert.match(refused.err, /"Environment variables SET by \.ai\/run\.config\.json[^\n]*" section[^\n]*too long/);
 });
 

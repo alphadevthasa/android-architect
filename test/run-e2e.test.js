@@ -555,10 +555,10 @@ test('without recorded consent the CLI refuses (exit 2) and never spawns the stu
 test('a vendored copy of run.js under .ai/tools refuses (exit 2) and starts nothing', async () => {
   const root = makeRepo({ steps: ONE });
   await consent(root);
-  fs.mkdirSync(path.join(root, '.ai/tools'), { recursive: true });
-  fs.copyFileSync(path.join(ROOT, 'skill/scripts/run.js'), path.join(root, '.ai/tools/run.js'));
+  fs.mkdirSync(path.join(root, '.ai/tools/scripts'), { recursive: true });
+  fs.copyFileSync(path.join(ROOT, 'skill/scripts/run.js'), path.join(root, '.ai/tools/scripts/run.js'));
   const out = await new Promise((resolve) => {
-    const c = spawn(process.execPath, [path.join(root, '.ai/tools/run.js'), '--root', root], { stdio: ['ignore', 'pipe', 'pipe'] });
+    const c = spawn(process.execPath, [path.join(root, '.ai/tools/scripts/run.js'), '--root', root], { stdio: ['ignore', 'pipe', 'pipe'] });
     let text = '';
     c.stdout.on('data', (d) => { text += d; });
     c.stderr.on('data', (d) => { text += d; });

@@ -254,13 +254,17 @@ test('sk- and sk-ant- style API keys are redacted; look-alike words are not', ()
     assert.ok(!r.text.includes('FAKEfake'), r.text);
     assert.deepEqual(r.hits.map((h) => h.kind), [kind]);
   }
-  for (const safe of ['sk-short', 'sk-' + 'a'.repeat(19), 'task-' + 'a'.repeat(30), 'risk-assessment-' + 'b'.repeat(30), 'desk-ant-' + 'c'.repeat(30), 'sk-ant-short']) {
+  for (const shape of ['sk-proj-' + 'Ab1_-'.repeat(12), 'sk-svcacct-' + 'Ab1_-'.repeat(12), 'sk-admin-' + 'Ab1_-'.repeat(12), 'sk-or-v1-' + 'ab12'.repeat(16)]) {
+    const r = redact(`OPENAI=${shape}\n`);
+    assert.equal(r.text, 'OPENAI=[REDACTED:sk-api-key]\n', shape);
+  }
+  for (const safe of ['sk-learn-' + 'a'.repeat(5), 'sk-learn', '.sk-proj-x', 'class="task-card-' + 'a'.repeat(30) + '"', 'a-disk-' + 'b'.repeat(30), 'sk-short', 'sk-' + 'a'.repeat(19), 'task-' + 'a'.repeat(30), 'risk-assessment-' + 'b'.repeat(30), 'desk-ant-' + 'c'.repeat(30), 'sk-ant-short']) {
     assert.equal(redact(safe).text, safe, safe);
   }
 });
 
 test('sk- detectors are linear on 1 MB hostile lines', () => {
-  const lines = ['sk-'.repeat(350 * 1024), 'sk-ant-'.repeat(150 * 1024), ('sk-' + 'a'.repeat(19)).repeat(48 * 1024), ('sk-ant-' + 'a'.repeat(19)).repeat(40 * 1024), 'sk-' + 'a'.repeat(1024 * 1024), 'sk-ant-' + 'a-'.repeat(512 * 1024), 'a'.repeat(1024 * 1024) + 'sk-' + 'a'.repeat(30)];
+  const lines = ['sk-proj-'.repeat(150000), 'sk-or-v1-'.repeat(100000), ('sk-proj-' + 'a'.repeat(19)).repeat(40000), 'sk-'.repeat(350 * 1024), 'sk-ant-'.repeat(150 * 1024), ('sk-' + 'a'.repeat(19)).repeat(48 * 1024), ('sk-ant-' + 'a'.repeat(19)).repeat(40 * 1024), 'sk-' + 'a'.repeat(1024 * 1024), 'sk-ant-' + 'a-'.repeat(512 * 1024), 'a'.repeat(1024 * 1024) + 'sk-' + 'a'.repeat(30)];
   for (const l of lines) {
     const t0 = Date.now();
     redact(l);

@@ -10,9 +10,9 @@ import { fileURLToPath } from 'node:url';
 const VENDORED_MESSAGE = 'this copy of run.js lives under .ai/tools, which is generated and can be changed by anyone who can change the repository, so it will not run: use `npx android-architect run` or the run.js of the installed skill';
 
 function underVendored(file) {
-  const parts = String(file).split(/[\\/]/);
-  for (let i = 0; i + 1 < parts.length; i++) if (parts[i].toLowerCase() === '.ai' && parts[i + 1].toLowerCase() === 'tools') return true; // case-insensitive file systems
-  return false;
+  // Exactly the vendored layout (last four segments), compared case-insensitively for case-insensitive file systems.
+  const tail = String(file).split(/[\\/]/).slice(-4).map((s) => s.toLowerCase());
+  return tail.length === 4 && tail.join('/') === '.ai/tools/scripts/run.js';
 }
 
 /** Resolves to the exit code (the caller sets process.exitCode). `io` is the test seam of lib/runcli.js. */

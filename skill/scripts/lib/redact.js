@@ -26,7 +26,7 @@ const TOKEN_RULES = [
   { kind: 'github-token', re: /gh[pousr]_[A-Za-z0-9]{36,}/g },
   // sk- API keys; the lookbehind keeps the scan linear and keeps words such as "task-..." and "risk-..." untouched.
   { kind: 'anthropic-api-key', re: /(?<![A-Za-z0-9_-])sk-ant-[A-Za-z0-9_-]{20,}/g },
-  { kind: 'sk-api-key', re: /(?<![A-Za-z0-9_-])sk-[A-Za-z0-9]{20,}/g },
+  { kind: 'sk-api-key', re: /(?<![A-Za-z0-9_-])sk-(?:(?:proj|svcacct|admin|or-v1)-[A-Za-z0-9_-]{20,}|[A-Za-z0-9]{20,})/g },
   { kind: 'slack-token', re: /xox[abprs]-[A-Za-z0-9-]{10,}/g },
   // The lookbehind keeps the scan linear: a match can only start at the beginning of a run of token characters.
   { kind: 'jwt', re: /(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g },
