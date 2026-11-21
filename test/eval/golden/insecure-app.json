@@ -1,0 +1,66 @@
+{
+  "fixture": "insecure-app",
+  "profile": {
+    "catalogVersion": "2026.11.3",
+    "sdk": {
+      "minSdk": null,
+      "targetSdk": null,
+      "compileSdk": 34
+    },
+    "size": {
+      "files": 3,
+      "sourceFiles": 1,
+      "kotlinFiles": 0,
+      "javaFiles": 1,
+      "xmlLayouts": 0,
+      "loc": 17
+    },
+    "modules": [
+      {
+        "path": ":",
+        "projectDeps": []
+      }
+    ],
+    "dimensions": {
+      "language": [
+        ["java", 1]
+      ],
+      "build": [
+        ["gradle-groovy", 1]
+      ],
+      "modularization": [
+        ["single-module", null]
+      ],
+      "build-performance": [
+        ["kapt-free", null]
+      ]
+    }
+  },
+  "candidates": {
+    "language": {
+      "current": ["java"],
+      "next": ["java8-desugar"],
+      "reachable": ["java8-desugar", "kotlin", "kotlin-k2", "kmp"],
+      "blocked": []
+    },
+    "build": {
+      "current": ["gradle-groovy"],
+      "next": ["gradle-kts", "buildsrc"],
+      "reachable": ["gradle-kts", "buildsrc", "version-catalog", "convention-plugins"],
+      "blocked": []
+    },
+    "modularization": {
+      "current": ["single-module"],
+      "next": ["app-plus-libraries", "layer-modules", "feature-modules"],
+      "reachable": ["app-plus-libraries", "layer-modules", "feature-modules", "api-impl-modules", "monorepo-convention"],
+      "blocked": []
+    },
+    "build-performance": {
+      "current": ["kapt-free"],
+      "next": [],
+      "reachable": [],
+      "blocked": []
+    }
+  },
+  "rules": []
+}

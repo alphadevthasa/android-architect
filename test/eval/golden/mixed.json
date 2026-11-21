@@ -1,0 +1,154 @@
+{
+  "fixture": "mixed",
+  "profile": {
+    "catalogVersion": "2026.11.3",
+    "sdk": {
+      "minSdk": 21,
+      "targetSdk": 34,
+      "compileSdk": 34
+    },
+    "size": {
+      "files": 16,
+      "sourceFiles": 8,
+      "kotlinFiles": 7,
+      "javaFiles": 1,
+      "xmlLayouts": 3,
+      "loc": 42
+    },
+    "modules": [
+      {
+        "path": ":app",
+        "projectDeps": [":legacy"]
+      },
+      {
+        "path": ":legacy",
+        "projectDeps": []
+      }
+    ],
+    "dimensions": {
+      "language": [
+        ["kotlin", 0.88],
+        ["java", 0.13]
+      ],
+      "build": [
+        ["gradle-groovy", 1]
+      ],
+      "ui": [
+        ["xml-layouts", 0.6],
+        ["compose", 0.4]
+      ],
+      "presentation": [
+        ["mvvm-livedata", 0.5],
+        ["udf-stateflow", 0.5]
+      ],
+      "async": [
+        ["coroutines-flow", 0.5],
+        ["coroutines-livedata", 0.5]
+      ],
+      "di": [
+        ["koin", 1]
+      ],
+      "keyvalue": [
+        ["datastore", 0.5],
+        ["sharedpreferences", 0.5]
+      ],
+      "modularization": [
+        ["app-plus-libraries", null]
+      ],
+      "build-performance": [
+        ["kapt-free", null]
+      ]
+    }
+  },
+  "candidates": {
+    "language": {
+      "current": ["kotlin", "java"],
+      "next": ["kotlin-k2", "java8-desugar"],
+      "reachable": ["kotlin-k2", "java8-desugar", "kmp"],
+      "blocked": []
+    },
+    "build": {
+      "current": ["gradle-groovy"],
+      "next": ["gradle-kts", "buildsrc"],
+      "reachable": ["gradle-kts", "buildsrc", "version-catalog", "convention-plugins"],
+      "blocked": []
+    },
+    "ui": {
+      "current": ["xml-layouts", "compose"],
+      "next": ["compose-multiplatform"],
+      "reachable": ["compose-multiplatform"],
+      "blocked": []
+    },
+    "presentation": {
+      "current": ["mvvm-livedata", "udf-stateflow"],
+      "next": ["mvvm-clean", "circuit-decompose"],
+      "reachable": ["mvvm-clean", "circuit-decompose"],
+      "blocked": []
+    },
+    "async": {
+      "current": ["coroutines-flow", "coroutines-livedata"],
+      "next": [],
+      "reachable": [],
+      "blocked": []
+    },
+    "di": {
+      "current": ["koin"],
+      "next": ["hilt"],
+      "reachable": ["hilt"],
+      "blocked": []
+    },
+    "keyvalue": {
+      "current": ["datastore", "sharedpreferences"],
+      "next": ["encrypted-sharedpreferences", "mmkv"],
+      "reachable": ["encrypted-sharedpreferences", "mmkv"],
+      "blocked": []
+    },
+    "modularization": {
+      "current": ["app-plus-libraries"],
+      "next": ["layer-modules", "feature-modules"],
+      "reachable": ["layer-modules", "feature-modules", "api-impl-modules", "monorepo-convention"],
+      "blocked": []
+    },
+    "build-performance": {
+      "current": ["kapt-free"],
+      "next": [],
+      "reachable": [],
+      "blocked": []
+    }
+  },
+  "rules": [
+    {
+      "id": "dependsOn-must-exist",
+      "kind": "guardrail",
+      "cases": [
+        {
+          "recs": "recs/mixed.build-hop.json",
+          "expect": "pass"
+        },
+        {
+          "recs": "recs/mixed.dangling-dependency.json",
+          "expect": "fail",
+          "rules": ["R3-order"]
+        }
+      ]
+    },
+    {
+      "id": "offer-gradle-kts",
+      "kind": "must-recommend",
+      "require": {
+        "dimension": "build",
+        "anyOf": ["gradle-kts"]
+      },
+      "cases": [
+        {
+          "recs": "recs/mixed.build-hop.json",
+          "expect": "pass"
+        },
+        {
+          "recs": "recs/mixed.no-build-step.json",
+          "expect": "fail"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "catalogVersion": "2026.11.3",
+  "generatedAt": "2026-01-01",
+  "dimensions": [
+    {
+      "dimension": "navigation",
+      "current": [
+        "nav-compose-typesafe"
+      ],
+      "target": "navigation3",
+      "label": "should",
+      "rationale": "Canned eval rationale."
+    }
+  ],
+  "steps": [
+    {
+      "id": "nav1",
+      "dimension": "navigation",
+      "from": "nav-compose-typesafe",
+      "to": "navigation3",
+      "dependsOn": []
+    }
+  ]
+}

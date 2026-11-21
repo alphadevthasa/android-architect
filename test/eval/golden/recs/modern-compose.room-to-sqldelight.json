@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "catalogVersion": "2026.11.3",
+  "generatedAt": "2026-01-01",
+  "dimensions": [
+    {
+      "dimension": "persistence",
+      "current": [
+        "room"
+      ],
+      "target": "sqldelight",
+      "label": "later",
+      "rationale": "Canned eval rationale."
+    }
+  ],
+  "steps": [
+    {
+      "id": "db1",
+      "dimension": "persistence",
+      "from": "room",
+      "to": "sqldelight",
+      "dependsOn": []
+    }
+  ]
+}

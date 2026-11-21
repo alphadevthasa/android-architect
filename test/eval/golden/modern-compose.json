@@ -1,0 +1,226 @@
+{
+  "fixture": "modern-compose",
+  "profile": {
+    "catalogVersion": "2026.11.3",
+    "sdk": {
+      "minSdk": 24,
+      "targetSdk": 35,
+      "compileSdk": 35
+    },
+    "size": {
+      "files": 15,
+      "sourceFiles": 5,
+      "kotlinFiles": 5,
+      "javaFiles": 0,
+      "xmlLayouts": 0,
+      "loc": 32
+    },
+    "modules": [
+      {
+        "path": ":app",
+        "projectDeps": [":feature:home"]
+      },
+      {
+        "path": ":core:data",
+        "projectDeps": []
+      },
+      {
+        "path": ":feature:home",
+        "projectDeps": [":core:data"]
+      }
+    ],
+    "dimensions": {
+      "language": [
+        ["kotlin", 1],
+        ["kotlin-k2", null]
+      ],
+      "build": [
+        ["gradle-kts", 0.45],
+        ["ksp", 0.27],
+        ["convention-plugins", 0.18],
+        ["version-catalog", 0.09]
+      ],
+      "ui": [
+        ["compose", 1]
+      ],
+      "presentation": [
+        ["mvvm-clean", 0.5],
+        ["udf-stateflow", 0.5]
+      ],
+      "navigation": [
+        ["nav-compose-typesafe", 1]
+      ],
+      "async": [
+        ["coroutines-flow", 1]
+      ],
+      "di": [
+        ["hilt", 1]
+      ],
+      "networking": [
+        ["okhttp-retrofit", 1]
+      ],
+      "serialization": [
+        ["kotlinx-serialization", 1]
+      ],
+      "persistence": [
+        ["room", 1]
+      ],
+      "image": [
+        ["coil", 1]
+      ],
+      "modularization": [
+        ["feature-modules", null]
+      ],
+      "testing": [
+        ["mockk", 0.5],
+        ["turbine", 0.5]
+      ],
+      "build-performance": [
+        ["config-cache", 1],
+        ["kapt-free", null]
+      ]
+    }
+  },
+  "candidates": {
+    "language": {
+      "current": ["kotlin", "kotlin-k2"],
+      "next": ["kmp"],
+      "reachable": ["kmp"],
+      "blocked": []
+    },
+    "build": {
+      "current": ["gradle-kts", "ksp", "convention-plugins", "version-catalog"],
+      "next": [],
+      "reachable": [],
+      "blocked": []
+    },
+    "ui": {
+      "current": ["compose"],
+      "next": ["compose-multiplatform"],
+      "reachable": ["compose-multiplatform"],
+      "blocked": []
+    },
+    "presentation": {
+      "current": ["mvvm-clean", "udf-stateflow"],
+      "next": ["circuit-decompose"],
+      "reachable": ["circuit-decompose"],
+      "blocked": []
+    },
+    "navigation": {
+      "current": ["nav-compose-typesafe"],
+      "next": ["navigation3"],
+      "reachable": ["navigation3"],
+      "blocked": []
+    },
+    "async": {
+      "current": ["coroutines-flow"],
+      "next": [],
+      "reachable": [],
+      "blocked": []
+    },
+    "di": {
+      "current": ["hilt"],
+      "next": [],
+      "reachable": [],
+      "blocked": []
+    },
+    "networking": {
+      "current": ["okhttp-retrofit"],
+      "next": ["ktor-client"],
+      "reachable": ["ktor-client"],
+      "blocked": []
+    },
+    "serialization": {
+      "current": ["kotlinx-serialization"],
+      "next": [],
+      "reachable": [],
+      "blocked": []
+    },
+    "persistence": {
+      "current": ["room"],
+      "next": ["sqldelight"],
+      "reachable": ["sqldelight"],
+      "blocked": ["sqldelight"]
+    },
+    "image": {
+      "current": ["coil"],
+      "next": [],
+      "reachable": [],
+      "blocked": []
+    },
+    "modularization": {
+      "current": ["feature-modules"],
+      "next": ["api-impl-modules"],
+      "reachable": ["api-impl-modules", "monorepo-convention"],
+      "blocked": []
+    },
+    "testing": {
+      "current": ["mockk", "turbine"],
+      "next": [],
+      "reachable": [],
+      "blocked": []
+    },
+    "build-performance": {
+      "current": ["config-cache", "kapt-free"],
+      "next": [],
+      "reachable": [],
+      "blocked": []
+    }
+  },
+  "rules": [
+    {
+      "id": "nav-hop-is-legal-and-room-to-sqldelight-needs-kmp",
+      "kind": "guardrail",
+      "cases": [
+        {
+          "recs": "recs/modern-compose.nav-hop.json",
+          "expect": "pass"
+        },
+        {
+          "recs": "recs/modern-compose.room-to-sqldelight.json",
+          "expect": "fail",
+          "rules": ["R2-prereq"]
+        }
+      ]
+    },
+    {
+      "id": "no-sqldelight-without-kmp",
+      "kind": "must-not-recommend",
+      "forbid": [
+        {
+          "dimension": "persistence",
+          "to": ["sqldelight"]
+        }
+      ],
+      "cases": [
+        {
+          "recs": "recs/modern-compose.nav-hop.json",
+          "expect": "pass"
+        },
+        {
+          "recs": "recs/modern-compose.room-to-sqldelight.json",
+          "expect": "violate",
+          "rules": ["R2-prereq"]
+        }
+      ]
+    },
+    {
+      "id": "offer-navigation3",
+      "kind": "must-recommend",
+      "require": {
+        "dimension": "navigation",
+        "anyOf": ["navigation3"]
+      },
+      "cases": [
+        {
+          "recs": "recs/modern-compose.nav-hop.json",
+          "expect": "pass"
+        },
+        {
+          "recs": "recs/modern-compose.no-steps.json",
+          "expect": "fail"
+        }
+      ]
+    }
+  ]
+}

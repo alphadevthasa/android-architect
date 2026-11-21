@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "catalogVersion": "2026.11.3",
+  "generatedAt": "2026-01-01",
+  "dimensions": [
+    {
+      "dimension": "presentation",
+      "current": [
+        "mvp"
+      ],
+      "target": "mvvm-livedata",
+      "label": "must",
+      "rationale": "Canned eval rationale."
+    },
+    {
+      "dimension": "language",
+      "current": [
+        "java"
+      ],
+      "target": "java8-desugar",
+      "label": "should",
+      "rationale": "Canned eval rationale."
+    }
+  ],
+  "steps": [
+    {
+      "id": "lang1",
+      "dimension": "language",
+      "from": "java",
+      "to": "java8-desugar",
+      "dependsOn": []
+    },
+    {
+      "id": "pres1",
+      "dimension": "presentation",
+      "from": "mvp",
+      "to": "mvvm-livedata",
+      "dependsOn": []
+    }
+  ]
+}

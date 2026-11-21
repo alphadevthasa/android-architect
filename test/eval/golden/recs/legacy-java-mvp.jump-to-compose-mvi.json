@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "catalogVersion": "2026.11.3",
+  "generatedAt": "2026-01-01",
+  "dimensions": [
+    {
+      "dimension": "presentation",
+      "current": [
+        "mvp"
+      ],
+      "target": "udf-stateflow",
+      "label": "must",
+      "rationale": "Canned eval rationale."
+    },
+    {
+      "dimension": "ui",
+      "current": [
+        "xml-layouts"
+      ],
+      "target": "compose",
+      "label": "should",
+      "rationale": "Canned eval rationale."
+    }
+  ],
+  "steps": [
+    {
+      "id": "pres1",
+      "dimension": "presentation",
+      "from": "mvp",
+      "to": "udf-stateflow",
+      "dependsOn": []
+    },
+    {
+      "id": "ui1",
+      "dimension": "ui",
+      "from": "xml-layouts",
+      "to": "compose",
+      "dependsOn": []
+    }
+  ]
+}

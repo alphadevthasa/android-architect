@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "catalogVersion": "2026.11.3",
+  "generatedAt": "2026-01-01",
+  "dimensions": [
+    {
+      "dimension": "presentation",
+      "current": [
+        "mvvm-livedata",
+        "udf-stateflow"
+      ],
+      "target": "udf-stateflow",
+      "label": "should",
+      "rationale": "Canned eval rationale."
+    }
+  ],
+  "steps": []
+}

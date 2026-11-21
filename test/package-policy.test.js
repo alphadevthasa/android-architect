@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
@@ -21,4 +22,11 @@ test('package metadata', () => {
 });
 test('network is blocked in tests', async () => {
   await assert.rejects(() => fetch('https://example.com'), /network disabled/);
+});
+test('npm pack ships no dev/, test/ or eval files', () => {
+  const out = execFileSync('npm', ['pack', '--dry-run', '--json', '--ignore-scripts'], { encoding: 'utf8', cwd: new URL('..', import.meta.url).pathname, timeout: 60000 });
+  const files = JSON.parse(out)[0].files.map((f) => f.path);
+  assert.ok(files.length > 0);
+  assert.deepEqual(files.filter((p) => !(p.startsWith('bin/') || p.startsWith('skill/') || ['package.json', 'README.md', 'LICENSE', 'CHANGELOG.md'].includes(p))), []);
+  for (const p of files) assert.ok(!/^(dev|test|docs|\.superpowers)\//.test(p), p);
 });
