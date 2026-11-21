@@ -10,7 +10,7 @@ asOf: 2026-11-20
 verified: false
 ---
 
-Moves JSON parsing from Gson to Moshi. Written from memory of https://square.github.io/moshi/ and https://kotlinlang.org; check the current docs before relying on a detail.
+Moves JSON parsing from Gson to Moshi. Written from memory of https://square.github.io/moshi/1.x/moshi/ and https://kotlinlang.org; check the current docs before relying on a detail.
 
 ## When it is worth it
 

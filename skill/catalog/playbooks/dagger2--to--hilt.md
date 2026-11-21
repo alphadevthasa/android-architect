@@ -10,7 +10,7 @@ asOf: 2026-11-20
 verified: false
 ---
 
-Moves a hand-written Dagger 2 setup (components, subcomponents, modules) to Hilt, which is built on Dagger and generates the Android components. A project that only uses `dagger-android` (the `AndroidInjector` library) is a different catalog entry and does not match this playbook. Written from memory of https://developer.android.com/training/dependency-injection/hilt-android and the Dagger to Hilt migration guide at https://developer.android.com/training/dependency-injection/hilt-migration; check the current documentation before relying on a detail.
+Moves a hand-written Dagger 2 setup (components, subcomponents, modules) to Hilt, which is built on Dagger and generates the Android components. A project that only uses `dagger-android` (the `AndroidInjector` library) is a different catalog entry and does not match this playbook. Written from memory of https://developer.android.com/training/dependency-injection/hilt-android and the Dagger to Hilt codelab at https://developer.android.com/codelabs/android-dagger-to-hilt; check the current documentation before relying on a detail.
 
 ## When it is worth it
 

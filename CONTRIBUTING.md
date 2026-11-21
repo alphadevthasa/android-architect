@@ -72,7 +72,7 @@ The release workflow runs the policy test with `RELEASE_REQUIRE_PINNED=1`, so it
 
 All of the following were written from memory and are unverified. Check each against its primary source, fix it, record the source and flip `verified` only then.
 
-- [ ] All playbooks in `skill/catalog/playbooks/` (steps, pitfalls, security checklists, tags).
+- [ ] All playbooks in `skill/catalog/playbooks/` (steps, pitfalls, security checklists, tags). Partly audited 2026-11-21: every URL in the catalog, references and SKILL.md was fetched (27 of 29 returned 200; the two broken links were fixed). The steps, pitfalls and security checklists were NOT reviewed line by line, so the playbooks stay `verified: false`.
 - [x] `skill/catalog/versions.json` stable versions: resolved from Google Maven and Maven Central on 2026-11-21. Still unaudited: update groups, `requires` and `notes` data, and major-bump migration breakage (OkHttp 5, Retrofit 3, Glide 5).
 - [ ] Compliance policy data and effective dates in `skill/catalog/dimensions/compliance.json`, including the Google Play target API level 36 date (2026-08-31) and the source links.
 - [ ] The Gson CVE-2022-25647 entry (affected range, fixed version, severity) and the other `vulnerableVersions` data.
