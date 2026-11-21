@@ -41,7 +41,7 @@ Release candidate for 1.0.0. 1.0.0 is cut only after the eval suite passes and a
 All of this was written from memory without access to the primary sources. Do not rely on it, and do not tag 1.0.0, until a maintainer has checked each item (the checklist is in CONTRIBUTING.md).
 
 - The default agent CLI command lines for `claude` and `codex` (`skill/scripts/lib/agent.js`); agent CLI flags change between releases. `run` prints the effective command and the confirmation warns about it.
-- The GitHub Action references in both workflows are tags (`actions/checkout@v4`, `actions/setup-node@v4`), not commit SHAs. The `release` environment and the `NPM_TOKEN` secret are not created yet, and the npm package name has not been checked.
+- Both workflows pin `actions/checkout` and `actions/setup-node` to full commit SHAs (v4.4.0, resolved from the actions' own repositories). The `release` environment and the `NPM_TOKEN` secret are not created yet. The npm package name `android-architect` was unclaimed (registry 404) when last checked.
 - All playbooks in `skill/catalog/playbooks/` (`verified: false`).
 - `skill/catalog/versions.json` (stable versions, update groups, `requires`).
 - Compliance policy data, effective dates and source links in `skill/catalog/dimensions/compliance.json`, including the Google Play target API level 36 date.

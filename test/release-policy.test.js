@@ -7,8 +7,12 @@ import { checkWorkflow, checkPackagePolicy, normalizeForGolden, ALLOWED_ACTIONS 
 const root = new URL('..', import.meta.url);
 const read = (p) => readFileSync(new URL(p, root), 'utf8');
 const pkg = JSON.parse(read('package.json'));
-const ci = () => read('.github/workflows/ci.yml');
-const release = () => read('.github/workflows/release.yml');
+const rawCi = () => read('.github/workflows/ci.yml');
+const rawRelease = () => read('.github/workflows/release.yml');
+// Negative-test fixtures mutate the tag form (`@v4`); rewrite SHA pins back to it so they work pinned or not.
+const tagForm = (t) => t.replace(/(actions\/(?:checkout|setup-node))@[0-9a-f]{40} # v\d+\.\d+\.\d+/g, '$1@v4');
+const ci = () => tagForm(rawCi());
+const release = () => tagForm(rawRelease());
 
 // Pack budget, recorded from `npm pack --dry-run --json` (2026-11-21, before the Task 8 docs).
 // Growth beyond 25% needs a deliberate edit here.
@@ -50,8 +54,8 @@ test('only the two allowed actions are used', () => {
 });
 
 test('actions pinned by full SHA (warning-level; enforced when RELEASE_REQUIRE_PINNED=1)', (t) => {
-  const rel = checkWorkflow(release(), 'release').unpinned;
-  const all = [...rel, ...checkWorkflow(ci(), 'ci').unpinned];
+  const rel = checkWorkflow(rawRelease(), 'release').unpinned;
+  const all = [...rel, ...checkWorkflow(rawCi(), 'ci').unpinned];
   if (all.length) {
     t.diagnostic(`WARNING release blocker: ${all.length} action reference(s) are tags, not 40-hex commit SHAs (unverified): ${[...new Set(all)].join(', ')}. ` +
       'Replace them with verified SHAs before the first release (see CONTRIBUTING.md).');
@@ -296,7 +300,7 @@ test('CHANGELOG has an entry for the package version', () => {
 
 test('CONTRIBUTING.md lists the release blockers and SECURITY.md the reporting path', () => {
   const c = read('CONTRIBUTING.md');
-  assert.match(c, /replace tag pins by verified SHAs/i);
+  assert.match(c, /action pins/i);
   assert.match(c, /npm view android-architect/);
   assert.match(c, /release blocker/i);
   assert.match(c, /Gson/);
