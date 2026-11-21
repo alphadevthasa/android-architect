@@ -39,19 +39,31 @@ test('every entry point that reads the manifest fails plainly on a corrupt manif
       'cli refresh': node(BIN, ['refresh', '--root', dir]),
       'cli doctor': node(BIN, ['doctor', '--root', dir]),
     };
+    // Pinned exit codes: reuse and doctor do not read the manifest; every other entry point fails with 1 (or 2 for input
+    // that cannot be read), never 0 and never a crash.
+    const EXPECTED = {
+      reuse: 0, 'cli doctor': 0, 'recommend-check profile.root': 1, 'ai-status': 1, fitness: 1,
+      scan: 1, candidates: 1, features: 1, 'lib-update': 1, 'migration-plan': 1, 'recommend-check --root': 1,
+      playbook: 1, refresh: 1, 'init-ai': 1, 'cli init': 1, 'cli refresh': 1,
+    };
+    assert.deepEqual(Object.keys(EXPECTED).sort(), Object.keys(cases).sort());
     for (const [name, r] of Object.entries(cases)) {
-      if (name === 'reuse' || name === 'cli doctor' || name === 'fitness' || name === 'ai-status' || name === 'recommend-check profile.root') {
-        // these may legitimately not read the manifest, but must never crash with a stack or path
-      } else {
-        assert.notEqual(r.status, 0, `${name}: exit ${r.status} ${r.stdout.slice(0, 200)}`);
-      }
+      assert.equal(r.status, EXPECTED[name], `${name}: exit ${r.status} ${r.stdout.slice(0, 200)}\n${r.stderr}`);
       const err = r.stderr;
       assert.doesNotMatch(err, /\n\s+at |file:\/\//, `${name}: stack trace\n${err}`);
       assert.equal(err.includes(dir) || err.includes(aux), false, `${name}: absolute path\n${err}`);
       assert.ok(err.trim().split('\n').length <= 1, `${name}: single line\n${err}`);
       assert.doesNotMatch(err, /Invalid catalog/, name);
     }
-    for (const name of ['scan', 'candidates']) assert.match(cases[name].stderr, /cannot read \.ai\/manifest\.json/);
+    // one plain message everywhere: no "invalid manifest", no repeated "cannot read", no refresh/init advice
+    for (const name of ['scan', 'candidates', 'features', 'lib-update', 'ai-status', 'refresh', 'init-ai', 'fitness']) {
+      const err = cases[name].stderr;
+      assert.match(err, /cannot read \.ai\/manifest\.json: it is not valid JSON; fix or delete \.ai\/manifest\.json by hand, or restore it from git/, name);
+      assert.doesNotMatch(err, /invalid manifest/, name);
+      assert.equal(err.match(/cannot read/g).length, 1, name);
+    }
+    // a corrupt manifest might hide a workspace member: fitness writes nothing
+    assert.equal(fs.existsSync(path.join(dir, '.ai/fitness')), false);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
     fs.rmSync(aux, { recursive: true, force: true });

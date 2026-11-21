@@ -53,7 +53,13 @@ test('newer schema and bad JSON throw', () => {
   fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify({ ...sample(), schemaVersion: 2 }));
   assert.throws(() => readManifest(dir), /newer than supported/);
   fs.writeFileSync(path.join(dir, 'manifest.json'), '{nope');
-  assert.throws(() => readManifest(dir), /manifest/);
+  assert.throws(() => readManifest(dir), /^Error: cannot read \.ai\/manifest\.json: it is not valid JSON; fix or delete \.ai\/manifest\.json by hand, or restore it from git$/);
+  fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify({ ...sample(), schemaVersion: 2 }));
+  // newer schema: one message, advice appears once, no refresh/init advice
+  assert.throws(() => readManifest(dir), (e) => e.message === 'cannot read .ai/manifest.json: schemaVersion 2 is newer than supported (1); use a newer android-architect');
+  fs.rmSync(path.join(dir, 'manifest.json'));
+  fs.mkdirSync(path.join(dir, 'manifest.json'));
+  assert.throws(() => readManifest(dir), (e) => /^cannot read \.ai\/manifest\.json: the file could not be read \(EISDIR\); /.test(e.message) && !e.message.includes(dir));
 });
 
 test('a manifest that is not an object or lacks an integer schemaVersion is invalid, not newer', () => {
@@ -62,7 +68,7 @@ test('a manifest that is not an object or lacks an integer schemaVersion is inva
   const { schemaVersion, ...noSchema } = sample();
   for (const value of [null, [], 42, '"x"', noSchema, { ...sample(), schemaVersion: '1' }, { ...sample(), schemaVersion: 1.5 }, { ...sample(), schemaVersion: 0 }]) {
     fs.writeFileSync(path.join(dir, 'manifest.json'), typeof value === 'string' ? value : JSON.stringify(value));
-    assert.throws(() => readManifest(dir), /^Error: invalid manifest /, JSON.stringify(value));
+    assert.throws(() => readManifest(dir), /^Error: cannot read \.ai\/manifest\.json: expected an object with an integer schemaVersion; fix or delete \.ai\/manifest\.json by hand, or restore it from git$/, JSON.stringify(value));
   }
   assert.equal(schemaVersion, 1);
 });

@@ -11,7 +11,7 @@ import { spawnCaptured, cleanTail } from './runverify.js';
 import { parseStatus } from './runstatus.js';
 import { isStepId } from './runplan.js';
 import { writeGenerated } from './aidir.js';
-import { deniedEnvName, validEnvName, passEnvAllowed, hasControl } from './runconfig.js';
+import { deniedEnvName, envBehaviorAllowed, validEnvName, passEnvAllowed, hasControl } from './runconfig.js';
 import { redact } from './redact.js';
 import { mdText } from './mdtext.js';
 
@@ -134,7 +134,7 @@ export function buildAgentEnv(config, source = process.env) {
   const own = config.agent.env ?? {};
   if (own === null || typeof own !== 'object' || Array.isArray(own)) throw refuse('agent.env must be an object');
   for (const k of Object.keys(own)) {
-    if (!validEnvName(k) || deniedEnvName(k)) throw refuse('agent.env holds a name that is not allowed');
+    if (!validEnvName(k) || deniedEnvName(k) || !envBehaviorAllowed(k)) throw refuse('agent.env holds a name that is not allowed');
     if (Object.hasOwn(env, k) || pass.includes(k)) throw refuse(`agent.env.${k} is also passed through passEnv or is reserved`);
     set(k, own[k], 'agent.env');
   }

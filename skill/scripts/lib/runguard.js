@@ -340,7 +340,7 @@ function literalArg(text, from) {
   }
   if (v === null || v === '') return null;
   ws();
-  return win[i] === ')' || win[i] === ',' || win[i] === '{' || i >= win.length || win[i] === ';' || win.startsWith('//', i) ? v : null; // `.resolve(...)`, `+ x` and the like: not a literal
+  return win[i] === ')' || win[i] === ',' || win[i] === '{' || (i >= win.length && from + win.length >= text.length) || win[i] === ';' || win.startsWith('//', i) ? v : null; // `.resolve(...)`, `+ x` and the like: not a literal
 }
 
 /**

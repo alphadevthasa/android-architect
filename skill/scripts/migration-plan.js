@@ -153,6 +153,9 @@ export function main(argv) {
       process.stdout.write(redact(JSON.stringify(redactJson(result), null, 2)).text + '\n');
       process.exit(1);
     }
+    if (!fs.existsSync(fileURLToPath(playbooksDir))) {
+      fail(1, 'the playbooks are not vendored into .ai/tools; run migration-plan.js from the installed skill (npx android-architect), not from a vendored copy');
+    }
     const playbooks = loadPlaybooks(fileURLToPath(playbooksDir));
     const errs = validatePlaybooks(playbooks, loadCatalog());
     if (errs.length > 0) throw new Error(errs.slice(0, 5).join('; '));

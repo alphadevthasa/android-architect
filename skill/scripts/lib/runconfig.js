@@ -10,6 +10,7 @@ export const RUN_CONFIG_FILE = '.ai/run.config.json';
 const PREFIX = `${RUN_CONFIG_FILE}: `;
 const MAX_FILE_BYTES = 64 * 1024;
 const MAX_ARG = 500;
+const MAX_ENV_VALUE = 380; // the consent text shows each agent.env line in full and refuses lines over 380 characters
 const MAX_ARGV = 40; // agent.command and every verification command: all of it is shown in the confirmation text
 const MAX_CMD_ARG = 300;
 const MAX_COMMANDS = 10;
@@ -256,7 +257,7 @@ export function validateRunConfig(value, root) {
             if (validEnvName(k) && deniedEnvName(k)) bad(`agent.env.${k} is not allowed (reserved: PATH, HOME, loader and option variables such as LD_*, DYLD_*, NODE_*, JAVA_*, GRADLE_*, GIT_*, SSH_*, CLAUDE_*, CODEX_*, and proxy, *_URL and *_HOST variables)`);
             else if (validEnvName(k) && !envBehaviorAllowed(k)) bad(`agent.env.${k} is not allowed (agent.env may only set behavior variables: *_MODEL, *_MAX_*, *_TIMEOUT*, TERM, NO_COLOR, CI, never keys, tokens, URLs, hosts, directories or config; put credentials in your own environment and list the name in agent.passEnv)`);
             else if (!validEnvName(k)) bad(`agent.env key ${JSON.stringify(k.slice(0, 40))} must be A-Z, 0-9 and "_" only`);
-            else if (typeof v !== 'string' || v.length > MAX_ARG || hasControl(v)) bad(`agent.env.${k} must be a printable string of at most ${MAX_ARG} characters`);
+            else if (typeof v !== 'string' || v.length > MAX_ENV_VALUE || hasControl(v)) bad(`agent.env.${k} must be a printable string of at most ${MAX_ENV_VALUE} characters`);
             else env[k] = v;
           }
           config.agent.env = env;

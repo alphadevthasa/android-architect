@@ -101,6 +101,11 @@ test('includeBuild fails closed: variables, path chains, interpolation, unreadab
     const d = repo({ 'settings.gradle': text });
     assert.throws(() => includeBuildDirs(d, d), (e) => e instanceof GateUnsure && e.needsHuman && /includeBuild/.test(e.message), text);
   }
+  // end of the 400-character window is a literal only when the text really ends there
+  for (const pad of [400, 450, 2000]) {
+    const d = repo({ 'settings.gradle': `includeBuild("a"${' '.repeat(pad)}+ x)\n` });
+    assert.throws(() => includeBuildDirs(d, d), (e) => e instanceof GateUnsure && /includeBuild/.test(e.message), `pad ${pad}`);
+  }
   let d = repo({ 'settings.gradle': 'x'.repeat(300 * 1024) });
   assert.throws(() => includeBuildDirs(d, d), GateUnsure);
   d = repo({ 'settings.gradle': 'includeBuild("a")\n'.repeat(20000) });

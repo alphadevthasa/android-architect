@@ -93,6 +93,9 @@ export function main(argv, { playbooksDir: dirOpt } = {}) {
   if (opts.positional.length !== need) fail(1, USAGE);
   const dir = opts.dir !== null ? path.resolve(opts.dir) : dirOpt ?? fileURLToPath(playbooksDir);
 
+  if (opts.dir === null && dirOpt === undefined && !fs.existsSync(dir)) {
+    fail(1, 'the playbooks are not vendored into .ai/tools; run playbook.js from the installed skill (npx android-architect), not from a vendored copy');
+  }
   let list;
   try {
     list = loadPlaybooks(dir);

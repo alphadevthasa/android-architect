@@ -11,7 +11,7 @@ const VENDORED_MESSAGE = 'this copy of run.js lives under .ai/tools, which is ge
 
 function underVendored(file) {
   const parts = String(file).split(/[\\/]/);
-  for (let i = 0; i + 1 < parts.length; i++) if (parts[i] === '.ai' && parts[i + 1] === 'tools') return true;
+  for (let i = 0; i + 1 < parts.length; i++) if (parts[i].toLowerCase() === '.ai' && parts[i + 1].toLowerCase() === 'tools') return true; // case-insensitive file systems
   return false;
 }
 
@@ -20,7 +20,7 @@ export async function main(argv, io = {}) {
   const self = fileURLToPath(import.meta.url);
   let real = self;
   try {
-    real = fs.realpathSync(self);
+    real = fs.realpathSync.native(self);
   } catch {
     // keep the plain path
   }

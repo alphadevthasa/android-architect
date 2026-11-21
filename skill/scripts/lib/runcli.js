@@ -316,7 +316,7 @@ export function askTerminal(prompt, stream, input = process.stdin) {
 /** True when `file` sits under a `.ai/tools` directory: the vendored, PR-controlled copy of the tools. */
 export function isVendoredPath(file) {
   const parts = String(file).split(/[\\/]/);
-  for (let i = 0; i + 1 < parts.length; i++) if (parts[i] === '.ai' && parts[i + 1] === 'tools') return true;
+  for (let i = 0; i + 1 < parts.length; i++) if (parts[i].toLowerCase() === '.ai' && parts[i + 1].toLowerCase() === 'tools') return true;
   return false;
 }
 const VENDORED_MESSAGE = 'this copy of run.js lives under .ai/tools, which is generated and can be changed by anyone who can change the repository, so it will not run: use `npx android-architect run` or the run.js of the installed skill';

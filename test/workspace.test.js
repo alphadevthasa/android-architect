@@ -416,7 +416,7 @@ test('an unreadable member manifest raises the hub error instead of falling back
   fs.writeFileSync(path.join(lib, '.ai/manifest.json'), '{ not json');
   const r = script('scan.js', [lib]);
   assert.equal(r.status, 1, r.stdout);
-  assert.match(r.stderr, /cannot read \.ai\/manifest\.json: .*restore it from version control; or pass --no-overrides/);
+  assert.match(r.stderr, /cannot read \.ai\/manifest\.json: .*restore it from git; or pass --no-overrides/);
   assert.equal(r.stderr.includes(tmp), false);
 });
 

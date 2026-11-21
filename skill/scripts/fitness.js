@@ -113,8 +113,9 @@ export function main(argv) {
     if (readManifest(path.join(root, '.ai'))?.workspace?.role === 'member') {
       memberNotes.push('this repo is a workspace member: ADRs live in the hub; run fitness from the hub');
     }
-  } catch {
-    // an unreadable manifest only means no workspace note
+  } catch (e) {
+    // The manifest may be what marks this repo as a workspace member (no ADRs of its own): fail closed, write nothing.
+    fail(1, cleanText(e.message));
   }
   // A workspace member has no ADRs of its own (they live in the hub): evaluate nothing, write nothing, exit 0.
   if (memberNotes.length) {

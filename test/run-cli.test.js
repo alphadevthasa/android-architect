@@ -572,6 +572,8 @@ test('a vendored copy under .ai/tools refuses to run (in-process and as a real c
   assert.equal(isVendoredPath('/p/.ai/tools/scripts/run.js'), true);
   assert.equal(isVendoredPath('C:\\p\\.ai\\tools\\scripts\\run.js'), true);
   assert.equal(isVendoredPath('/p/.ai/toolsx/run.js'), false);
+  assert.equal(isVendoredPath('/p/.AI/TOOLS/scripts/run.js'), true);
+  assert.equal(isVendoredPath('/p/.Ai/Tools/scripts/run.js'), true);
   const root = project(CHAIN, { config: CONFIG });
   const r = await run(['--root', root, '--dry-run'], { root: os.tmpdir(), selfPath: '/p/.ai/tools/scripts/run.js' });
   assert.equal(r.code, 2);
@@ -582,6 +584,16 @@ test('a vendored copy under .ai/tools refuses to run (in-process and as a real c
   fs.writeFileSync(path.join(root, '.ai/tools/package.json'), '{"type":"module","private":true}\n');
   const c = spawnSync(process.execPath, [path.join(copy, 'run.js'), '--root', root, '--dry-run'], { encoding: 'utf8' });
   assert.equal(c.status, 2);
+  assert.match(c.stderr, /installed skill/);
+});
+
+test('a case-variant .AI/TOOLS copy of run.js refuses to run (advisory vendored guard)', () => {
+  const root = project(CHAIN, { config: CONFIG });
+  const copy = path.join(root, '.AI/TOOLS/scripts');
+  fs.cpSync(path.join(ROOT, 'skill/scripts'), copy, { recursive: true });
+  fs.writeFileSync(path.join(root, '.AI/TOOLS/package.json'), '{"type":"module","private":true}\n');
+  const c = spawnSync(process.execPath, [path.join(copy, 'run.js'), '--root', root, '--dry-run'], { encoding: 'utf8' });
+  assert.equal(c.status, 2, c.stderr);
   assert.match(c.stderr, /installed skill/);
 });
 
@@ -675,9 +687,14 @@ test('over-cap refusals name the section; 64-char names are shown whole', async 
   const tooLong = project(CHAIN, { config: { agent: { kind: 'claude', command: ['claude'], env: { AGENT_MODEL: 'v'.repeat(300) } } } });
   const long = await run(['--root', tooLong, '--dry-run'], { root: os.tmpdir() });
   assert.equal(long.code, 0);
-  const big = project(CHAIN, { config: { agent: { kind: 'claude', command: ['claude'], env: { AGENT_MODEL: 'w'.repeat(480) } } } });
+  const big = project(CHAIN, { config: { agent: { kind: 'claude', command: ['claude'], env: { AGENT_MODEL: '\u200b'.repeat(100) } } } });
   const refused = await run(['--root', big, '--dry-run'], { root: os.tmpdir() });
   assert.equal(refused.code, 2);
+  // what validates is at most 380 characters; a value that only grows when escaped for display is still refused, never cut
+  const huge = project(CHAIN, { config: { agent: { kind: 'claude', command: ['claude'], env: { AGENT_MODEL: 'w'.repeat(381) } } } });
+  const refusedRaw = await run(['--root', huge, '--dry-run'], { root: os.tmpdir() });
+  assert.equal(refusedRaw.code, 2);
+  assert.match(refusedRaw.err, /agent\.env\.AGENT_MODEL must be a printable string of at most 380 characters/);
   assert.match(refused.err, /"Environment variables SET by \.ai\/run\.config\.json[^\n]*" section[^\n]*too long/);
 });
 

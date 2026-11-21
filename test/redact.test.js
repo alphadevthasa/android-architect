@@ -244,3 +244,44 @@ test('an oversize bearer token is redacted whole', () => {
   assert.equal(r.text, '[REDACTED:authorization-header] end');
   assert.equal(redact(`Bearer ${big}`).text, '[REDACTED:bearer-token]');
 });
+
+test('sk- and sk-ant- style API keys are redacted; look-alike words are not', () => {
+  const ant = 'sk-ant-api03-' + 'FAKEfake_-'.repeat(8);
+  const sk = 'sk-' + 'FAKEfake01'.repeat(3);
+  for (const [kind, input] of [['anthropic-api-key', `ANT=${ant}`], ['anthropic-api-key', `curl -H "x-key: ${ant}" x`], ['sk-api-key', `use ${sk} here`], ['sk-api-key', `("${sk}")`]]) {
+    const r = redact(input);
+    assert.ok(r.text.includes(`[REDACTED:${kind}]`), input);
+    assert.ok(!r.text.includes('FAKEfake'), r.text);
+    assert.deepEqual(r.hits.map((h) => h.kind), [kind]);
+  }
+  for (const safe of ['sk-short', 'sk-' + 'a'.repeat(19), 'task-' + 'a'.repeat(30), 'risk-assessment-' + 'b'.repeat(30), 'desk-ant-' + 'c'.repeat(30), 'sk-ant-short']) {
+    assert.equal(redact(safe).text, safe, safe);
+  }
+});
+
+test('sk- detectors are linear on 1 MB hostile lines', () => {
+  const lines = ['sk-'.repeat(350 * 1024), 'sk-ant-'.repeat(150 * 1024), ('sk-' + 'a'.repeat(19)).repeat(48 * 1024), ('sk-ant-' + 'a'.repeat(19)).repeat(40 * 1024), 'sk-' + 'a'.repeat(1024 * 1024), 'sk-ant-' + 'a-'.repeat(512 * 1024), 'a'.repeat(1024 * 1024) + 'sk-' + 'a'.repeat(30)];
+  for (const l of lines) {
+    const t0 = Date.now();
+    redact(l);
+    assert.ok(Date.now() - t0 < 1000, 'redact is too slow on a long line');
+  }
+});
+
+test('the sk- detectors fire on no shipped file under skill/ or docs/ (no false positives)', () => {
+  const changed = [];
+  const walk = (dir) => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const abs = path.join(dir, e.name);
+      if (e.isDirectory()) walk(abs);
+      else if (e.isFile() && fs.statSync(abs).size < 2 * 1024 * 1024) {
+        const text = fs.readFileSync(abs, 'utf8');
+        // Other detectors (credential, token names) already touch a few source and plan files; only the sk- rules are pinned here.
+        if (redact(text).hits.some((h) => h.kind === 'anthropic-api-key' || h.kind === 'sk-api-key')) changed.push(path.relative(process.cwd(), abs));
+      }
+    }
+  };
+  walk(path.resolve('skill'));
+  walk(path.resolve('docs'));
+  assert.deepEqual(changed, []);
+});

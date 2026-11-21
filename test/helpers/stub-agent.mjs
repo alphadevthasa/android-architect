@@ -99,7 +99,7 @@ switch (mode) {
     break;
   case 'env':
     console.log(JSON.stringify(Object.keys(process.env).sort()));
-    console.log(JSON.stringify({ MY_FLAG: process.env.MY_FLAG ?? null, ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY ?? null }));
+    console.log(JSON.stringify({ MY_MODEL: process.env.MY_MODEL ?? null, ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY ?? null }));
     break;
   case 'argv':
     console.log(JSON.stringify(process.argv.slice(2)));

@@ -211,11 +211,11 @@ test('the environment holds only PATH, HOME, LANG, passEnv names and the configu
     const plain = await run(root, ['env']);
     const keys = JSON.parse(plain.outputTail.split('\n')[0]);
     assert.deepEqual(keys.filter((k) => !OWN.includes(k)), []);
-    const r = await run(root, ['env'], {}, { env: { MY_FLAG: '1' }, passEnv: ['ANTHROPIC_API_KEY', 'ANTHROPIC_NOT_SET'] });
+    const r = await run(root, ['env'], {}, { env: { MY_MODEL: '1' }, passEnv: ['ANTHROPIC_API_KEY', 'ANTHROPIC_NOT_SET'] });
     const got = JSON.parse(r.outputTail.split('\n')[0]);
-    assert.deepEqual(got.filter((k) => !OWN.includes(k)), ['ANTHROPIC_API_KEY', 'MY_FLAG']);
+    assert.deepEqual(got.filter((k) => !OWN.includes(k)), ['ANTHROPIC_API_KEY', 'MY_MODEL']);
     // The value reaches the agent but is never returned, stored or logged by the adapter.
-    assert.match(r.outputTail, /"MY_FLAG":"1"/);
+    assert.match(r.outputTail, /"MY_MODEL":"1"/);
     const log = fs.readFileSync(path.join(root, r.logPath), 'utf8');
     assert.doesNotMatch(JSON.stringify(r) + log + fs.readFileSync(path.join(root, r.briefPath), 'utf8'), /must-not-leak/);
   } finally {
@@ -246,9 +246,22 @@ test('passEnv is a family allowlist minus loader/exec names; agent.env stays on 
     delete process.env.ANTHROPIC_MULTI;
     delete process.env.MULTI_LINE_X;
   }
-  await assert.rejects(run(root, ['env'], {}, { env: { OK_NAME: 'a\nb' } }), /control characters or newlines/);
-  await assert.rejects(run(root, ['env'], {}, { env: { OK_NAME: 'a\u0000b' } }), /control characters/);
+  await assert.rejects(run(root, ['env'], {}, { env: { OK_MODEL: 'a\nb' } }), /control characters or newlines/);
+  await assert.rejects(run(root, ['env'], {}, { env: { OK_MODEL: 'a\u0000b' } }), /control characters/);
   assert.throws(() => buildAgentEnv({ agent: { passEnv: 'x' } }), /array/);
+});
+
+test('the adapter enforces the same agent.env name allowlist as the config validator (defense in depth)', () => {
+  assert.deepEqual(buildAgentEnv({ agent: { env: { AGENT_MODEL: 'm', CI: '1' } } }, {}), { AGENT_MODEL: 'm', CI: '1' });
+  for (const bad of ['OK_NAME', 'MY_SERVICE_KEY', 'SOME_TOKEN', 'MODEL_FILE', 'FOO']) {
+    assert.throws(() => buildAgentEnv({ agent: { env: { [bad]: 'x' } } }, {}), /agent\.env holds a name that is not allowed/, bad);
+  }
+});
+
+test('an agent.env value longer than the 380-character consent line cap is refused at validation', () => {
+  const v = (value) => validateRunConfig({ schemaVersion: 1, agent: { kind: 'claude', command: ['claude'], env: { AGENT_MODEL: value } } }, project()).problems;
+  assert.deepEqual(v('a'.repeat(380)), []);
+  assert.ok(v('a'.repeat(381)).some((p) => /agent\.env\.AGENT_MODEL.*at most 380 characters/.test(p)));
 });
 
 test('a passEnv name that is set but empty or unset is simply not passed', () => {
