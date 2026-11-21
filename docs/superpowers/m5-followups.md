@@ -15,7 +15,6 @@ Shipped and documented; revisit only if a user hits them.
 - Task 1: replaceEmptyTable adds an extra blank line on re-run; attached-value Gradle forms (-g/tmp/x, --project-dir=../x) bypass the path check; script symlinks pointing outside are not checked; same-ids-different-deps plan.json change is silent when only .new is produced.
 - Task 2: redact has no pair-wise fuzz; the jwt lookbehind skips a JWT glued to a preceding token character; a key cut mid-body with no END and under 64 lines is kept; per-line log-prefixed PEM bodies end the scan; generic config.worktree refusal message.
 - Task 4: see the build-gate limits above.
-- Task 5: buildAgentEnv could re-enforce the env allowlist as defense in depth (done in Task 9: verify and drop this line if so).
 - Task 8: replace workflow action tags with verified commit SHAs (release blocker, tracked in CONTRIBUTING); create the `release` environment and NPM_TOKEN; verify the npm package name.
 - Test hygiene: a CPU-time based assertion helper for linear-time tests; give every test its own cleaned temp dir prefix.
 - 1.x: `run --dry-run` token estimate; metrics history (spec 5.17).
