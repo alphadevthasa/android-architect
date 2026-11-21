@@ -44,7 +44,7 @@ Releases are published only by `.github/workflows/release.yml`, from a version t
 2. Run `npm test` locally (it includes the eval suite and the package and workflow policy).
 3. Tag the merged commit `vX.Y.Z` (equal to `package.json` version) and push the tag. Both jobs refuse a tag that does not match, a commit that is not an ancestor of `origin/main` (note: any historical `main` commit passes this check, so tag only the commit you reviewed), and any run that is not a tag ref (a manual dispatch from a branch cannot publish).
 4. The `verify` job (read-only token, no environment, no secrets) runs the tests. Only then does `publish` start, and it waits on the protected **`release`** environment, where a reviewer approves it. `publish` repeats the guards, then runs only `npm publish --provenance --access public --ignore-scripts`.
-5. **Create the `release` environment before the first tag**, with required reviewers and a deployment rule that allows only `v*` tags. If it does not exist, GitHub creates an unprotected one on first use. Store `NPM_TOKEN` only as a secret of that environment. Use a granular npm token limited to this package with publish rights (not an automation token: automation tokens bypass 2FA), on an account with 2FA enabled. Alternatively use npm trusted publishing (OIDC), which needs no stored token; then remove `NPM_TOKEN` and update the workflow and policy together. Provenance needs the GitHub-hosted runner and `id-token: write`, granted only to the `publish` job.
+5. **Create the `release` environment before the first tag**, with required reviewers and a deployment rule that allows only `v*` tags. If it does not exist, GitHub creates an unprotected one on first use. Publishing uses npm trusted publishing (OIDC): no token is stored anywhere. On npmjs.com the package's Trusted Publisher must name this repository, workflow `release.yml`, environment `release` and allow `npm publish`; the workflow needs npm >= 11.5.1 (Node 24 ships it). Provenance needs the GitHub-hosted runner and `id-token: write`, granted only to the `publish` job. The policy checker forbids any secret or `NODE_AUTH_TOKEN` in `release.yml`.
 6. Check the result with `npm view android-architect` and the provenance badge on the npm page.
 
 ### Editing the workflows
@@ -64,7 +64,7 @@ Run `npm view android-architect` and confirm the name is free (or yours). If it 
 The release workflow runs the policy test with `RELEASE_REQUIRE_PINNED=1`, so it fails until the first item is done.
 
 - [x] **Action pins.** Done: both workflows use full commit SHAs with `# v4.4.0` comments. When bumping, resolve the new tag from the action's own repository and keep `RELEASE_REQUIRE_PINNED=1 node --test test/release-policy.test.js` green.
-- [ ] `release` environment, required reviewers and `NPM_TOKEN` secret configured; GitHub private vulnerability reporting enabled; branch protection on `main`.
+- [ ] `release` environment and required reviewers configured, npm Trusted Publisher set up (no `NPM_TOKEN`); GitHub private vulnerability reporting enabled; branch protection on `main`.
 - [ ] `npm view android-architect` name check done.
 - [ ] Maintainer data audit below completed.
 

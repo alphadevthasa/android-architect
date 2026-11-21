@@ -29,7 +29,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 22.11.0
+          node-version: 24.11.0
       - name: Verify the ref is a version tag that matches package.json
         shell: bash
         run: |
@@ -77,7 +77,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 22.11.0
+          node-version: 24.11.0
           registry-url: https://registry.npmjs.org
       - name: Verify the ref is a version tag that matches package.json
         shell: bash
@@ -107,5 +107,3 @@ jobs:
           git merge-base --is-ancestor HEAD origin/main
       - name: Publish to npm with provenance
         run: npm publish --provenance --access public --registry https://registry.npmjs.org --ignore-scripts
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

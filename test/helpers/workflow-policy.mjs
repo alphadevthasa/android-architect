@@ -32,7 +32,7 @@ const CI_RUNS = new Map([['npm test', 'npm-test']]);
 
 const EXPR_OK = {
   ci: new Set(['github.workflow', 'github.ref', "github.event_name == 'pull_request'", 'matrix.os', 'matrix.node']),
-  release: new Set(['secrets.NPM_TOKEN']),
+  release: new Set([]), // OIDC trusted publishing: the release workflow uses no secret and no expression
 };
 
 class ParseError extends Error {}
@@ -139,8 +139,8 @@ export function checkWorkflow(text, kind) {
   for (const e of exprs) if (!EXPR_OK[kind].has(e)) add('unexpected-expression');
   const count = (re) => (text.match(re) ?? []).length;
   if (release) {
-    if (count(/\bsecrets\b/g) !== 1 || count(/secrets\.NPM_TOKEN\b/g) !== 1) add('release-secret-count');
-    if (count(/NODE_AUTH_TOKEN/g) !== 1) add('release-token-count');
+    if (count(/\bsecrets\b/g) !== 0) add('release-secret-count');
+    if (count(/NODE_AUTH_TOKEN/g) !== 0) add('release-token-count');
     if (count(/id-token/g) !== 1) add('release-id-token-scope');
   } else {
     if (/\bsecrets\b/.test(text)) add('ci-secrets');
@@ -221,9 +221,7 @@ export function checkWorkflow(text, kind) {
       if (get(s, 'shell') && (!run || unq(val(get(s, 'shell'))) !== 'bash')) add('step-shell');
       const env = get(s, 'env');
       if (env) {
-        const okEnv = release && jn === 'publish' && same(keys(env), ['NODE_AUTH_TOKEN']) && val(get(env, 'NODE_AUTH_TOKEN')) === '${{ secrets.NPM_TOKEN }}' &&
-          run && val(run) === PUBLISH_CMD;
-        if (!okEnv) add('step-env');
+        add('step-env'); // no step may set env: publishing authenticates through OIDC, never a token
       }
       if (uses) {
         const [name, ref = ''] = unq(val(uses)).split('@');
