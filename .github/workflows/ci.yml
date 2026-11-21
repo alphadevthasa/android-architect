@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    name: test (node ${{ matrix.node }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            node: 20
+          - os: ubuntu-latest
+            node: 22
+          - os: macos-latest
+            node: 22
+    steps:
+      # UNVERIFIED pin: replace with the full commit SHA of this tag before the first release (release blocker)
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      # UNVERIFIED pin: replace with the full commit SHA of this tag before the first release (release blocker)
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Unit tests
+        run: npm test
+      - name: Eval suite
+        run: npm run eval
+      - name: Pack policy
+        run: |
+          npm pack --dry-run --json --ignore-scripts | node -e '
+            const p = JSON.parse(require("fs").readFileSync(0, "utf8"))[0];
+            const ok = (f) => /^(bin|skill)\//.test(f) || ["package.json", "README.md", "LICENSE", "CHANGELOG.md"].includes(f);
+            const bad = p.files.map((f) => f.path).filter((f) => !ok(f));
+            if (bad.length) { console.error("unexpected files in package:", bad.join(", ")); process.exit(1); }
+            console.log("pack ok:", p.files.length, "files,", p.size, "bytes");
+          '

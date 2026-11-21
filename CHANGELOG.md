@@ -2,6 +2,10 @@
 
 ## [0.5.0] - Unreleased
 
+### CI and release
+
+- `.github/workflows/ci.yml` (push to `main` and pull requests, read-only token, no secrets, Node 20 and 22 on Linux plus macOS, `npm test`, `npm run eval`, pack check) and `.github/workflows/release.yml` (version tags and manual dispatch from a tag only, protected `release` environment, `id-token: write` only on the publish job, tag and `package.json` version and `origin/main` ancestry verified, `npm publish --provenance`). `SECURITY.md` and `CONTRIBUTING.md` added; `test/release-policy.test.js` enforces the package contents, a size budget and the workflow policy (with negative tests). **The GitHub Action references are tags, not commit SHAs, and are unverified: replacing them with verified SHAs is a release blocker listed in CONTRIBUTING.md.**
+
 ### Run loop
 
 - `android-architect run` (`skill/scripts/run.js`, delegated from `bin/cli.js`): the opt-in autonomous run loop. Flags `--root`, `--json`, `--dry-run`, `--approve-build-changes <hash>` (repeatable, argv only) and `--help`; budgets, agent and verification come from `.ai/run.config.json` only. No `--yes`: the first-use confirmation needs an explicit `yes` at an interactive terminal (it lists the agent command, unverified-default warning, verification commands, passEnv names, budgets, branch prefix and the no-push statement), and a non-interactive stdin never confirms. Stable exit codes: 0 done, 2 refused or usage, 3 needs-human, 4 stopped or interrupted, 5 tampered, 6 budget or no-progress or repeated-error or verification-failed, 7 failed. Default agent command lines are unverified. The confirmation text shows the full agent command and every verification command, one argument per line (nothing truncated; `agent.command` and verification commands are capped at 40 arguments of 300 characters, at most 10 verification commands, and a config that cannot be shown in full is refused). `agent.env` is limited to behavior variables and its values are shown in the confirmation. The run loop is no longer vendored into `.ai/tools` (a vendored `run.js` refuses to run): use `npx android-architect run` or the installed skill.

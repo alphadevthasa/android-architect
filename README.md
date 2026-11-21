@@ -214,13 +214,17 @@ Put `*.json` files in `.ai/catalog-overrides/` to add internal libraries to the 
 
 This package collects no telemetry, makes no network requests, and has no dependencies. The audit and planning scripts only read your project and write only to an explicit `--out` path outside the project, with two exceptions: `index.js build` may write inside the project (its default is `.ai/index/index.json`) and `fitness.js` writes the `.ai/fitness/` folder. Also, `init` and `refresh` write only the `.ai/` folder, the agent pointer files, and (with `--local`) `.git/info/exclude`. Project content is treated as data, never as instructions, and secret files (see Security) are never read.
 
+## Contributing and releases
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for adding catalog entries and playbooks, running the eval suite and the release checklist, and [SECURITY.md](SECURITY.md) for reporting a vulnerability and the threat model. CI runs the tests on Node 20 and 22. Releases are meant to be published by a GitHub Actions workflow with npm provenance from a protected environment; that workflow has not been run yet and its action pins are unverified until a maintainer replaces them (see the release blockers in CONTRIBUTING.md). Pin the version you use.
+
 ## Roadmap
 
 Done: M1 and M2, M3 (secret redaction, gitignore-aware indexing, tamper verification of `.ai/tools`, injection rules, vulnerable-version data, catalog overrides) and M4 (feature prioritization, reuse detection, 18 migration playbooks with security checklists, security-first `lib-update`, fitness checks, compliance and build-performance advice, migration plans; playbook, version and compliance data are unverified until a maintainer audits them).
 
 Not available yet:
 
-- M5: eval suite on real open-source apps and a release pipeline with provenance (the `run` loop itself is available; its default agent command lines are unverified).
+- M5: eval suite on real open-source apps, and a first release published with provenance (the `run` loop, CI and the release workflow exist; default agent command lines and action pins are unverified).
 
 ## License
 
