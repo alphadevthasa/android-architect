@@ -165,10 +165,10 @@ test('node_modules/.bin symlink targets are digested; outside or dangling target
   assert.deepEqual(gate.files, ['node_modules/pkg/bin/cli.js']);
   fs.symlinkSync('/etc/hosts', path.join(d, 'node_modules/.bin/out'));
   assert.throws(() => ignoredBuildMap(rungit, d), (e) => e instanceof GateUnsure && /outside the repository/.test(e.message));
-  fs.rmSync(path.join(d, 'node_modules/.bin/out'));
+  fs.unlinkSync(path.join(d, 'node_modules/.bin/out')); // unlink, not rmSync: rmSync mishandles symlinks on some Node 24 builds
   fs.symlinkSync('../nope.js', path.join(d, 'node_modules/.bin/dangling'));
   assert.throws(() => ignoredBuildMap(rungit, d), GateUnsure);
-  fs.rmSync(path.join(d, 'node_modules/.bin/dangling'));
+  fs.unlinkSync(path.join(d, 'node_modules/.bin/dangling'));
   put(d, 'tools/Verify.js', 'ignored script named by the verification argv');
   assert.ok(buildGate(rungit, d, CFG, [], base).files.includes('tools/Verify.js'));
 });

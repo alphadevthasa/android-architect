@@ -654,7 +654,7 @@ test('a staged symlink into the git folder is refused', () => {
   start(d);
   fs.symlinkSync('.git/hooks', path.join(d, 'h1'));
   refuses(() => commitStep(d, { id: 's1', title: 't' }), /symlink/);
-  fs.rmSync(path.join(d, 'h1'));
+  fs.unlinkSync(path.join(d, 'h1')); // unlink, not rmSync: rmSync mishandles symlinks on some Node 24 builds
   fs.symlinkSync('./.git', path.join(d, 'h2'));
   refuses(() => commitStep(d, { id: 's2', title: 't' }), /symlink/);
 });

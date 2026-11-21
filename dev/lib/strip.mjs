@@ -24,7 +24,7 @@ export function stripToAllowlist(dir) {
     for (const e of fs.readdirSync(d, { withFileTypes: true })) {
       const p = path.join(d, e.name);
       if (d === dir && e.name === '.git') continue;
-      if (e.isSymbolicLink()) fs.rmSync(p, { force: true });
+      if (e.isSymbolicLink()) fs.unlinkSync(p); // rmSync mishandles symlinks on some Node 24 builds
       else if (e.isDirectory()) walk(p);
       else if (!e.isFile() || !keepName(e.name)) fs.rmSync(p, { force: true });
     }

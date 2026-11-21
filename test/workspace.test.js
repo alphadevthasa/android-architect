@@ -398,7 +398,7 @@ test('a hub that does not list the member, is not a hub, or has symlinked .ai pi
   r = refreshMember();
   assert.equal(r.status, 1);
   assert.match(r.stderr, /catalog-overrides is a symlink/);
-  fs.rmSync(ov);
+  fs.unlinkSync(ov); // unlink, not rmSync: rmSync mishandles symlinks on some Node 24 builds
   fs.renameSync(moved, ov);
   // symlinked .ai
   const aiMoved = path.join(tmp, 'moved-ai');
