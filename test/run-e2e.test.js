@@ -21,14 +21,15 @@ const CLI = path.join(ROOT, 'bin/cli.js');
 const FIXTURE = path.join(ROOT, 'test/fixtures/run-app');
 const STUB = path.join(ROOT, 'test/helpers/stub-agent.mjs');
 const REAL_GIT = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
-const TMP_PREFIX = 'aa-e2e-';
+const TMP_PREFIX = 'aa-rune2e-'; // unique to this file: test/e2e.test.js also uses temp dirs and files run in parallel
+const made = new Set(); // every temp dir this file created
 const FAKE_KEY = 'sk-ant-FAKEFAKEFAKE0123456789abcdefghij';
 const LEAKS = ['MIIEpAIBAAKCAQEA1234567890abcdefghijklmnopqrstuvwxyz', 'abcDEF1234567890ghijklMNOPqrst99', 'AKIAIOSFODNN7EXAMPLE', 'ghp_a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8', FAKE_KEY];
 const API = 'app/src/main/kotlin/com/example/runapp';
 const SCRIPT = '.git/stub-script.json'; // inside the git folder: writable between runs without dirtying the tree
 
+// The repository-unchanged check needs a git checkout of this project (the published package has no .git; the tests are not shipped).
 const repoStatusBefore = execFileSync(REAL_GIT, ['status', '--porcelain', '--ignored'], { cwd: ROOT, encoding: 'utf8' });
-const tmpBefore = new Set(fs.readdirSync(os.tmpdir()).filter((n) => n.startsWith(TMP_PREFIX)));
 const roots = new Set();
 const seen = new Map(); // outcome -> exit code observed through the real CLI
 
@@ -72,6 +73,7 @@ const ONE = [FIXTURE_STEPS[0]];
 function makeRepo({ steps, config = baseConfig(), script = EDITS, branch = 'feature', gitignore = null, extraFiles = {} } = {}) {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), TMP_PREFIX)));
   roots.add(root);
+  made.add(root);
   fs.cpSync(FIXTURE, root, { recursive: true });
   if (steps) for (const [name, text] of Object.entries(planFiles(steps))) fs.writeFileSync(path.join(root, '.ai/migration', name), text);
   fs.mkdirSync(path.join(root, 'stub'));
@@ -335,7 +337,7 @@ test('a flooding agent is capped: logs stay small and the step still completes',
 test('.ai/STOP created by the agent stops the run during the iteration (exit 4), the agent is killed, nothing is committed', async () => {
   const t0 = Date.now();
   const { root, r, j } = await scenario({ steps: PLAIN, script: { '*': { ...EDITS['s1-extract-api'], stop: 'create', sleepMs: 15000 } } });
-  assert.ok(Date.now() - t0 < 12000, 'the poll must kill the agent long before its own sleep ends');
+  await until(() => calls(root).every((c) => !alive(c.pid)), 5000); // killed by the poll, not by its own 15 s sleep ending
   assert.equal(r.code, EXIT.STOPPED);
   assert.equal(j.outcome, 'stopped');
   assert.deepEqual(callIds(root), ['s1-extract-api']);
@@ -457,6 +459,29 @@ test('secret-looking files never get committed: empty .gitignore + force-staged 
   assert.equal(subjects(b.root).length, 1);
   assert.ok(!g(b.root, 'ls-tree', '-r', '--name-only', 'HEAD').includes('local.properties'));
   await finish(b.root);
+});
+
+test('a force-staged file with an innocent name but a credential inside is never committed: needs-human, index clean', async () => {
+  const fake = `AKIA${'ABCDEFGH12345678'}`; // built at runtime: a fake AWS-shaped key
+  const { root, r, j } = await scenario({ steps: ONE, script: { '*': { edit: { [`${API}/Secrets.kt`]: `package com.example.runapp\nconst val KEY = "${fake}"\n` }, stage: [`${API}/Secrets.kt`] } } });
+  assert.equal(r.code, EXIT.NEEDS_HUMAN, r.stdout + r.stderr);
+  assert.match(j.reason, /looks like credentials/);
+  assert.ok(!(r.stdout + r.stderr).includes(fake));
+  assert.equal(subjects(root).length, 0);
+  assert.equal(g(root, 'diff', '--cached', '--name-only').trim(), '');
+  assert.ok(!g(root, 'ls-tree', '-r', '--name-only', 'HEAD').includes('Secrets.kt'));
+  await finish(root);
+});
+
+test('token floor: with usage unreported, the per-iteration estimate alone exhausts a tiny maxTotalTokens', async () => {
+  // floor = max(1, maxTotalTokens / (maxIterations * 10)); only a tiny cap reaches it (a bigger cap always leaves room for all iterations)
+  const { root, r, j } = await scenario({ steps: PLAIN, config: baseConfig({ budgets: { maxIterations: 10, maxTotalTokens: 1, maxTurnsPerStep: 5, maxWallClockMinutes: 30 } }) });
+  assert.equal(r.code, 6);
+  assert.equal(j.outcome, 'budget');
+  assert.match(j.reason, /maxTotalTokens/);
+  assert.equal(j.usage.estimated, true);
+  assert.deepEqual(callIds(root), ['s1-extract-api']);
+  await finish(root);
 });
 
 test('secrets and instruction-like text printed by the agent never appear raw under .ai/runs or in the CLI output; ai-status trusts none of it', async () => {
@@ -592,6 +617,7 @@ test('resume: SIGKILL of the CLI mid-iteration, rerun retries the interrupted st
 test('the runner never pushes, fetches, merges or touches a remote: a recording git shim on PATH sees only allowed subcommands', async () => {
   const shimDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), TMP_PREFIX)));
   roots.add(shimDir);
+  made.add(shimDir);
   const log = path.join(shimDir, 'git-argv.log');
   fs.writeFileSync(path.join(shimDir, 'git'), `#!/bin/sh\n{ for a in "$@"; do printf '%s\\037' "$a"; done; printf '\\n'; } >> "${log}"\nexec "${REAL_GIT}" "$@"\n`, { mode: 0o755 });
   const { root, r } = await scenario({ steps: PLAIN.slice(0, 2) }, { env: { PATH: `${shimDir}${path.delimiter}${process.env.PATH}` } });
@@ -614,6 +640,14 @@ test('the runner never pushes, fetches, merges or touches a remote: a recording 
   }
   assert.equal(g(root, 'remote').trim(), '');
   assert.ok(!/\[remote /.test(read(root, '.git/config')));
+  // Positive control: the shim (it covers only `git` found through PATH) does record a push and a remote listing, so the
+  // assertions above are not vacuous.
+  const before = lines.length;
+  const shimEnv = { ...process.env, PATH: `${shimDir}${path.delimiter}${process.env.PATH}` };
+  spawnSync('git', ['remote', '-v'], { cwd: root, env: shimEnv });
+  spawnSync('git', ['push', 'origin', 'HEAD'], { cwd: root, env: shimEnv });
+  const after = fs.readFileSync(log, 'utf8').split('\n').filter(Boolean).map((l) => l.split('\u001f').filter((x) => x !== ''));
+  assert.deepEqual(after.slice(before).map((a) => a[0]), ['remote', 'push']);
   await finish(root);
   fs.rmSync(shimDir, { recursive: true, force: true });
   roots.delete(shimDir);
@@ -627,6 +661,8 @@ test('a hostile run.config.json (push or publish in verification or agent argv) 
     'curl in verification': { verification: { commands: [['curl', 'http://example.invalid']], timeoutSeconds: 30 } },
     'git push as the agent': { agent: { kind: 'custom', command: ['git', 'push', 'origin', 'HEAD'] } },
     'push after a global option': { agent: { kind: 'custom', command: ['git', '-c', 'x=y', 'push'] } },
+    'npm publish as the agent': { agent: { kind: 'custom', command: ['npm', 'publish'] } },
+    'git remote as the agent': { agent: { kind: 'custom', command: ['git', 'remote', 'add', 'o', 'x'] } },
     'absolute agent path': { agent: { kind: 'custom', command: ['/usr/bin/git', 'status'] } },
     'shell string': { verification: { commands: [['sh', '-c', 'git push']], timeoutSeconds: 30 } },
   };
@@ -634,6 +670,8 @@ test('a hostile run.config.json (push or publish in verification or agent argv) 
     const root = makeRepo({ steps: ONE, config: { ...baseConfig(), ...patch } });
     const r = await runCli(root);
     assert.equal(r.code, EXIT.REFUSED, `${name}: ${r.stdout}${r.stderr}`);
+    // The agent cases pass the executable check (kind custom allows any bare name): their rejection must come from the denied-subcommand list.
+    if (name.includes('as the agent') || name.includes('global option')) assert.match(r.json.reason, /"(push|publish|remote)" is not allowed after (git|npm)/, `${name}: ${r.json.reason}`);
     assert.deepEqual(callIds(root), [], name);
     assert.deepEqual(branches(root), ['feature', 'main'], name);
     assert.equal(runFiles(root).length, 0, name);
@@ -656,6 +694,8 @@ test('a hung agent is killed at the wall-clock deadline with its whole process g
   assert.equal(alive(gc), false);
 });
 
+// ORDER-DEPENDENT on purpose: it summarizes the exit codes recorded by the cases above (`seen`), so it must stay after them and
+// fails when the file is run with --test-name-pattern.
 test('every outcome seen through the real CLI exits with the documented code', () => {
   assert.deepEqual([...seen.keys()].sort(), [...OUTCOMES].sort(), 'the matrix must hit every outcome');
   for (const [outcome, code] of seen) assert.equal(code, OUTCOME_EXIT[outcome], outcome);
@@ -664,7 +704,6 @@ test('every outcome seen through the real CLI exits with the documented code', (
 
 test('hygiene: no temp dirs and no files outside the temp dirs were left by the matrix', () => {
   assert.equal(roots.size, 0);
-  const left = fs.readdirSync(os.tmpdir()).filter((n) => n.startsWith(TMP_PREFIX) && !tmpBefore.has(n));
-  assert.deepEqual(left, []);
+  assert.deepEqual([...made].filter((d) => fs.existsSync(d)), []); // only dirs this file created (other files use temp dirs concurrently)
   assert.equal(execFileSync(REAL_GIT, ['status', '--porcelain', '--ignored'], { cwd: ROOT, encoding: 'utf8' }), repoStatusBefore);
 });
