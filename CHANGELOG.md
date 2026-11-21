@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.5.0] - Unreleased
+## [0.5.0] - 2026-11-21
 
 Release candidate for 1.0.0. 1.0.0 is cut only after the eval suite passes and a maintainer audits the unverified data listed at the end of this section.
 
