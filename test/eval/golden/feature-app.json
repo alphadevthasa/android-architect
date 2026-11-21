@@ -1,0 +1,116 @@
+{
+  "fixture": "feature-app",
+  "profile": {
+    "catalogVersion": "2026.11.3",
+    "sdk": {
+      "minSdk": 24,
+      "targetSdk": 35,
+      "compileSdk": 35
+    },
+    "size": {
+      "files": 23,
+      "sourceFiles": 12,
+      "kotlinFiles": 12,
+      "javaFiles": 0,
+      "xmlLayouts": 3,
+      "loc": 1248
+    },
+    "modules": [
+      {
+        "path": ":app",
+        "projectDeps": [":feature:legacy-reports", ":feature:login", ":feature:payment", ":feature:profile"]
+      },
+      {
+        "path": ":core:data",
+        "projectDeps": []
+      },
+      {
+        "path": ":feature:legacy-reports",
+        "projectDeps": [":core:data"]
+      },
+      {
+        "path": ":feature:login",
+        "projectDeps": [":core:data", ":feature:payment"]
+      },
+      {
+        "path": ":feature:payment",
+        "projectDeps": [":core:data"]
+      },
+      {
+        "path": ":feature:profile",
+        "projectDeps": [":core:data"]
+      }
+    ],
+    "dimensions": {
+      "language": [
+        ["kotlin", 1],
+        ["kotlin-k2", null]
+      ],
+      "build": [
+        ["gradle-kts", 1]
+      ],
+      "ui": [
+        ["xml-layouts", 0.6],
+        ["compose", 0.4]
+      ],
+      "presentation": [
+        ["mvvm-viewmodel", 0.67],
+        ["mvp", 0.33]
+      ],
+      "async": [
+        ["coroutines-flow", 1]
+      ],
+      "modularization": [
+        ["feature-modules", null]
+      ],
+      "build-performance": [
+        ["kapt-free", null]
+      ]
+    }
+  },
+  "candidates": {
+    "language": {
+      "current": ["kotlin", "kotlin-k2"],
+      "next": ["kmp"],
+      "reachable": ["kmp"],
+      "blocked": []
+    },
+    "build": {
+      "current": ["gradle-kts"],
+      "next": ["version-catalog"],
+      "reachable": ["version-catalog", "convention-plugins"],
+      "blocked": []
+    },
+    "ui": {
+      "current": ["xml-layouts", "compose"],
+      "next": ["compose-multiplatform"],
+      "reachable": ["compose-multiplatform"],
+      "blocked": []
+    },
+    "presentation": {
+      "current": ["mvvm-viewmodel", "mvp"],
+      "next": ["udf-stateflow", "mvvm-clean", "mvvm-livedata"],
+      "reachable": ["udf-stateflow", "mvvm-clean", "mvvm-livedata", "circuit-decompose"],
+      "blocked": []
+    },
+    "async": {
+      "current": ["coroutines-flow"],
+      "next": [],
+      "reachable": [],
+      "blocked": []
+    },
+    "modularization": {
+      "current": ["feature-modules"],
+      "next": ["api-impl-modules"],
+      "reachable": ["api-impl-modules", "monorepo-convention"],
+      "blocked": []
+    },
+    "build-performance": {
+      "current": ["kapt-free"],
+      "next": [],
+      "reachable": [],
+      "blocked": []
+    }
+  },
+  "rules": []
+}

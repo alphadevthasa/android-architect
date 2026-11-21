@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "catalogVersion": "2026.11.3",
+  "generatedAt": "2026-01-01",
+  "dimensions": [
+    {
+      "dimension": "build",
+      "current": [
+        "gradle-groovy"
+      ],
+      "target": "gradle-kts",
+      "label": "must",
+      "rationale": "Canned eval rationale."
+    }
+  ],
+  "steps": [
+    {
+      "id": "b1",
+      "dimension": "build",
+      "from": "gradle-groovy",
+      "to": "gradle-kts",
+      "dependsOn": []
+    }
+  ]
+}

@@ -6,6 +6,24 @@ import { fileURLToPath } from 'node:url';
 import { hashTree, regularFiles } from './hash.js';
 import { readManifest } from './manifest.js';
 
+/**
+ * Scripts that are never vendored into .ai/tools: the autonomous run loop (entry script and the libraries only it uses).
+ * .ai/tools is PR-controlled and unguarded, and the loop's consent gate and guards must never run from it. A test derives
+ * this list from the import graph (everything reachable from run.js, lib/runcli.js and from no vendored tool).
+ */
+export const NOT_VENDORED = Object.freeze([
+  'run.js', 'lib/runcli.js', 'lib/runreport.js', 'lib/rungit.js', 'lib/runconfig.js', 'lib/agent.js', 'lib/runstatus.js',
+  'lib/runverify.js', 'lib/runloop.js', 'lib/runguard.js', 'lib/stepbrief.js',
+]);
+
+/**
+ * Catalog files that are not vendored: the migration playbooks (about 190 KB) and the schema doc. Vendored scripts read
+ * catalog.json, dimensions/, scoring.json and versions.json (via loadCatalog, loadScoring and lib-update) but never the
+ * playbooks; playbook.js and migration-plan.js need the installed skill.
+ */
+export const NOT_VENDORED_CATALOG = Object.freeze(['playbooks/', 'recommendations.schema.md']);
+const catalogVendored = (rel) => !NOT_VENDORED_CATALOG.some((p) => rel === p || rel.startsWith(p.endsWith('/') ? p : `${p}/`));
+
 /** The package.json written next to the vendored scripts so plain `node` runs them as ES modules. */
 export const TOOLS_PACKAGE_JSON = '{"type":"module","private":true}\n';
 export const TRUST_FLAG = '--trust-modified-tools';
@@ -32,7 +50,10 @@ export function collectVendorSources(skillDir, catalogDir, { aiDir } = {}) {
         `refusing to vendor from inside .ai (${srcDir}): a vendored copy cannot regenerate .ai; run the installed skill or npx android-architect`,
       );
     }
-    return regularFiles(srcDir).map((rel) => [`${destRel}/${rel}`, fs.readFileSync(path.join(srcDir, rel))]);
+    return regularFiles(srcDir)
+      .filter((rel) => !(destRel === 'scripts' && NOT_VENDORED.includes(rel)))
+      .filter((rel) => destRel !== 'catalog' || catalogVendored(rel))
+      .map((rel) => [`${destRel}/${rel}`, fs.readFileSync(path.join(srcDir, rel))]);
   });
   sources.push(['package.json', Buffer.from(TOOLS_PACKAGE_JSON)]);
   return sources.sort(([a], [b]) => byText(a, b));
@@ -91,7 +112,10 @@ export function verifyTools(root, { skillDir, catalogDir, toolVersion }) {
   }
   const diff = diffHashes(actual, expected);
   const status = diff.changed.length || diff.added.length || diff.removed.length ? 'modified' : 'ok';
-  return { status, ...diff };
+  const stale = diff.added.some((k) => NOT_VENDORED_CATALOG.some((p) => k === `catalog/${p}` || k.startsWith(`catalog/${p.endsWith('/') ? p : `${p}/`}`)));
+  return stale
+    ? { status, ...diff, reason: 'vendored catalog files that are no longer vendored (the playbooks) are left over from an older android-architect (they are no longer vendored); run "refresh" with the installed android-architect to remove them' }
+    : { status, ...diff };
 }
 
 /**

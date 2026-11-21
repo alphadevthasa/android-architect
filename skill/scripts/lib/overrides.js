@@ -302,6 +302,13 @@ export const baseVersion = (catalog) => catalog.baseCatalogVersion ?? catalog.ca
  */
 export class ManifestError extends CatalogError {
   constructor(root, cause) {
+    if (cause?.manifestMessage === true) {
+      const plain = String(cause.message);
+      super([plain]);
+      this.message = plain;
+      this.name = 'ManifestError';
+      return;
+    }
     let reason = String(cause?.message ?? cause);
     const abs = [root, safeReal(root)].filter((p) => typeof p === 'string' && p.length > 3);
     for (const p of abs) reason = reason.split(path.join(p, '.ai', 'manifest.json')).join('.ai/manifest.json');
@@ -309,7 +316,7 @@ export class ManifestError extends CatalogError {
     const newer = /newer than supported/.test(reason);
     const text =
       `cannot read .ai/manifest.json: ${shownPath(reason)}; ` +
-      (newer ? 'use a newer android-architect' : 'fix or delete .ai/manifest.json by hand, or restore it from version control');
+      (newer ? 'use a newer android-architect' : FIX_ADVICE);
     super([text]);
     this.message = text;
     this.name = 'ManifestError';

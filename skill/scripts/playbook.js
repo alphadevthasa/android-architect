@@ -14,6 +14,15 @@ import { mdText, stripUnsafe } from './lib/knowledge.js';
 import { oneLine } from './lib/overrides.js';
 import { redact, redactJson } from './lib/redact.js';
 
+// True when this script runs from a vendored <.ai>/tools/scripts copy (as opposed to a damaged installed skill).
+const vendoredCopy = () => {
+  try {
+    return /[\\/]\.ai[\\/]tools[\\/]scripts$/i.test(fs.realpathSync.native(path.dirname(fileURLToPath(import.meta.url))));
+  } catch {
+    return false;
+  }
+};
+
 const USAGE = 'usage: node playbook.js list | show <id> | apply <from> <to> <projectRoot> [--format json|md] [--dir <playbooks>]';
 const BUILD_FILES = ['build.gradle', 'build.gradle.kts', 'settings.gradle', 'settings.gradle.kts', 'build.xml'];
 
@@ -93,6 +102,11 @@ export function main(argv, { playbooksDir: dirOpt } = {}) {
   if (opts.positional.length !== need) fail(1, USAGE);
   const dir = opts.dir !== null ? path.resolve(opts.dir) : dirOpt ?? fileURLToPath(playbooksDir);
 
+  if (opts.dir === null && dirOpt === undefined && !fs.existsSync(dir)) {
+    fail(1, vendoredCopy()
+      ? 'the playbooks are not vendored into .ai/tools; run playbook.js from the installed skill (npx android-architect), not from a vendored copy'
+      : 'the playbooks folder of this android-architect install is missing; reinstall android-architect');
+  }
   let list;
   try {
     list = loadPlaybooks(dir);

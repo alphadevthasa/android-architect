@@ -1,12 +1,18 @@
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { listFiles, readLines, SECRET_FILE_PATTERNS, IGNORED_DIRS } from '../skill/scripts/lib/walk.js';
 
+const made = [];
+after(() => {
+  for (const d of made) fs.rmSync(d, { recursive: true, force: true });
+});
+
 function mkTree(files) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'walk-'));
+  made.push(root);
   for (const f of files) {
     const abs = path.join(root, f);
     fs.mkdirSync(path.dirname(abs), { recursive: true });

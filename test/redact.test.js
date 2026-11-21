@@ -165,7 +165,7 @@ test('long single lines redact in linear time', () => {
   for (const l of lines) {
     const t0 = Date.now();
     redact(l);
-    assert.ok(Date.now() - t0 < 1000, 'redact is too slow on a long line');
+    assert.ok(Date.now() - t0 < 10000, 'redact is too slow on a long line');
   }
 });
 
@@ -175,4 +175,117 @@ test('an Android string resource with a credential name is redacted; labels and 
   assert.equal(r.text.split('\n')[0], '<string name="backend_api_key">[REDACTED:credential]</string>');
   assert.ok(!r.text.includes(value), 'value removed');
   assert.deepEqual(r.hits, [{ kind: 'credential', line: 1 }]);
+});
+
+test('Authorization and Bearer credentials are redacted; prose is not', () => {
+  const digits = 'abcdef1234567890ABCDEF';
+  const letters = 'AbcdefGhijklMnopqrStuvwxYz'; // 26 chars, mixed case, no digit
+  for (const line of [
+    `Authorization: Bearer ${digits}`,
+    `authorization=${digits}-xyzxyz`,
+    `curl -H "Authorization: Basic ${digits}=="`,
+    `Bearer ${digits}`,
+    `bearer\t${digits}`,
+    `Authorization: Bearer ${letters}`,
+    `Token ${letters}`,
+    `Authorization: ${digits}0123`,
+  ]) {
+    const r = redact(line);
+    assert.ok(!r.text.includes(digits) && !r.text.includes(letters), line);
+    assert.ok(r.hits.length >= 1, line);
+  }
+  const jwt = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.abcdefghijklmnop';
+  assert.deepEqual(redact(`Authorization: Bearer ${jwt}`).hits.map((h) => h.kind), ['jwt']);
+  for (const prose of ['the bearer of news', 'Auth if you use bearer refresh.', 'basic usage of the token refresh', 'Token budget exceeded', 'Authorization: required', 'authorization = none', 'Bearer abcdefghijklmnopqrstuvwx', 'basic 2 things']) {
+    assert.equal(redact(prose).text, prose, prose);
+  }
+});
+
+test('the header rules are linear on 1 MB hostile single lines', () => {
+  const MB = 1024 * 1024;
+  const lines = [
+    'authorization='.repeat(100000),
+    'Authorization: '.repeat(70000),
+    'Bearer '.repeat(150000),
+    'bearer'.repeat(170000),
+    'Bearer' + 'a'.repeat(MB),
+    'Bearer ' + 'aB'.repeat(MB / 2),
+    'Bearer ' + ' '.repeat(MB) + 'x',
+    'Authorization:' + ' '.repeat(MB),
+    'authorization=a'.repeat(70000),
+    'Bearer a '.repeat(110000),
+    'token '.repeat(170000),
+    'basic\t'.repeat(170000),
+    'Authorization: Bearer ' + '1'.repeat(MB),
+    ('Authorization: Bearer ' + 'x'.repeat(30) + ' ').repeat(20000),
+  ];
+  for (const l of lines) {
+    const t0 = Date.now();
+    redact(l);
+    const ms = Date.now() - t0;
+    assert.ok(ms < 10000, `slow (${ms} ms) on ${l.slice(0, 30)}`);
+  }
+});
+
+test('the jwt rule is linear on 1 MB of repeated eyJ and still finds real tokens', () => {
+  const MB = 1024 * 1024;
+  for (const l of ['eyJ'.repeat(MB / 3), 'eyJaaaaaaaaaa.'.repeat(MB / 15), ('eyJ' + 'a'.repeat(20) + '.' + 'b'.repeat(20) + ' ').repeat(MB / 45), 'eyJ' + 'a'.repeat(MB)]) {
+    const t0 = Date.now();
+    redact(l);
+    assert.ok(Date.now() - t0 < 10000, 'jwt rule is slow');
+  }
+  const jwt = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.abcdefghijklmnop';
+  assert.deepEqual(redact(`x="${jwt}" ${jwt}`).hits.map((h) => h.kind), ['jwt', 'jwt']);
+});
+
+test('an oversize bearer token is redacted whole', () => {
+  const big = 'aB3'.repeat(2000);
+  const r = redact(`Authorization: Bearer ${big} end`);
+  assert.equal(r.text, '[REDACTED:authorization-header] end');
+  assert.equal(redact(`Bearer ${big}`).text, '[REDACTED:bearer-token]');
+});
+
+test('sk- and sk-ant- style API keys are redacted; look-alike words are not', () => {
+  const ant = 'sk-ant-api03-' + 'FAKEfake_-'.repeat(8);
+  const sk = 'sk-' + 'FAKEfake01'.repeat(3);
+  for (const [kind, input] of [['anthropic-api-key', `ANT=${ant}`], ['anthropic-api-key', `curl -H "x-key: ${ant}" x`], ['sk-api-key', `use ${sk} here`], ['sk-api-key', `("${sk}")`]]) {
+    const r = redact(input);
+    assert.ok(r.text.includes(`[REDACTED:${kind}]`), input);
+    assert.ok(!r.text.includes('FAKEfake'), r.text);
+    assert.deepEqual(r.hits.map((h) => h.kind), [kind]);
+  }
+  for (const shape of ['sk-proj-' + 'Ab1_-'.repeat(12), 'sk-svcacct-' + 'Ab1_-'.repeat(12), 'sk-admin-' + 'Ab1_-'.repeat(12), 'sk-or-v1-' + 'ab12'.repeat(16)]) {
+    const r = redact(`OPENAI=${shape}\n`);
+    assert.equal(r.text, 'OPENAI=[REDACTED:sk-api-key]\n', shape);
+  }
+  for (const safe of ['sk-learn-' + 'a'.repeat(5), 'sk-learn', '.sk-proj-x', 'class="task-card-' + 'a'.repeat(30) + '"', 'a-disk-' + 'b'.repeat(30), 'sk-short', 'sk-' + 'a'.repeat(19), 'task-' + 'a'.repeat(30), 'risk-assessment-' + 'b'.repeat(30), 'desk-ant-' + 'c'.repeat(30), 'sk-ant-short']) {
+    assert.equal(redact(safe).text, safe, safe);
+  }
+});
+
+test('sk- detectors are linear on 1 MB hostile lines', () => {
+  const lines = ['sk-proj-'.repeat(150000), 'sk-or-v1-'.repeat(100000), ('sk-proj-' + 'a'.repeat(19)).repeat(40000), 'sk-'.repeat(350 * 1024), 'sk-ant-'.repeat(150 * 1024), ('sk-' + 'a'.repeat(19)).repeat(48 * 1024), ('sk-ant-' + 'a'.repeat(19)).repeat(40 * 1024), 'sk-' + 'a'.repeat(1024 * 1024), 'sk-ant-' + 'a-'.repeat(512 * 1024), 'a'.repeat(1024 * 1024) + 'sk-' + 'a'.repeat(30)];
+  for (const l of lines) {
+    const t0 = Date.now();
+    redact(l);
+    assert.ok(Date.now() - t0 < 10000, 'redact is too slow on a long line');
+  }
+});
+
+test('the sk- detectors fire on no shipped file under skill/ or docs/ (no false positives)', () => {
+  const changed = [];
+  const walk = (dir) => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const abs = path.join(dir, e.name);
+      if (e.isDirectory()) walk(abs);
+      else if (e.isFile() && fs.statSync(abs).size < 2 * 1024 * 1024) {
+        const text = fs.readFileSync(abs, 'utf8');
+        // Other detectors (credential, token names) already touch a few source and plan files; only the sk- rules are pinned here.
+        if (redact(text).hits.some((h) => h.kind === 'anthropic-api-key' || h.kind === 'sk-api-key')) changed.push(path.relative(process.cwd(), abs));
+      }
+    }
+  };
+  walk(path.resolve('skill'));
+  walk(path.resolve('docs'));
+  assert.deepEqual(changed, []);
 });

@@ -8,7 +8,8 @@ import { loadCatalog } from '../skill/scripts/lib/catalog.js';
 import { initProject, isGradleProject } from '../skill/scripts/lib/init.js';
 import { refreshAiDir } from '../skill/scripts/lib/refresh.js';
 
-const USAGE = `Usage: android-architect <install|uninstall|update|init|refresh|doctor|version> [--claude] [--codex] [--force] [--home <dir>] [--json] [--root <dir>] [--local] [--append-pointers] [--workspace [paths...]]`;
+const USAGE = `Usage: android-architect <install|uninstall|update|init|refresh|doctor|version|run> [--claude] [--codex] [--force] [--home <dir>] [--json] [--root <dir>] [--local] [--append-pointers] [--workspace [paths...]]
+       android-architect run [--root <dir>] [--json] [--dry-run] [--approve-build-changes <hash>]...   (run --help for details and exit codes)`;
 const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 const sourceDir = fileURLToPath(new URL('../skill', import.meta.url));
 
@@ -20,7 +21,10 @@ function usageError(message) {
   process.exit(1);
 }
 
+// `run` has its own strict parser (skill/scripts/run.js: boolean flags json, dry-run, help; value flags root and the
+// repeatable approve-build-changes); everything after `run` is handed over untouched.
 function parseArgs(argv) {
+  if (argv[0] === 'run') return { cmd: 'run', flags: new Set(), values: {}, workspace: null, rest: argv.slice(1) };
   const opts = { cmd: argv[0], flags: new Set(), values: {}, workspace: null };
   for (let i = 1; i < argv.length; i++) {
     const a = argv[i];
@@ -175,6 +179,16 @@ try {
         console.log(`graphify (optional): ${d.optional.graphify ? 'found' : 'not found'}`);
         if (d.project) printProject(d.project);
       }
+      break;
+    }
+    case 'run': {
+      let main;
+      try {
+        ({ main } = await import('../skill/scripts/run.js'));
+      } catch {
+        throw new Error('the run command could not be loaded (is the android-architect package complete?)');
+      }
+      process.exitCode = await main(opts.rest);
       break;
     }
     case 'version':

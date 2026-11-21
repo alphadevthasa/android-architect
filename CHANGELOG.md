@@ -1,5 +1,53 @@
 # Changelog
 
+## [0.5.0] - Unreleased
+
+Release candidate for 1.0.0. 1.0.0 is cut only after the eval suite passes and a maintainer audits the unverified data listed at the end of this section.
+
+### Added
+
+- `android-architect run` (`skill/scripts/run.js`, delegated from `bin/cli.js`; implementation in `skill/scripts/lib/runcli.js`): the opt-in autonomous run loop that drives your own agent CLI through the steps of `.ai/migration/plan.json`, one step at a time, on its own git branch. Flags `--root`, `--json`, `--dry-run`, `--approve-build-changes <hash>` (repeatable, command line only) and `--help`; there is no `--yes` and no flag for budgets or the agent. Stable exit codes: 0 done, 2 refused or usage, 3 needs-human, 4 stopped or interrupted, 5 tampered, 6 budget or no-progress or repeated-error or verification-failed, 7 failed.
+- Run config, plan and status (`.ai/run.config.json`, `.ai/migration/plan.json`): strict validation of budgets (defaults: 10 iterations, 400000 tokens, 20 turns per step, 120 minutes), verification commands as argv arrays from an executable allowlist, the agent command and `agent.passEnv`/`agent.env` rules, a resumable roadmap status contract (`todo`, `doing`, `done`) and `migration-plan.js --write`, which saves `plan.json` and fills the roadmap table without overwriting user text (`roadmap.md.new` otherwise). `init` creates `run.config.json` once; it is user-owned.
+- Git safety and verification: the runner refuses default or protected branches, a dirty tree, a detached HEAD, a repo without commits and repo-local git configuration that could execute code; creates its own branch, commits per step with conventional messages and never pushes, merges or publishes. Verification commands run with timeouts, in their own process group, with redacted and bounded output.
+- Agent adapter and step brief: argv-array spawn without a shell, per-iteration nonce in the status block (status is read from stdout only), output caps, usage read only from a trusted final `result` line, a per-step brief file under `.ai/runs/<run>/`.
+- Loop engine, reports and the build-code gate: exit decisions come only from observed facts; `needs-human` pauses on `irreversible` and `decision` steps; a cooperative `.ai/STOP` file; a tamper digest of protected files; the loop stops before verification when the agent changed build files (`build files changed: <n>`), and you approve the exact content with `--approve-build-changes <hash>`; per-run `report.md` with redacted, sanitized content.
+- First-use consent: an explicit `yes` at an interactive terminal after the full effective agent command, every verification command, the `passEnv` names, the `agent.env` values, budgets and branch prefix are shown (nothing is truncated; a config that cannot be shown in full is refused). Consent is recorded per clone in the git folder and bound to the `run.config.json` bytes and agent command, so any change asks again; a non-interactive stdin never confirms.
+- End-to-end test matrix for the runner with a stub agent (hang, flood, forged status, non-zero exit, STOP, resume, gated steps, hostile config) and a recorded-spawn test asserting that no network git verb or `npm publish` is ever started.
+- Eval suite (`npm run eval`, `test/eval/`, also part of `npm test`): golden profiles, candidate paths, guardrail rules (R1 to R7) and optional pinned real apps fetched with `dev/fetch-eval-apps.mjs` (reduced to the files the scan reads); `dev/record-eval.mjs` records goldens.
+- CI and release pipeline: `.github/workflows/ci.yml` (push to `main` and pull requests, read-only token, no secrets, Node 20 and 22 on Linux plus macOS, `npm test`) and `.github/workflows/release.yml` (version tags only; a read-only `verify` job, then a `publish` job in the protected `release` environment with `id-token: write` only there; tag, `package.json` version and `origin/main` ancestry checked in both; `npm publish --provenance --ignore-scripts`), `.github/CODEOWNERS`, `SECURITY.md` and `CONTRIBUTING.md`. `test/release-policy.test.js` enforces the package contents, a size budget and the workflow policy (with negative tests and a golden copy of `release.yml`). The pipeline has not been run.
+
+### Changed
+
+- The run loop is never vendored into `.ai/tools` (a vendored `run.js` refuses to run before it loads any library; that refusal is advisory, `refresh` deletes stale copies). The migration playbooks and the schema doc are no longer vendored either (about 190 KB per project): a vendored `playbook.js` or `migration-plan.js` exits 1 with a "run it from the installed skill" message, and `refresh` removes a stale vendored `catalog/playbooks`. `.ai/tools` from 0.4.0 verifies as `modified` or `unverifiable` until `refresh`.
+- Manifest errors are plain on every entry point, with pinned exit codes.
+- `skill/SKILL.md`: `run` is documented as a terminal command the agent explains but never starts; the "Not yet available" section is gone because every planned command now exists. `setup` mentions `.ai/run.config.json` and `migration-plan.js --write` after the user agrees.
+- README: the roadmap became "Status"; "No telemetry" now states that the tool's own code makes no network requests and names the exceptions (the user's agent CLI, local git, the user's verification commands and their Gradle downloads), consistent with `SECURITY.md`; added "Autonomous run: what it can and cannot guarantee".
+- Package version is 0.5.0.
+
+### Security
+
+- `run` executes your project's Gradle build code and launches an agent CLI as you: its guard rails (executable allowlist, environment rules, build-file gate, STOP file, no push) are not a sandbox. The build-file gate is a best-effort heuristic that fails closed on input it cannot read; agent-written sources, annotation processors and other `node_modules` content are not covered. Use a container or VM for repositories you do not trust (see `SECURITY.md` and "Limits of the run loop" in the README).
+- Redaction gains the kinds `authorization-header` and `bearer-token` and covers `sk-proj-`, `sk-svcacct-` and `sk-or-v1-` style keys; the new rules are covered by linear-time tests on 1 MB hostile input.
+- Everything the runner writes or prints is redacted, and agent output and verification logs are treated as untrusted data, never as instructions.
+
+### Known deviations from the design spec
+
+- No permission profile is applied: the default `claude` and `codex` command lines carry no permission flag, the user supplies them through `agent.command` and `agent.requireArgs`.
+- `.ai/STOP` kills the running agent within about 1 second, which is stricter than waiting for the iteration to end.
+- The `--agent` and `--max-*` flag overrides are intentionally absent: the agent and budgets come from `.ai/run.config.json` only (consent is bound to its bytes).
+
+### Unverified / maintainer must check
+
+All of this was written from memory without access to the primary sources. Do not rely on it, and do not tag 1.0.0, until a maintainer has checked each item (the checklist is in CONTRIBUTING.md).
+
+- The default agent CLI command lines for `claude` and `codex` (`skill/scripts/lib/agent.js`); agent CLI flags change between releases. `run` prints the effective command and the confirmation warns about it.
+- The GitHub Action references in both workflows are tags (`actions/checkout@v4`, `actions/setup-node@v4`), not commit SHAs. The `release` environment and the `NPM_TOKEN` secret are not created yet, and the npm package name has not been checked.
+- All playbooks in `skill/catalog/playbooks/` (`verified: false`).
+- `skill/catalog/versions.json` (stable versions, update groups, `requires`).
+- Compliance policy data, effective dates and source links in `skill/catalog/dimensions/compliance.json`, including the Google Play target API level 36 date.
+- The Gson CVE-2022-25647 entry (affected range, fixed version, severity) and other `vulnerableVersions` data.
+- Test note: a few timing-sensitive tests (output flood, grandchild kill, 1 MB glob, redaction and reuse linear-time tests) can fail in a full run on a heavily loaded machine; run a clean `npm test` on a quiet machine before publishing.
+
 ## [0.4.0] - Unreleased
 
 ### Tool

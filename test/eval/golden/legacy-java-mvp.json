@@ -1,0 +1,440 @@
+{
+  "fixture": "legacy-java-mvp",
+  "profile": {
+    "catalogVersion": "2026.11.3",
+    "sdk": {
+      "minSdk": 19,
+      "targetSdk": 28,
+      "compileSdk": 28
+    },
+    "size": {
+      "files": 15,
+      "sourceFiles": 9,
+      "kotlinFiles": 0,
+      "javaFiles": 9,
+      "xmlLayouts": 2,
+      "loc": 86
+    },
+    "modules": [
+      {
+        "path": ":app",
+        "projectDeps": []
+      }
+    ],
+    "dimensions": {
+      "language": [
+        [
+          "java",
+          1
+        ]
+      ],
+      "build": [
+        [
+          "gradle-groovy",
+          1
+        ]
+      ],
+      "ui": [
+        [
+          "xml-layouts",
+          0.5
+        ],
+        [
+          "butterknife",
+          0.25
+        ],
+        [
+          "xml-findviewbyid",
+          0.25
+        ]
+      ],
+      "presentation": [
+        [
+          "mvp",
+          1
+        ]
+      ],
+      "async": [
+        [
+          "asynctask-loader",
+          0.5
+        ],
+        [
+          "rxjava2",
+          0.5
+        ]
+      ],
+      "di": [
+        [
+          "dagger2",
+          1
+        ]
+      ],
+      "networking": [
+        [
+          "okhttp-retrofit",
+          1
+        ]
+      ],
+      "serialization": [
+        [
+          "gson",
+          1
+        ]
+      ],
+      "persistence": [
+        [
+          "sqliteopenhelper",
+          1
+        ]
+      ],
+      "image": [
+        [
+          "glide",
+          1
+        ]
+      ],
+      "modularization": [
+        [
+          "single-module",
+          null
+        ]
+      ],
+      "testing": [
+        [
+          "espresso",
+          0.33
+        ],
+        [
+          "junit4",
+          0.33
+        ],
+        [
+          "mockito",
+          0.33
+        ]
+      ],
+      "build-performance": [
+        [
+          "kapt-free",
+          null
+        ]
+      ]
+    }
+  },
+  "candidates": {
+    "language": {
+      "current": [
+        "java"
+      ],
+      "next": [
+        "java8-desugar"
+      ],
+      "reachable": [
+        "java8-desugar",
+        "kotlin",
+        "kotlin-k2",
+        "kmp"
+      ],
+      "blocked": []
+    },
+    "build": {
+      "current": [
+        "gradle-groovy"
+      ],
+      "next": [
+        "gradle-kts",
+        "buildsrc"
+      ],
+      "reachable": [
+        "gradle-kts",
+        "buildsrc",
+        "version-catalog",
+        "convention-plugins"
+      ],
+      "blocked": []
+    },
+    "ui": {
+      "current": [
+        "xml-layouts",
+        "butterknife",
+        "xml-findviewbyid"
+      ],
+      "next": [
+        "compose",
+        "viewbinding"
+      ],
+      "reachable": [
+        "compose",
+        "viewbinding",
+        "compose-multiplatform"
+      ],
+      "blocked": [
+        "compose"
+      ]
+    },
+    "presentation": {
+      "current": [
+        "mvp"
+      ],
+      "next": [
+        "mvvm-livedata",
+        "mvvm-viewmodel"
+      ],
+      "reachable": [
+        "mvvm-livedata",
+        "mvvm-viewmodel",
+        "mvvm-clean",
+        "udf-stateflow",
+        "circuit-decompose"
+      ],
+      "blocked": [
+        "udf-stateflow"
+      ]
+    },
+    "async": {
+      "current": [
+        "asynctask-loader",
+        "rxjava2"
+      ],
+      "next": [
+        "coroutines-flow",
+        "rxjava3"
+      ],
+      "reachable": [
+        "coroutines-flow",
+        "rxjava3"
+      ],
+      "blocked": [
+        "coroutines-flow"
+      ]
+    },
+    "di": {
+      "current": [
+        "dagger2"
+      ],
+      "next": [
+        "dagger-android",
+        "hilt"
+      ],
+      "reachable": [
+        "dagger-android",
+        "hilt"
+      ],
+      "blocked": []
+    },
+    "networking": {
+      "current": [
+        "okhttp-retrofit"
+      ],
+      "next": [
+        "ktor-client"
+      ],
+      "reachable": [
+        "ktor-client"
+      ],
+      "blocked": []
+    },
+    "serialization": {
+      "current": [
+        "gson"
+      ],
+      "next": [
+        "moshi",
+        "kotlinx-serialization"
+      ],
+      "reachable": [
+        "moshi",
+        "kotlinx-serialization"
+      ],
+      "blocked": []
+    },
+    "persistence": {
+      "current": [
+        "sqliteopenhelper"
+      ],
+      "next": [
+        "room"
+      ],
+      "reachable": [
+        "room",
+        "sqldelight"
+      ],
+      "blocked": [
+        "sqldelight"
+      ]
+    },
+    "image": {
+      "current": [
+        "glide"
+      ],
+      "next": [
+        "coil"
+      ],
+      "reachable": [
+        "coil"
+      ],
+      "blocked": []
+    },
+    "modularization": {
+      "current": [
+        "single-module"
+      ],
+      "next": [
+        "app-plus-libraries",
+        "layer-modules",
+        "feature-modules"
+      ],
+      "reachable": [
+        "app-plus-libraries",
+        "layer-modules",
+        "feature-modules",
+        "api-impl-modules",
+        "monorepo-convention"
+      ],
+      "blocked": []
+    },
+    "testing": {
+      "current": [
+        "espresso",
+        "junit4",
+        "mockito"
+      ],
+      "next": [
+        "compose-ui-test",
+        "junit5",
+        "mockk"
+      ],
+      "reachable": [
+        "compose-ui-test",
+        "junit5",
+        "mockk"
+      ],
+      "blocked": []
+    },
+    "build-performance": {
+      "current": [
+        "kapt-free"
+      ],
+      "next": [],
+      "reachable": [],
+      "blocked": []
+    }
+  },
+  "rules": [
+    {
+      "id": "single-hops-are-legal",
+      "kind": "guardrail",
+      "cases": [
+        {
+          "recs": "recs/legacy-java-mvp.valid-hops.json",
+          "expect": "pass"
+        },
+        {
+          "recs": "recs/legacy-java-mvp.presentation-only.json",
+          "expect": "pass"
+        },
+        {
+          "recs": "recs/legacy-java-mvp.jump-to-compose-mvi.json",
+          "expect": "fail",
+          "rules": [
+            "R1-hop",
+            "R2-prereq"
+          ]
+        },
+        {
+          "recs": "recs/legacy-java-mvp.unknown-entry.json",
+          "expect": "fail",
+          "rules": [
+            "R4-unknown-id",
+            "R6-anchor"
+          ]
+        },
+        {
+          "recs": "recs/legacy-java-mvp.justified-jump.json",
+          "expect": "pass"
+        },
+        {
+          "recs": "recs/legacy-java-mvp.short-justification.json",
+          "expect": "fail",
+          "rules": [
+            "R1-hop"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "no-unjustified-jump-to-compose-mvi",
+      "kind": "must-not-recommend",
+      "forbid": [
+        {
+          "dimension": "ui",
+          "to": [
+            "compose"
+          ]
+        },
+        {
+          "dimension": "presentation",
+          "to": [
+            "udf-stateflow",
+            "circuit-decompose"
+          ]
+        }
+      ],
+      "cases": [
+        {
+          "recs": "recs/legacy-java-mvp.valid-hops.json",
+          "expect": "pass"
+        },
+        {
+          "recs": "recs/legacy-java-mvp.jump-to-compose-mvi.json",
+          "expect": "violate",
+          "rules": [
+            "R1-hop",
+            "R2-prereq"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "modernise-language-first",
+      "kind": "must-recommend",
+      "require": {
+        "dimension": "language",
+        "anyOf": [
+          "java8-desugar",
+          "kotlin"
+        ]
+      },
+      "cases": [
+        {
+          "recs": "recs/legacy-java-mvp.valid-hops.json",
+          "expect": "pass"
+        },
+        {
+          "recs": "recs/legacy-java-mvp.presentation-only.json",
+          "expect": "fail"
+        }
+      ]
+    },
+    {
+      "id": "rejected-recommendation-is-not-repeated",
+      "kind": "guardrail",
+      "cases": [
+        {
+          "recs": "recs/legacy-java-mvp.valid-hops.json",
+          "expect": "fail",
+          "rules": [
+            "R7-rejected"
+          ],
+          "adr": "adr/legacy-rejected-mvvm"
+        },
+        {
+          "recs": "recs/legacy-java-mvp.valid-hops.json",
+          "expect": "pass",
+          "adr": "adr/legacy-reopened-mvvm"
+        }
+      ]
+    }
+  ]
+}

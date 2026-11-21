@@ -1,0 +1,80 @@
+{
+  "fixture": "reuse-app",
+  "profile": {
+    "catalogVersion": "2026.11.3",
+    "sdk": {
+      "minSdk": 24,
+      "targetSdk": null,
+      "compileSdk": 35
+    },
+    "size": {
+      "files": 14,
+      "sourceFiles": 7,
+      "kotlinFiles": 7,
+      "javaFiles": 0,
+      "xmlLayouts": 2,
+      "loc": 69
+    },
+    "modules": [
+      {
+        "path": ":app",
+        "projectDeps": [":core:designsystem"]
+      },
+      {
+        "path": ":core:designsystem",
+        "projectDeps": []
+      }
+    ],
+    "dimensions": {
+      "language": [
+        ["kotlin", 1]
+      ],
+      "build": [
+        ["gradle-kts", 1]
+      ],
+      "ui": [
+        ["compose", 0.6],
+        ["xml-layouts", 0.4]
+      ],
+      "modularization": [
+        ["app-plus-libraries", null]
+      ],
+      "build-performance": [
+        ["kapt-free", null]
+      ]
+    }
+  },
+  "candidates": {
+    "language": {
+      "current": ["kotlin"],
+      "next": ["kotlin-k2"],
+      "reachable": ["kotlin-k2", "kmp"],
+      "blocked": []
+    },
+    "build": {
+      "current": ["gradle-kts"],
+      "next": ["version-catalog"],
+      "reachable": ["version-catalog", "convention-plugins"],
+      "blocked": []
+    },
+    "ui": {
+      "current": ["compose", "xml-layouts"],
+      "next": ["compose-multiplatform"],
+      "reachable": ["compose-multiplatform"],
+      "blocked": []
+    },
+    "modularization": {
+      "current": ["app-plus-libraries"],
+      "next": ["layer-modules", "feature-modules"],
+      "reachable": ["layer-modules", "feature-modules", "api-impl-modules", "monorepo-convention"],
+      "blocked": []
+    },
+    "build-performance": {
+      "current": ["kapt-free"],
+      "next": [],
+      "reachable": [],
+      "blocked": []
+    }
+  },
+  "rules": []
+}

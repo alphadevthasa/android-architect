@@ -2,9 +2,25 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
-// Stable English git messages regardless of the user's locale.
+// Identity variables are the only GIT_* variables that survive: they select who commits, never what runs or where.
+const KEEP_GIT_ENV = new Set(['GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL', 'GIT_AUTHOR_DATE', 'GIT_COMMITTER_NAME', 'GIT_COMMITTER_EMAIL', 'GIT_COMMITTER_DATE']);
+
+/**
+ * Environment for a git child: process.env without every GIT_* variable except the author/committer identity ones
+ * (GIT_DIR, GIT_WORK_TREE, GIT_INDEX_FILE, GIT_CONFIG_*, GIT_EXTERNAL_DIFF, GIT_SSH*, GIT_ASKPASS, GIT_PROXY_COMMAND,
+ * GIT_EXEC_PATH and friends redirect git or make it run programs), with stable English messages.
+ */
+export function cleanGitEnv(extra = {}) {
+  const env = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (k.toUpperCase().startsWith('GIT_') && !KEEP_GIT_ENV.has(k)) continue;
+    env[k] = v;
+  }
+  return { ...env, LC_ALL: 'C', LANGUAGE: 'C', ...extra };
+}
+
 function gitEnv() {
-  return { ...process.env, LC_ALL: 'C', LANGUAGE: 'C' };
+  return cleanGitEnv();
 }
 
 function git(root, args) {
@@ -61,11 +77,24 @@ function commonGitDir(root) {
   return out ? path.resolve(root, out) : null;
 }
 
-/** Append missing lines to <commonGitDir>/info/exclude (works in linked worktrees). Idempotent. */
-export function addToExclude(root, patterns) {
-  const dir = commonGitDir(root);
+/**
+ * Append missing lines to <commonGitDir>/info/exclude (works in linked worktrees). Idempotent.
+ * `commonDir` (absolute) lets a caller that has its own hardened git wrapper supply the git dir.
+ */
+export function addToExclude(root, patterns, { commonDir } = {}) {
+  const dir = commonDir ?? commonGitDir(root);
   if (!dir) throw new Error('--local needs a git repository');
+  if (patterns.some((p) => /[\r\n]/.test(p))) throw new Error('an exclude pattern must be one line');
   const file = path.join(dir, 'info', 'exclude');
+  for (const p of [path.dirname(file), file]) {
+    let st = null;
+    try {
+      st = fs.lstatSync(p);
+    } catch {
+      st = null;
+    }
+    if (st !== null && st.isSymbolicLink()) throw new Error('.git/info/exclude must not be a symlink');
+  }
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const existing = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
   const have = new Set(existing.split(/\r?\n/));

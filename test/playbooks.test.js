@@ -267,15 +267,15 @@ test('CLI: hostile file names in evidence cannot break out of a Markdown table r
   assert.doesNotMatch(md, /[\u202e\u2028]/);
 });
 
-test('the shipped playbooks folder is vendored into .ai/tools and covered by the tool hashes', () => {
+test('the shipped playbooks folder is not vendored into .ai/tools and is not in the tool hashes', () => {
   const root = path.join(tmp, 'p');
   fs.cpSync(LEGACY, root, { recursive: true });
-  writeAiDir(root, { now: new Date('2026-11-20T00:00:00Z'), toolVersion: '0.4.0', skillDir: SKILL, catalogDir: CATALOG_DIR });
-  assert.ok(fs.existsSync(path.join(root, '.ai/tools/catalog/playbooks')));
-  assert.ok(fs.existsSync(path.join(root, '.ai/tools/catalog/playbooks/README.md')));
+  writeAiDir(root, { now: new Date('2026-11-20T00:00:00Z'), toolVersion: '0.5.0', skillDir: SKILL, catalogDir: CATALOG_DIR });
+  assert.ok(!fs.existsSync(path.join(root, '.ai/tools/catalog/playbooks')));
   const hashes = expectedToolHashes(SKILL, CATALOG_DIR);
-  assert.ok('catalog/playbooks/README.md' in hashes);
-  assert.ok('catalog/playbooks/_example-seam.md' in hashes);
+  assert.deepEqual(Object.keys(hashes).filter((k) => k.includes('playbooks/')), []);
   assert.ok('scripts/playbook.js' in hashes);
-  assert.ok(execFileSync(process.execPath, [path.join(root, '.ai/tools/scripts/playbook.js'), 'list'], { encoding: 'utf8' }).includes('Migration playbooks'));
+  const r = spawnSync(process.execPath, [path.join(root, '.ai/tools/scripts/playbook.js'), 'list'], { encoding: 'utf8' });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /not vendored/);
 });

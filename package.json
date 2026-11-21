@@ -1,6 +1,6 @@
 {
   "name": "android-architect",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Android architecture advisor skill for Claude Code and Codex",
   "license": "MIT",
   "repository": {
@@ -23,6 +23,7 @@
     "node": ">=20"
   },
   "scripts": {
-    "test": "node --test --import ./test/helpers/no-network.mjs "
+    "test": "node --test --import ./test/helpers/no-network.mjs test/*.test.js test/eval/*.test.js",
+    "eval": "node --test --import ./test/helpers/no-network.mjs test/eval/eval.test.js"
   }
 }

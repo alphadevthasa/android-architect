@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "agent": {
+    "kind": "claude",
+    "command": [
+      "claude"
+    ],
+    "requireArgs": [],
+    "passEnv": []
+  },
+  "budgets": {
+    "maxIterations": 10,
+    "maxTotalTokens": 400000,
+    "maxTurnsPerStep": 20,
+    "maxWallClockMinutes": 120
+  },
+  "verification": {
+    "commands": [
+      [
+        "./gradlew",
+        "assembleDebug",
+        "testDebugUnitTest",
+        "lint"
+      ]
+    ],
+    "timeoutSeconds": 1800
+  },
+  "branchPrefix": "android-architect/run",
+  "protectedBranches": []
+}

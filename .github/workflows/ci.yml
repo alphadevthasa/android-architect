@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    name: test (node ${{ matrix.node }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            node: 20
+          - os: ubuntu-latest
+            node: 22
+          - os: macos-latest
+            node: 22
+    steps:
+      # UNVERIFIED pin: replace with the full commit SHA of this tag before the first release (release blocker)
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      # UNVERIFIED pin: replace with the full commit SHA of this tag before the first release (release blocker)
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      # npm test also runs the eval suite and the package policy (pack list, size budget).
+      - name: Tests
+        run: npm test

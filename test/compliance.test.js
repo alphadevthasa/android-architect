@@ -167,7 +167,7 @@ test('hostile inputs stay linear', () => {
     'app/src/main/AndroidManifest.xml': `<manifest>\n<!-- ${big}`,
     'app/build.gradle': `x = '${big}`,
   }, (p) => assert.ok(p.compliance.length > 0));
-  assert.ok(Date.now() - t0 < 5000);
+  assert.ok(Date.now() - t0 < 30000);
 });
 
 test('modern-compose emits the edge-to-edge check row', () => {

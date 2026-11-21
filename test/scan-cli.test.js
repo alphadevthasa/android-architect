@@ -57,7 +57,7 @@ test('bad arguments exit 1 with usage', () => {
 test('standalone project with an unreadable manifest: plain actionable error, --no-overrides still works', async () => {
   const { execFileSync, spawnSync } = await import('node:child_process');
   const cases = [
-    ['corrupt JSON', (ai) => fs.writeFileSync(path.join(ai, 'manifest.json'), '{ nope'), /invalid manifest \.ai\/manifest\.json/],
+    ['corrupt JSON', (ai) => fs.writeFileSync(path.join(ai, 'manifest.json'), '{ nope'), /^cannot read \.ai\/manifest\.json: it is not valid JSON; fix or delete \.ai\/manifest\.json by hand, or restore it from git\n?$/],
     ['newer schema', (ai) => fs.writeFileSync(path.join(ai, 'manifest.json'), '{"schemaVersion":99}'), /newer than supported.*use a newer android-architect/],
     ['a directory instead of a file', (ai) => fs.mkdirSync(path.join(ai, 'manifest.json')), /cannot read \.ai\/manifest\.json: /],
   ];
@@ -73,7 +73,7 @@ test('standalone project with an unreadable manifest: plain actionable error, --
       assert.equal(r.status, 1, name);
       assert.match(r.stderr, /^cannot read \.ai\/manifest\.json: /, name);
       assert.match(r.stderr, reason, name);
-      assert.match(r.stderr, /--no-overrides/, name);
+      assert.doesNotMatch(r.stderr, /--no-overrides|refresh|init/, name); // one piece of advice
       assert.doesNotMatch(r.stderr, /Invalid catalog/, name);
       assert.equal(r.stderr.includes(dir), false, `${name}: no absolute path`);
       assert.equal(run('--no-overrides').status, 0, name);
