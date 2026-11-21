@@ -38,6 +38,9 @@ function project(plan = CHAIN, { config = null, gradle = true, branch = 'feature
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'aa-runcli-')));
   tmps.push(root);
   g(root, 'init', '-q', '-b', 'main');
+  // A CI runner has no global git identity, and the runner under test commits with the repo's own.
+  g(root, 'config', 'user.name', 't');
+  g(root, 'config', 'user.email', 't@example.invalid');
   fs.mkdirSync(path.join(root, '.ai/migration'), { recursive: true });
   fs.writeFileSync(path.join(root, '.ai/migration/plan.json'), JSON.stringify(plan));
   fs.writeFileSync(path.join(root, '.ai/migration/roadmap.md'), renderRoadmap(plan));

@@ -85,6 +85,9 @@ function makeRepo({ steps, config = baseConfig(), script = EDITS, branch = 'feat
     fs.writeFileSync(path.join(root, name), text, { mode: 0o755 });
   }
   g(root, 'init', '-q', '-b', 'main');
+  // A CI runner has no global git identity, and the runner under test commits with the repo's own.
+  g(root, 'config', 'user.name', 't');
+  g(root, 'config', 'user.email', 't@example.invalid');
   g(root, 'add', '-A');
   g(root, 'commit', '-q', '-m', 'init');
   if (branch) g(root, 'switch', '-q', '-c', branch);
