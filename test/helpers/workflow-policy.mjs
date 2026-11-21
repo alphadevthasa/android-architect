@@ -1,229 +1,270 @@
-// Minimal line-based workflow checker (no YAML dependency). Test-only helper, never shipped.
-// It understands the plain block style used by this repository's workflows; anything it cannot
-// find is reported as a violation, so an unusual layout fails closed.
+// Strict workflow checker (no YAML dependency). Test-only helper, never shipped.
+// It parses only the small block-style YAML subset this repository's workflows use and FAILS
+// CLOSED: flow collections, anchors, aliases, merge keys, quoted keys, tabs, CRLF, extra
+// documents, unknown keys and unknown expressions are all violations. For the release
+// workflow, run commands must equal the exact allowlisted scripts below.
 export const ALLOWED_ACTIONS = ['actions/checkout', 'actions/setup-node'];
 
-const indentOf = (l) => l.length - l.trimStart().length;
-const skippable = (l) => /^\s*(#.*)?$/.test(l);
-const stripComment = (s) => s.replace(/\s+#.*$/, '').trim();
-const unq = (s) => s.replace(/^['"]|['"]$/g, '');
+export const TAG_GUARD = `set -euo pipefail
+if [ "$GITHUB_REF_TYPE" != "tag" ]; then
+  echo "refusing: not a tag ref (a branch dispatch cannot publish)" >&2
+  exit 1
+fi
+if ! [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\\.[0-9]+\\.[0-9]+$ ]]; then
+  echo "refusing: tag is not vX.Y.Z" >&2
+  exit 1
+fi
+version="$(node -p "require('./package.json').version")"
+if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+  echo "refusing: tag does not match package.json version" >&2
+  exit 1
+fi
+if [ "$(git rev-parse HEAD)" != "$GITHUB_SHA" ]; then
+  echo "refusing: checked out commit is not the tagged commit" >&2
+  exit 1
+fi`;
+export const MAIN_GUARD = `set -euo pipefail
+git merge-base --is-ancestor HEAD origin/main`;
+export const POLICY_CMD = 'RELEASE_REQUIRE_PINNED=1 node --test --import ./test/helpers/no-network.mjs test/release-policy.test.js';
+export const PUBLISH_CMD = 'npm publish --provenance --access public --ignore-scripts';
+const RELEASE_RUNS = new Map([[TAG_GUARD, 'tag-guard'], [MAIN_GUARD, 'main-guard'], ['npm test', 'npm-test'], [POLICY_CMD, 'policy'], [PUBLISH_CMD, 'publish']]);
+const CI_RUNS = new Map([['npm test', 'npm-test']]);
 
-function topBlocks(lines) {
-  const blocks = new Map();
-  const dupes = [];
-  let cur = null;
-  for (const l of lines) {
-    if (skippable(l)) { if (cur) cur.lines.push(l); continue; }
-    const m = indentOf(l) === 0 && /^(['"]?)([A-Za-z_][\w-]*)\1\s*:(.*)$/.exec(l);
-    if (m) {
-      if (blocks.has(m[2])) dupes.push(m[2]);
-      cur = { inline: stripComment(m[3]), lines: [] };
-      blocks.set(m[2], cur);
-    } else if (cur) cur.lines.push(l);
-  }
-  return { blocks, dupes };
-}
+const EXPR_OK = {
+  ci: new Set(['github.workflow', 'github.ref', "github.event_name == 'pull_request'", 'matrix.os', 'matrix.node']),
+  release: new Set(['secrets.NPM_TOKEN']),
+};
 
-function childKeys(lines) {
-  const real = lines.filter((l) => !skippable(l));
-  if (!real.length) return [];
-  const ind = Math.min(...real.map(indentOf));
-  return real.filter((l) => indentOf(l) === ind).map((l) => stripComment(l));
-}
+class ParseError extends Error {}
+const bad = (n, why) => { throw new ParseError(`line ${n + 1}: ${why}`); };
 
-function splitJobs(jobsBlock) {
-  const real = jobsBlock.lines.filter((l) => !skippable(l));
-  if (!real.length) return [];
-  const ind = Math.min(...real.map(indentOf));
-  const jobs = [];
-  let cur = null;
-  for (const l of jobsBlock.lines) {
-    if (!skippable(l) && indentOf(l) === ind && /^[\w-]+:\s*$/.test(l.trim())) {
-      cur = { name: l.trim().slice(0, -1), lines: [] };
-      jobs.push(cur);
-    } else if (cur) cur.lines.push(l);
-  }
-  for (const j of jobs) analyzeJob(j);
-  return jobs;
-}
+function parseYaml(text) {
+  if (text.includes('\r')) throw new ParseError('carriage return');
+  if (text.includes('\t')) throw new ParseError('tab character');
+  const L = text.split('\n').map((raw, n) => ({ n, raw, ind: raw.length - raw.trimStart().length, t: raw.trim() }));
+  let idx = 0;
+  const skippable = (e) => e.t === '' || e.t.startsWith('#');
+  const peek = () => { while (idx < L.length && skippable(L[idx])) idx++; return idx < L.length ? L[idx] : null; };
+  const stripComment = (v) => (v.startsWith('#') ? '' : v.replace(/\s+#.*$/, '').trim());
+  const scalarOk = (e, v) => { if (/^[{[&*!|>%@`]/.test(v) || v.startsWith('<<')) bad(e.n, `unsupported value "${v.slice(0, 20)}"`); };
 
-function analyzeJob(job) {
-  const real = job.lines.filter((l) => !skippable(l));
-  const keyInd = real.length ? Math.min(...real.map(indentOf)) : 0;
-  job.keyInd = keyInd;
-  const own = [];
-  const stepsLines = [];
-  let inSteps = false;
-  for (const l of job.lines) {
-    if (!skippable(l) && indentOf(l) <= keyInd) {
-      inSteps = /^steps:\s*$/.test(l.trim()) && indentOf(l) === keyInd;
-      own.push(l);
-    } else if (inSteps) stepsLines.push(l);
-    else own.push(l);
-  }
-  job.own = own;
-  job.raw = job.lines.join('\n');
-  const top = (key) => job.lines.find((l) => !skippable(l) && indentOf(l) === keyInd && new RegExp(`^${key}:`).test(l.trim()));
-  job.top = top;
-  const permIdx = job.lines.findIndex((l) => !skippable(l) && indentOf(l) === keyInd && /^permissions:/.test(l.trim()));
-  if (permIdx >= 0) {
-    const inline = stripComment(job.lines[permIdx].trim().slice('permissions:'.length));
-    const kids = [];
-    for (let i = permIdx + 1; i < job.lines.length; i++) {
-      const l = job.lines[i];
-      if (skippable(l)) continue;
-      if (indentOf(l) <= keyInd) break;
-      kids.push(stripComment(l));
+  function parseMap(ind) {
+    const pairs = [];
+    for (;;) {
+      const e = peek();
+      if (!e || e.ind < ind) break;
+      if (e.ind > ind) bad(e.n, 'unexpected indentation');
+      const m = /^([A-Za-z_][\w-]*):(?: +(.*))?$/.exec(e.t);
+      if (!m) bad(e.n, 'unsupported syntax (quoted key, flow, list or stray text)');
+      if (pairs.some((p) => p.key === m[1])) bad(e.n, `duplicate key ${m[1]}`);
+      idx++;
+      const val = m[2] === undefined ? '' : stripComment(m[2]);
+      let node;
+      if (val === '') {
+        const nx = peek();
+        if (nx && nx.ind > ind) node = nx.t === '-' || nx.t.startsWith('- ') ? parseList(nx.ind) : parseMap(nx.ind);
+        else node = { kind: 'null' };
+      } else if (val === '|' || val === '|-') {
+        const body = [];
+        while (idx < L.length && (L[idx].t === '' || L[idx].ind > ind)) body.push(L[idx++]);
+        while (body.length && body[body.length - 1].t === '') body.pop();
+        const min = Math.min(...body.filter((b) => b.t !== '').map((b) => b.ind), Infinity);
+        node = { kind: 'block', v: body.map((b) => b.raw.slice(Math.min(min, b.raw.length))).join('\n') };
+      } else if (val === '{}') node = { kind: 'empty' };
+      else {
+        scalarOk(e, val);
+        node = { kind: 'scalar', v: val };
+        const nx = peek();
+        if (nx && nx.ind > ind) bad(nx.n, 'multi-line scalar');
+      }
+      pairs.push({ key: m[1], node, n: e.n });
     }
-    job.permissions = { inline, entries: kids.sort() };
+    return { kind: 'map', pairs };
   }
-  const real2 = stepsLines.filter((l) => !skippable(l));
-  const steps = [];
-  if (real2.length) {
-    const sInd = Math.min(...real2.map(indentOf));
-    let cur = null;
-    for (const l of stepsLines) {
-      if (!skippable(l) && indentOf(l) === sInd && l.trimStart().startsWith('- ')) { cur = { lines: [] }; steps.push(cur); }
-      if (cur) cur.lines.push(l);
-    }
-    for (const s of steps) {
-      const norm = s.lines.map((l, i) => (i === 0 ? l.replace('- ', '  ') : l));
-      s.raw = s.lines.join('\n');
-      s.keyInd = sInd + 2;
-      s.norm = norm;
-      const at = (k) => norm.findIndex((l) => !skippable(l) && indentOf(l) === s.keyInd && new RegExp(`^${k}:`).test(l.trim()));
-      s.has = (k) => at(k) >= 0;
-      const u = at('uses');
-      s.uses = u >= 0 ? unq(stripComment(norm[u].trim().slice(5))) : null;
-      s.usesLine = u >= 0 ? norm[u] : null;
-      const r = at('run');
-      s.run = null;
-      if (r >= 0) {
-        const body = [norm[r].trim().slice(4)];
-        for (let i = r + 1; i < norm.length; i++) {
-          if (!skippable(norm[i]) && indentOf(norm[i]) <= s.keyInd) break;
-          body.push(norm[i]);
-        }
-        s.run = body.join('\n');
+
+  function parseList(ind) {
+    const items = [];
+    for (;;) {
+      const e = peek();
+      if (!e || e.ind < ind) break;
+      if (e.ind > ind) bad(e.n, 'unexpected indentation');
+      if (!(e.t === '-' || e.t.startsWith('- '))) bad(e.n, 'expected a list item');
+      const rest = e.t.slice(1).trimStart();
+      if (rest === '') bad(e.n, 'nested list item');
+      if (/^[A-Za-z_][\w-]*:(?: |$)/.test(rest)) {
+        const itemInd = ind + (e.t.length - rest.length);
+        L[idx] = { ...e, ind: itemInd, t: rest, raw: ' '.repeat(itemInd) + rest };
+        items.push(parseMap(itemInd));
+      } else {
+        const v = stripComment(rest);
+        scalarOk(e, v.replace(/^(['"])(.*)\1$/, '$2').length ? v : '');
+        if (/^[{[&*]/.test(v)) bad(e.n, 'unsupported list item');
+        idx++;
+        items.push({ kind: 'scalar', v });
       }
     }
+    return { kind: 'list', items };
   }
-  job.steps = steps;
+
+  const first = peek();
+  if (!first) throw new ParseError('empty file');
+  if (first.ind !== 0) bad(first.n, 'top level must start at column 0');
+  const root = parseMap(0);
+  const rest = peek();
+  if (rest) bad(rest.n, 'unparsed content');
+  return root;
 }
 
-function triggersOf(on) {
-  if (!on) return null;
-  if (on.inline) return on.inline.replace(/[[\]{}]/g, ' ').split(/[\s,]+/).filter(Boolean).map(unq);
-  return childKeys(on.lines).map((l) => unq(l.split(':')[0].trim()));
-}
+const get = (m, k) => (m?.kind === 'map' ? m.pairs.find((p) => p.key === k)?.node : undefined);
+const keys = (m) => (m?.kind === 'map' ? m.pairs.map((p) => p.key) : []);
+const val = (n) => (n && (n.kind === 'scalar' || n.kind === 'block') ? n.v : undefined);
+const unq = (s) => (typeof s === 'string' ? s.replace(/^(['"])(.*)\1$/, '$2') : s);
+const same = (a, b) => JSON.stringify([...a].sort()) === JSON.stringify([...b].sort());
+const permEntries = (n) => (n?.kind === 'map' ? n.pairs.map((p) => `${p.key}: ${unq(val(p.node))}`) : null);
 
 export function checkWorkflow(text, kind) {
   const v = [];
   const unpinned = [];
-  const lines = text.split('\n');
-  const { blocks, dupes } = topBlocks(lines);
-  if (dupes.length) v.push('duplicate-top-level-key');
-  if (/pull_request_target/.test(text)) v.push('pull_request_target');
-  if (/self-hosted/.test(text)) v.push('self-hosted-runner');
-  if (/continue-on-error/.test(text)) v.push('continue-on-error');
-  if (/\bsecrets\.(?!NPM_TOKEN\b)/.test(text)) v.push('unexpected-secret');
-  const on = blocks.get('on') ?? blocks.get('true');
-  const triggers = triggersOf(on);
-  if (!triggers) v.push('no-triggers');
-  const jobsBlock = blocks.get('jobs');
-  const jobs = jobsBlock ? splitJobs(jobsBlock) : [];
-  if (!jobs.length) v.push('no-jobs');
-  const topPerm = blocks.get('permissions');
-  const topEntries = topPerm ? childKeys(topPerm.lines).sort() : [];
+  const add = (c) => v.push(c);
+  const release = kind === 'release';
 
-  const allSteps = [];
-  for (const j of jobs) {
-    if (!j.top('timeout-minutes')) v.push(`job-timeout:${j.name}`);
-    if (!j.steps.length) v.push(`job-no-steps:${j.name}`);
-    if (!j.permissions) v.push(`job-permissions-missing:${j.name}`);
-    for (const s of j.steps) {
-      allSteps.push({ job: j, s });
-      if (s.uses) {
-        const [name, ref = ''] = s.uses.split('@');
-        if (!ALLOWED_ACTIONS.includes(name)) v.push(`disallowed-action:${s.uses}`);
-        else if (!/^[0-9a-f]{40}$/.test(ref)) unpinned.push(s.uses);
-        if (name === 'actions/checkout' && !/persist-credentials:\s*false\b/.test(s.raw)) v.push('checkout-persist-credentials');
-      }
-      if (s.run !== null) {
-        if (/\$\{\{/.test(s.run)) v.push(`run-interpolation:${j.name}`);
-        if (/\b(curl|wget)\b/.test(s.run)) v.push('run-network-download');
-        if (/\bnpx\b/.test(s.run) || /\bnpm\s+(install|i|ci|add|exec)\b/.test(s.run)) v.push('run-installs-code');
-        if (/\|\s*(ba|z)?sh\b/.test(s.run)) v.push('run-pipe-to-shell');
-      }
-    }
-  }
-  if (/\buses:\s*(\.|docker:)/.test(text)) v.push('disallowed-action:local-or-docker');
-
-  if (kind === 'ci') {
-    const t = new Set(triggers ?? []);
-    if (t.size !== 2 || !t.has('push') || !t.has('pull_request')) v.push('ci-triggers');
-    if (!on || !/branches:[\s\S]*\bmain\b/.test(on.lines.join('\n'))) v.push('ci-push-branch-main');
-    if (JSON.stringify(topEntries) !== JSON.stringify(['contents: read'])) v.push('ci-top-permissions');
-    if (/:\s*write\b/.test(text) || /id-token/.test(text)) v.push('ci-write-permission');
-    if (/\bsecrets\./.test(text)) v.push('ci-secrets');
-    if (!blocks.has('concurrency') || !/cancel-in-progress:/.test(blocks.get('concurrency').lines.join('\n'))) v.push('ci-concurrency');
-    for (const { job } of allSteps.map((x) => ({ job: x.job }))) if (job.top('environment')) v.push('ci-environment');
-    const runs = allSteps.map((x) => x.s.run ?? '').join('\n');
-    if (!/\bnpm test\b/.test(runs)) v.push('ci-npm-test');
-    if (!/\bnpm run eval\b/.test(runs)) v.push('ci-npm-eval');
-    if (!/npm pack --dry-run --json/.test(runs)) v.push('ci-pack-step');
-    for (const j of jobs) for (const s of j.steps) if (s.has('env') && /secrets/.test(s.raw)) v.push('ci-secrets');
+  // Raw text checks (comments included on purpose).
+  if (/pull_request_target/.test(text)) add('pull_request_target');
+  if (/self-hosted|self_hosted/.test(text)) add('self-hosted-runner');
+  if (/continue-on-error/.test(text)) add('continue-on-error');
+  if (/NODE_OPTIONS/.test(text)) add('node-options');
+  if (/github\.token|GITHUB_TOKEN|toJSON|fromJSON/.test(text)) add('token-or-json-expression');
+  const exprs = [...text.matchAll(/\$\{\{([\s\S]*?)\}\}/g)].map((m) => m[1].trim());
+  if ((text.match(/\$\{\{/g) ?? []).length !== exprs.length) add('unterminated-expression');
+  for (const e of exprs) if (!EXPR_OK[kind].has(e)) add('unexpected-expression');
+  const count = (re) => (text.match(re) ?? []).length;
+  if (release) {
+    if (count(/\bsecrets\b/g) !== 1 || count(/secrets\.NPM_TOKEN\b/g) !== 1) add('release-secret-count');
+    if (count(/NODE_AUTH_TOKEN/g) !== 1) add('release-token-count');
+    if (count(/id-token/g) !== 1) add('release-id-token-scope');
+  } else {
+    if (/\bsecrets\b/.test(text)) add('ci-secrets');
+    if (/id-token|NODE_AUTH_TOKEN/.test(text)) add('ci-write-permission');
+    if (/:\s*write\b/.test(text)) add('ci-write-permission');
   }
 
-  if (kind === 'release') {
-    const t = new Set(triggers ?? []);
-    if (t.size !== 2 || !t.has('push') || !t.has('workflow_dispatch')) v.push('release-triggers');
-    const pushText = on ? on.lines.join('\n') : '';
-    if (!/\btags:\s*\n\s*-\s*['"]?v\*['"]?\s*(#.*)?(\n|$)/.test(pushText) || /\bbranches\b/.test(pushText)) v.push('release-push-tags-only');
-    if (!topPerm || topPerm.inline !== '{}' || topEntries.length) v.push('release-top-permissions');
-    if (/id-token/.test(topPerm ? topPerm.lines.join('\n') : '')) v.push('release-top-permissions');
-    const publishers = allSteps.filter((x) => x.s.run !== null && /\bnpm\s+publish\b/.test(x.s.run));
-    if (publishers.length !== 1) v.push('release-publish-count');
-    const pubJob = publishers[0]?.job;
-    const idTokens = (text.match(/id-token:\s*write/g) ?? []).length;
-    if (idTokens !== 1 || (pubJob && !/id-token:\s*write/.test(pubJob.raw))) v.push('release-id-token-scope');
-    for (const j of jobs) if (j !== pubJob && /id-token/.test(j.raw)) v.push('release-id-token-scope');
-    if (pubJob) {
-      const p = pubJob.permissions;
-      if (!p || p.inline !== '' || JSON.stringify(p.entries) !== JSON.stringify(['contents: read', 'id-token: write'])) v.push('release-job-permissions');
-      const envLine = pubJob.top('environment');
-      if (!envLine || stripComment(envLine.trim().slice(12)) !== 'release') v.push('release-environment');
-      const runsOn = pubJob.top('runs-on');
-      if (!runsOn || !/^runs-on:\s*ubuntu-latest\s*(#.*)?$/.test(runsOn.trim())) v.push('release-runner');
-      const last = pubJob.steps[pubJob.steps.length - 1];
-      if (last !== publishers[0].s) v.push('release-publish-not-last');
-      const pubStep = publishers[0].s;
-      if (!/--provenance\b/.test(pubStep.run) || !/--access\s+public\b/.test(pubStep.run)) v.push('release-provenance');
-      if (!/NODE_AUTH_TOKEN:\s*\$\{\{\s*secrets\.NPM_TOKEN\s*\}\}/.test(pubStep.raw)) v.push('release-token-on-publish-step');
-      const names = pubJob.steps.map((s) => s.raw);
-      const idx = (re) => pubJob.steps.findIndex((s) => s.run !== null && re.test(s.run));
-      const pi = pubJob.steps.indexOf(pubStep);
-      const before = (re, code) => { const i = idx(re); if (i < 0 || i > pi) v.push(code); };
-      before(/GITHUB_REF_TYPE/, 'release-verify-tag-ref');
-      before(/package\.json/, 'release-verify-version');
-      before(/merge-base --is-ancestor/, 'release-verify-main');
-      before(/\bnpm test\b/, 'release-npm-test');
-      before(/\bnpm run eval\b/, 'release-npm-eval');
-      before(/release-policy\.test\.js/, 'release-policy-step');
-      const tagStep = pubJob.steps[idx(/GITHUB_REF_TYPE/)];
-      if (tagStep && !/GITHUB_REF_TYPE"?\s*!=\s*"?tag/.test(tagStep.run)) v.push('release-verify-tag-ref');
-      const policyStep = pubJob.steps[idx(/release-policy\.test\.js/)];
-      if (policyStep && !/RELEASE_REQUIRE_PINNED:\s*['"]?1['"]?/.test(policyStep.raw)) v.push('release-policy-requires-pins');
-      const checkout = pubJob.steps.find((s) => s.uses && s.uses.startsWith('actions/checkout@'));
-      if (!checkout || !/fetch-depth:\s*0\b/.test(checkout.raw)) v.push('release-checkout-fetch-depth');
-      const node = pubJob.steps.find((s) => s.uses && s.uses.startsWith('actions/setup-node@'));
-      if (!node || !/registry-url:\s*https:\/\/registry\.npmjs\.org\/?\s*$/m.test(node.raw) || !/node-version:\s*['"]?\d+\.\d+\.\d+/.test(node.raw)) v.push('release-setup-node');
-      if (pubJob.steps.some((s) => s.has('if'))) v.push('release-conditional-step');
-      void names;
+  let root;
+  try { root = parseYaml(text); } catch (e) { add(`yaml-unsupported: ${e.message}`); return { violations: [...new Set(v)], unpinned }; }
+
+  for (const k of keys(root)) if (!['name', 'on', 'permissions', 'concurrency', 'jobs'].includes(k)) add(`top-key:${k}`);
+
+  // Triggers
+  const on = get(root, 'on');
+  const trig = keys(on);
+  const push = get(on, 'push');
+  if (release) {
+    if (!same(trig, ['workflow_dispatch', 'push']) || get(on, 'workflow_dispatch')?.kind !== 'null') add('release-triggers');
+    const tagsOnly = same(keys(push), ['tags']) && get(push, 'tags')?.kind === 'list' && get(push, 'tags').items.length === 1 && unq(val(get(push, 'tags').items[0])) === 'v*';
+    if (!tagsOnly) add('release-push-tags-only');
+  } else {
+    if (!same(trig, ['push', 'pull_request']) || get(on, 'pull_request')?.kind !== 'null') add('ci-triggers');
+    const br = get(push, 'branches');
+    if (!(same(keys(push), ['branches']) && br?.kind === 'list' && br.items.length === 1 && unq(val(br.items[0])) === 'main')) add('ci-push-branch-main');
+  }
+
+  // Top-level permissions
+  const tp = get(root, 'permissions');
+  if (release) { if (tp?.kind !== 'empty') add('release-top-permissions'); }
+  else if (!same(permEntries(tp) ?? ['x'], ['contents: read'])) add('ci-top-permissions');
+
+  // Concurrency
+  const cc = get(root, 'concurrency');
+  const cancel = unq(val(get(cc, 'cancel-in-progress')));
+  if (!same(keys(cc), ['group', 'cancel-in-progress'])) add(release ? 'release-concurrency' : 'ci-concurrency');
+  else if (release && (unq(val(get(cc, 'group'))) !== 'release' || cancel !== 'false')) add('release-concurrency');
+
+  // Jobs
+  const jobs = get(root, 'jobs');
+  const jobNames = keys(jobs);
+  if (!jobNames.length) add('no-jobs');
+  if (release && !same(jobNames, ['verify', 'publish'])) add('release-jobs');
+  if (!release && !same(jobNames, ['test'])) add('ci-jobs');
+  const JOB_KEYS = release ? ['runs-on', 'timeout-minutes', 'permissions', 'environment', 'needs', 'steps'] : ['name', 'runs-on', 'timeout-minutes', 'permissions', 'strategy', 'steps'];
+  for (const jn of jobNames) {
+    const job = get(jobs, jn);
+    for (const k of keys(job)) if (!JOB_KEYS.includes(k)) add(`job-key:${jn}.${k}`);
+    const to = Number(unq(val(get(job, 'timeout-minutes'))));
+    if (!Number.isInteger(to) || to < 1 || to > 30) add(`job-timeout:${jn}`);
+    const perms = permEntries(get(job, 'permissions'));
+    const wantPerms = release && jn === 'publish' ? ['contents: read', 'id-token: write'] : ['contents: read'];
+    if (!perms || !same(perms, wantPerms)) add(release ? `release-job-permissions:${jn}` : 'ci-top-permissions');
+    const runsOn = unq(val(get(job, 'runs-on')));
+    if (release ? runsOn !== 'ubuntu-latest' : runsOn !== '${{ matrix.os }}') add(release ? 'release-runner' : 'ci-runner');
+    if (release) {
+      const env = get(job, 'environment');
+      if (jn === 'publish' ? unq(val(env)) !== 'release' : env) add('release-environment');
+      const needs = get(job, 'needs');
+      if (jn === 'publish' ? unq(val(needs)) !== 'verify' : needs) add('release-needs');
+    } else {
+      const st = get(job, 'strategy');
+      const mx = get(st, 'matrix');
+      const inc = get(mx, 'include');
+      const okStrat = same(keys(st).filter((k) => k !== 'fail-fast'), ['matrix']) && same(keys(mx), ['include']) && inc?.kind === 'list' &&
+        inc.items.length > 0 && inc.items.every((i) => same(keys(i), ['os', 'node']) && ['ubuntu-latest', 'macos-latest'].includes(unq(val(get(i, 'os')))) && /^\d+$/.test(unq(val(get(i, 'node')))));
+      if (!okStrat) add('ci-strategy');
     }
-    if ((text.match(/NODE_AUTH_TOKEN/g) ?? []).length !== 1) v.push('release-token-count');
-    if ((text.match(/secrets\./g) ?? []).length !== 1) v.push('release-secret-count');
-    if (/^\s*if:/m.test(text.split('\njobs:')[1] ?? '') ) v.push('release-conditional-step');
+
+    const steps = get(job, 'steps');
+    if (steps?.kind !== 'list' || !steps.items.length) { add(`job-no-steps:${jn}`); continue; }
+    const labels = [];
+    for (const s of steps.items) {
+      if (s.kind !== 'map') { add('step-not-map'); continue; }
+      for (const k of keys(s)) if (!['name', 'uses', 'with', 'run', 'shell', 'env'].includes(k)) add(`step-key:${k}`);
+      const uses = get(s, 'uses');
+      const run = get(s, 'run');
+      if (!!uses === !!run) add('step-needs-exactly-one-of-uses-run');
+      if (get(s, 'shell') && (!run || unq(val(get(s, 'shell'))) !== 'bash')) add('step-shell');
+      const env = get(s, 'env');
+      if (env) {
+        const okEnv = release && jn === 'publish' && same(keys(env), ['NODE_AUTH_TOKEN']) && val(get(env, 'NODE_AUTH_TOKEN')) === '${{ secrets.NPM_TOKEN }}' &&
+          run && val(run) === PUBLISH_CMD;
+        if (!okEnv) add('step-env');
+      }
+      if (uses) {
+        const [name, ref = ''] = unq(val(uses)).split('@');
+        const w = get(s, 'with');
+        if (!ALLOWED_ACTIONS.includes(name)) { add(`disallowed-action:${unq(val(uses))}`); labels.push('bad-action'); continue; }
+        if (!/^[\w.-]+$/.test(ref)) add('action-ref-format');
+        else if (!/^[0-9a-f]{40}$/.test(ref)) unpinned.push(`${name}@${ref}`);
+        labels.push(name);
+        const wk = keys(w);
+        if (name === 'actions/checkout') {
+          if (unq(val(get(w, 'persist-credentials'))) !== 'false') add('checkout-persist-credentials');
+          if (!wk.every((k) => (release ? ['persist-credentials', 'fetch-depth'] : ['persist-credentials']).includes(k))) add('with-key:checkout');
+          if (release && unq(val(get(w, 'fetch-depth'))) !== '0') add('release-checkout-fetch-depth');
+        } else {
+          if (!wk.every((k) => ['node-version', 'registry-url'].includes(k))) add('with-key:setup-node');
+          const nv = unq(val(get(w, 'node-version')));
+          if (release ? !/^\d+\.\d+\.\d+$/.test(nv ?? '') : nv !== '${{ matrix.node }}') add('release-setup-node');
+          const ru = unq(val(get(w, 'registry-url')));
+          if (release && (jn === 'publish' ? ru !== 'https://registry.npmjs.org' : ru !== undefined)) add('release-setup-node');
+          if (!release && ru !== undefined) add('release-setup-node');
+        }
+      } else if (run) {
+        const body = (val(run) ?? '').replace(/\s+$/, '');
+        const lab = (release ? RELEASE_RUNS : CI_RUNS).get(body);
+        if (!lab) { add(`run-not-allowed:${jn}`); labels.push('bad-run'); } else labels.push(lab);
+        if (/\$\{\{/.test(body)) add(`run-interpolation:${jn}`);
+      }
+    }
+    const co = 'actions/checkout';
+    const sn = 'actions/setup-node';
+    let want;
+    if (!release) want = [co, sn, 'npm-test'];
+    else if (jn === 'verify') want = [co, sn, 'tag-guard', 'main-guard', 'npm-test', 'policy'];
+    else want = [co, sn, 'tag-guard', 'main-guard', 'publish'];
+    if (JSON.stringify(labels) !== JSON.stringify(want)) add(release ? `release-steps:${jn}` : 'ci-steps');
+    if (release && jn === 'publish' && labels[labels.length - 1] !== 'publish') add('release-publish-not-last');
   }
   return { violations: [...new Set(v)], unpinned };
+}
+
+// Golden comparison of release.yml: only the pin comments and the action tag/SHA refs are ignored.
+export function normalizeForGolden(text) {
+  return text.split('\n').filter((l) => !/^\s*# UNVERIFIED pin:/.test(l)).join('\n').replace(/\b(actions\/(?:checkout|setup-node))@[\w.-]+/g, '$1@<ref>');
 }

@@ -39,16 +39,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
-      - name: Unit tests
+      # npm test also runs the eval suite and the package policy (pack list, size budget).
+      - name: Tests
         run: npm test
-      - name: Eval suite
-        run: npm run eval
-      - name: Pack policy
-        run: |
-          npm pack --dry-run --json --ignore-scripts | node -e '
-            const p = JSON.parse(require("fs").readFileSync(0, "utf8"))[0];
-            const ok = (f) => /^(bin|skill)\//.test(f) || ["package.json", "README.md", "LICENSE", "CHANGELOG.md"].includes(f);
-            const bad = p.files.map((f) => f.path).filter((f) => !ok(f));
-            if (bad.length) { console.error("unexpected files in package:", bad.join(", ")); process.exit(1); }
-            console.log("pack ok:", p.files.length, "files,", p.size, "bytes");
-          '

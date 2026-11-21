@@ -2,6 +2,8 @@ name: Release
 
 # Publishes to npm with provenance. Runs only for version tags (vX.Y.Z), either pushed
 # or dispatched manually from a tag ref. Never triggered by pull requests.
+# Job `verify` has no environment, no credentials and no token-minting permission. Job `publish` runs only after
+# it, in the protected `release` environment, and does nothing but guard and publish.
 on:
   workflow_dispatch:
   push:
@@ -10,8 +12,60 @@ on:
 
 permissions: {}
 
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      # UNVERIFIED pin: replace with the full commit SHA of this tag before the first release (release blocker)
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      # UNVERIFIED pin: replace with the full commit SHA of this tag before the first release (release blocker)
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.11.0
+      - name: Verify the ref is a version tag that matches package.json
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_REF_TYPE" != "tag" ]; then
+            echo "refusing: not a tag ref (a branch dispatch cannot publish)" >&2
+            exit 1
+          fi
+          if ! [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "refusing: tag is not vX.Y.Z" >&2
+            exit 1
+          fi
+          version="$(node -p "require('./package.json').version")"
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "refusing: tag does not match package.json version" >&2
+            exit 1
+          fi
+          if [ "$(git rev-parse HEAD)" != "$GITHUB_SHA" ]; then
+            echo "refusing: checked out commit is not the tagged commit" >&2
+            exit 1
+          fi
+      - name: Verify the tagged commit is on main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor HEAD origin/main
+      # npm test also runs the eval suite and the package policy (pack list, size budget).
+      - name: Tests
+        run: npm test
+      - name: Release policy with SHA pins required
+        run: RELEASE_REQUIRE_PINNED=1 node --test --import ./test/helpers/no-network.mjs test/release-policy.test.js
+
   publish:
+    needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: release
@@ -55,15 +109,7 @@ jobs:
         run: |
           set -euo pipefail
           git merge-base --is-ancestor HEAD origin/main
-      - name: Unit tests
-        run: npm test
-      - name: Eval suite
-        run: npm run eval
-      - name: Release policy (pack list, workflow policy, SHA pins required)
-        env:
-          RELEASE_REQUIRE_PINNED: '1'
-        run: node --test --import ./test/helpers/no-network.mjs test/release-policy.test.js
       - name: Publish to npm with provenance
-        run: npm publish --provenance --access public
+        run: npm publish --provenance --access public --ignore-scripts
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

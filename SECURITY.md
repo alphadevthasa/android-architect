@@ -18,9 +18,9 @@ Pin the version you run (`npx android-architect@<version>`) and upgrade delibera
 ## Threat model in brief
 
 - **The tool reads untrusted repositories.** Project files (code, Gradle files, docs, `.ai/` content, catalog overrides, agent output) are treated as data, never as instructions. Secret-like values and secret files are skipped or redacted before anything is written or printed. Parsers are strict and linear-time, and paths are kept inside the project.
-- **It sends nothing anywhere.** The package has no telemetry, makes no network requests at runtime and has no dependencies. It runs no install scripts.
-- **It writes only under `.ai/`**, plus the agent pointer files created by `init`, `.git/info/exclude` with `--local`, and an explicit `--out` path outside the project for reports. Vendored scripts in `.ai/tools` are checked against a manifest of hashes.
-- **Supply chain.** Releases are published from GitHub Actions with npm provenance, through a protected `release` environment. The package ships only `bin/` and `skill/` plus package metadata.
+- **The tool's own code makes no network requests** and collects no telemetry. It has no dependencies and runs no install scripts. Two exceptions come from what you plug in, not from this package: `run` launches the agent CLI you configure, which sends repository content to its model provider, and your Gradle build downloads dependencies when verification commands run.
+- **Writes.** `init`, `refresh` and the other scripts write under `.ai/`, plus the agent pointer files created by `init`, `.git/info/exclude` with `--local`, and an explicit `--out` path outside the project for reports. `run` additionally creates git branches and commits and edits the project files the agent changes. Vendored scripts in `.ai/tools` are checked against a manifest of hashes.
+- **Supply chain.** Releases will be published from GitHub Actions with npm provenance, through a protected `release` environment. This pipeline has not been run yet: no release has been published through it, and its action pins are unverified (see CONTRIBUTING.md). The package ships only `bin/` and `skill/` plus package metadata. The release workflow policy is enforced by tests that live in the same commit as the workflow, so the real control is branch protection with required code-owner review on `.github/`, `test/helpers/`, `package.json` and the policy test (see `.github/CODEOWNERS`). A change that edits both the workflow and its policy needs that review.
 
 ### The `run` command has honest limits
 

@@ -9,19 +9,19 @@ npm run eval    # only the eval suite
 
 ## Add a dimension entry
 
-Entries live in `skill/catalog/dimensions/<dimension>.json`. Add an object to `entries` with `id`, `name`, `era`, `status` (`current`, `legacy` or `deprecated`), `since`, `successors` (ids in the same catalog, a direct step only), `detect` signals (Gradle coordinates, imports, file globs) and, where relevant, `prerequisites` and `vulnerableVersions`. Mark anything written from memory with `verified: false` or the dimension-level `dataNote`. Then bump the catalog version (see below), update goldens if detection changed, and run `npm test`.
+Entries live in `skill/catalog/dimensions/<dimension>.json`. Add an object to `entries` with `id`, `name`, `era`, `status` (`current`, `legacy` or `deprecated`), `since`, `successors` (ids in the same catalog, a direct step only), `detect` signals (Gradle coordinates, imports, file globs) and, where relevant, `prerequisites` and `vulnerableVersions`. `successors` must be entries of the same dimension. There is no entry-level `verified` flag: unverified data is marked at dimension level with `verified: false` and `dataNote` (see `compliance.json`). Playbooks carry `verified: false` in their front matter. Then bump the catalog version (see below), update goldens if detection changed, and run `npm test`.
 
 ## Add a playbook
 
 Playbooks are `skill/catalog/playbooks/<from>--to--<to>.md`, with `from` and `to` entries of the same dimension and `to` reachable through `successors`. Read `skill/catalog/playbooks/README.md` and copy `_example-seam.md`: strict front matter, the fixed headings in order, and a Security checklist of at least two items.
 
-**Safe-ordering rule for irreversible playbooks (on-device data moves):** back up first, keep a single writer, copy behind a write gate, verify, and only then delete the old store. The old store is never deleted before verification, and the playbook is tagged `irreversible`. Playbooks start as `verified: false`. Add a fixture test in `test/playbooks.test.js`.
+**Safe-ordering rule for irreversible playbooks (on-device data moves):** back up first, keep a single writer, copy behind a write gate, verify, and only then delete the old store. The old store is never deleted before verification, and the playbook is tagged `irreversible`. Playbooks start as `verified: false`. Add a fixture test in `test/playbooks.test.js`, and check `test/playbook-content.test.js`: it has per-id expectation tables and batch lists a new playbook may need to join.
 
 ## Change catalog data
 
-- `skill/catalog/catalog.json` `catalogVersion` is `YYYY.MM.N`. Bump `N` for any data change in the same month and the year-month when the month changes, and update `asOf`.
+- `skill/catalog/catalog.json` `catalogVersion` is `YYYY.MM.N` by convention (not enforced by code): bump `N` for any data change in the same month, reset `N` when the month changes, and update `asOf`.
 - After a bump, re-record goldens (`node dev/record-eval.mjs <name> --force`, then `node dev/record-eval.mjs --update-recs`) and review the whole diff.
-- Version numbers, policy dates, CVE ranges and default agent flags written from memory stay `verified: false` until someone checks them against the primary source and records the source link. Never mark data verified without that check.
+- Version numbers, policy dates, CVE ranges and default agent flags written from memory stay `verified: false` until someone checks them against the primary source and records the source link. Never mark data verified without that check (dimension-level `verified`, or `verified:` in playbook front matter).
 - Add a CHANGELOG line under the unreleased heading for every data change.
 
 ## Run the eval suite
@@ -30,18 +30,26 @@ Playbooks are `skill/catalog/playbooks/<from>--to--<to>.md`, with `from` and `to
 
 ## CI and policy tests
 
-`.github/workflows/ci.yml` runs the tests on Node 20 and 22 with read-only permissions. `test/release-policy.test.js` checks the package contents and size budget, and parses both workflows (permissions, triggers, token scope, provenance, pinned actions). Change a workflow and the policy together, and keep its negative tests green.
+`.github/workflows/ci.yml` runs `npm test` (which includes the eval suite and the package policy) on Node 20 and 22 on Linux and one macOS job, with read-only permissions. `test/release-policy.test.js` checks the package contents and size budget, and parses both workflows (permissions, triggers, token scope, provenance, pinned actions). Change a workflow and the policy together, and keep its negative tests green.
 
 ## Cut a release
 
 Releases are published only by `.github/workflows/release.yml`, from a version tag, with npm provenance.
 
-1. Update `version` in `package.json` and the `CHANGELOG.md` heading together; merge to `main` through a reviewed pull request.
-2. Run `npm test` and `npm run eval` locally.
-3. Tag the merged commit `vX.Y.Z` (equal to `package.json` version) and push the tag. The workflow refuses a tag that does not match, a tag whose commit is not on `origin/main`, and any run that is not a tag ref (a manual dispatch from a branch cannot publish).
-4. The job waits on the protected **`release`** environment: configure it with required reviewers (and restrict deployments to `v*` tags). A reviewer approves the run.
-5. `NPM_TOKEN` is stored only as a secret of the `release` environment. Use an npm automation token scoped to this package, on an account with 2FA enforced for publishing. Provenance needs the GitHub-hosted runner and `id-token: write`, both only in the publish job.
+1. Update `version` in `package.json` and the `CHANGELOG.md` heading together; merge to `main` through a reviewed pull request. Only plain `X.Y.Z` versions are released: pre-release tags such as `1.2.3-rc` are refused by design.
+2. Run `npm test` locally (it includes the eval suite and the package and workflow policy).
+3. Tag the merged commit `vX.Y.Z` (equal to `package.json` version) and push the tag. Both jobs refuse a tag that does not match, a commit that is not an ancestor of `origin/main` (note: any historical `main` commit passes this check, so tag only the commit you reviewed), and any run that is not a tag ref (a manual dispatch from a branch cannot publish).
+4. The `verify` job (read-only token, no environment, no secrets) runs the tests. Only then does `publish` start, and it waits on the protected **`release`** environment, where a reviewer approves it. `publish` repeats the guards, then runs only `npm publish --provenance --access public --ignore-scripts`.
+5. **Create the `release` environment before the first tag**, with required reviewers and a deployment rule that allows only `v*` tags. If it does not exist, GitHub creates an unprotected one on first use. Store `NPM_TOKEN` only as a secret of that environment. Use a granular npm token limited to this package with publish rights (not an automation token: automation tokens bypass 2FA), on an account with 2FA enabled. Alternatively use npm trusted publishing (OIDC), which needs no stored token; then remove `NPM_TOKEN` and update the workflow and policy together. Provenance needs the GitHub-hosted runner and `id-token: write`, granted only to the `publish` job.
 6. Check the result with `npm view android-architect` and the provenance badge on the npm page.
+
+### Editing the workflows
+
+The policy lives in the same commit as the workflow, so a pull request can change both. Treat `.github/`, `test/helpers/`, `test/release-policy.test.js` and `package.json` as sensitive: protect `main` with required pull request review and **Require review from Code Owners** (`.github/CODEOWNERS`). `test/helpers/release.golden.yml` is a golden copy of `release.yml` (pin comments and action refs ignored); any change to the release workflow needs a deliberate golden update, shown in review (the command is in `test/release-policy.test.js`).
+
+### First CI run on macOS
+
+The CI matrix includes macOS, and tests that use temp directories can fail there on the first run because `/var` is a symlink to `/private/var` (compare real paths). Expect to fix such failures when the pipeline first runs; they are test issues, not product bugs.
 
 ### Before the first publish
 

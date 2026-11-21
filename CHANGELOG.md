@@ -4,7 +4,7 @@
 
 ### CI and release
 
-- `.github/workflows/ci.yml` (push to `main` and pull requests, read-only token, no secrets, Node 20 and 22 on Linux plus macOS, `npm test`, `npm run eval`, pack check) and `.github/workflows/release.yml` (version tags and manual dispatch from a tag only, protected `release` environment, `id-token: write` only on the publish job, tag and `package.json` version and `origin/main` ancestry verified, `npm publish --provenance`). `SECURITY.md` and `CONTRIBUTING.md` added; `test/release-policy.test.js` enforces the package contents, a size budget and the workflow policy (with negative tests). **The GitHub Action references are tags, not commit SHAs, and are unverified: replacing them with verified SHAs is a release blocker listed in CONTRIBUTING.md.**
+- `.github/workflows/ci.yml` (push to `main` and pull requests, read-only token, no secrets, Node 20 and 22 on Linux plus macOS, `npm test`, which includes the eval suite and the package policy) and `.github/workflows/release.yml` (version tags and manual dispatch from a tag only; a read-only `verify` job, then a `publish` job in the protected `release` environment with `id-token: write` only there; tag, `package.json` version and `origin/main` ancestry checked in both; `npm publish --provenance --ignore-scripts`). `.github/CODEOWNERS` covers the policy-bearing paths. `SECURITY.md` and `CONTRIBUTING.md` added; `test/release-policy.test.js` enforces the package contents, a size budget and the workflow policy (with negative tests). **The GitHub Action references are tags, not commit SHAs, and are unverified: replacing them with verified SHAs is a release blocker listed in CONTRIBUTING.md.**
 
 ### Run loop
 

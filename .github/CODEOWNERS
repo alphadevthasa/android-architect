@@ -1,0 +1,8 @@
+# Policy-bearing paths need review by the repository owner. Pair this with branch protection
+# on main ("Require review from Code Owners"): the workflow policy lives in the tagged commit,
+# so protecting these paths is the real control.
+/.github/ @alphadevthasa
+/test/helpers/ @alphadevthasa
+/test/release-policy.test.js @alphadevthasa
+/package.json @alphadevthasa
+/SECURITY.md @alphadevthasa
