@@ -110,6 +110,6 @@ jobs:
           set -euo pipefail
           git merge-base --is-ancestor HEAD origin/main
       - name: Publish to npm with provenance
-        run: npm publish --provenance --access public --ignore-scripts
+        run: npm publish --provenance --access public --registry https://registry.npmjs.org --ignore-scripts
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

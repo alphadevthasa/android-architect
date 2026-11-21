@@ -6,3 +6,5 @@
 /test/release-policy.test.js @alphadevthasa
 /package.json @alphadevthasa
 /SECURITY.md @alphadevthasa
+/.npmrc @alphadevthasa
+/package-lock.json @alphadevthasa

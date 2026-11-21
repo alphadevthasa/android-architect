@@ -45,7 +45,7 @@ Releases are published only by `.github/workflows/release.yml`, from a version t
 
 ### Editing the workflows
 
-The policy lives in the same commit as the workflow, so a pull request can change both. Treat `.github/`, `test/helpers/`, `test/release-policy.test.js` and `package.json` as sensitive: protect `main` with required pull request review and **Require review from Code Owners** (`.github/CODEOWNERS`). `test/helpers/release.golden.yml` is a golden copy of `release.yml` (pin comments and action refs ignored); any change to the release workflow needs a deliberate golden update, shown in review (the command is in `test/release-policy.test.js`).
+The policy lives in the same commit as the workflow, so a pull request can change both. Nothing in the repository may redirect `npm publish`: the publish command pins `--registry https://registry.npmjs.org`, and the policy test fails on any `.npmrc` (root, `bin/`, `skill/`) or a `publishConfig` that sets another registry. Treat `.github/`, `.npmrc`, `test/helpers/`, `test/release-policy.test.js` and `package.json` as sensitive: protect `main` with required pull request review and **Require review from Code Owners** (`.github/CODEOWNERS`). `test/helpers/release.golden.yml` is a golden copy of `release.yml` (pin comments and action refs ignored); any change to the release workflow needs a deliberate golden update, shown in review (the command is in `test/release-policy.test.js`).
 
 ### First CI run on macOS
 
@@ -59,7 +59,7 @@ Run `npm view android-architect` and confirm the name is free (or yours). If it 
 
 The release workflow runs the policy test with `RELEASE_REQUIRE_PINNED=1`, so it fails until the first item is done.
 
-- [ ] **Replace tag pins by verified SHAs.** `actions/checkout@v4` and `actions/setup-node@v4` in both workflows are tag references marked `UNVERIFIED pin`. The SHAs were not known when the workflows were written. Resolve each tag to its full 40-character commit SHA from the action's own repository, replace the references (keep the version in a trailing comment), and confirm `RELEASE_REQUIRE_PINNED=1 node --test test/release-policy.test.js` passes.
+- [ ] **Replace tag pins by verified SHAs.** `actions/checkout@v4` and `actions/setup-node@v4` in both workflows are tag references marked `UNVERIFIED pin`. The SHAs were not known when the workflows were written. Resolve each tag to its full 40-character commit SHA from the action's own repository, replace each reference with `actions/<name>@<40-hex sha> # v4.1.0` (the trailing comment must have exactly the form `# vN.N.N`; the golden test ignores only that), delete the `# UNVERIFIED pin:` comment lines above them, and confirm `RELEASE_REQUIRE_PINNED=1 node --test test/release-policy.test.js` passes.
 - [ ] `release` environment, required reviewers and `NPM_TOKEN` secret configured; GitHub private vulnerability reporting enabled; branch protection on `main`.
 - [ ] `npm view android-architect` name check done.
 - [ ] Maintainer data audit below completed.

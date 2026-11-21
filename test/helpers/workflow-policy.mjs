@@ -26,7 +26,7 @@ fi`;
 export const MAIN_GUARD = `set -euo pipefail
 git merge-base --is-ancestor HEAD origin/main`;
 export const POLICY_CMD = 'RELEASE_REQUIRE_PINNED=1 node --test --import ./test/helpers/no-network.mjs test/release-policy.test.js';
-export const PUBLISH_CMD = 'npm publish --provenance --access public --ignore-scripts';
+export const PUBLISH_CMD = 'npm publish --provenance --access public --registry https://registry.npmjs.org --ignore-scripts';
 const RELEASE_RUNS = new Map([[TAG_GUARD, 'tag-guard'], [MAIN_GUARD, 'main-guard'], ['npm test', 'npm-test'], [POLICY_CMD, 'policy'], [PUBLISH_CMD, 'publish']]);
 const CI_RUNS = new Map([['npm test', 'npm-test']]);
 
@@ -229,8 +229,9 @@ export function checkWorkflow(text, kind) {
         const [name, ref = ''] = unq(val(uses)).split('@');
         const w = get(s, 'with');
         if (!ALLOWED_ACTIONS.includes(name)) { add(`disallowed-action:${unq(val(uses))}`); labels.push('bad-action'); continue; }
-        if (!/^[\w.-]+$/.test(ref)) add('action-ref-format');
-        else if (!/^[0-9a-f]{40}$/.test(ref)) unpinned.push(`${name}@${ref}`);
+        if (/^[0-9a-f]{40}$/.test(ref)) { /* pinned by full commit SHA */ }
+        else if (/^v\d+(\.\d+)*$/.test(ref)) unpinned.push(`${name}@${ref}`);
+        else add('action-ref-format');
         labels.push(name);
         const wk = keys(w);
         if (name === 'actions/checkout') {
@@ -264,7 +265,23 @@ export function checkWorkflow(text, kind) {
   return { violations: [...new Set(v)], unpinned };
 }
 
-// Golden comparison of release.yml: only the pin comments and the action tag/SHA refs are ignored.
+// Golden comparison of release.yml: only the pin comments and VALID action refs (a version tag
+// vN[.N...] or a 40-hex SHA, with an optional trailing "# vN.N.N" comment) are ignored.
 export function normalizeForGolden(text) {
-  return text.split('\n').filter((l) => !/^\s*# UNVERIFIED pin:/.test(l)).join('\n').replace(/\b(actions\/(?:checkout|setup-node))@[\w.-]+/g, '$1@<ref>');
+  return text.split('\n').filter((l) => !/^\s*# UNVERIFIED pin:/.test(l)).join('\n')
+    .replace(/^(\s*(?:- )?uses: actions\/(?:checkout|setup-node))@(?:v\d+(?:\.\d+)*|[0-9a-f]{40})(?: +# v\d+(?:\.\d+)*)?$/gm, '$1@<ref>');
+}
+
+// Package-level publish guards: nothing in the repository may redirect `npm publish` (and with it
+// the registry token) to another host, and the shipped file list must not change silently.
+export function checkPackagePolicy(pkg, npmrcPaths) {
+  const v = [];
+  if (npmrcPaths.length) v.push('npmrc-present');
+  const pc = pkg.publishConfig;
+  if (pc !== undefined) {
+    const okKeys = Object.keys(pc).every((k) => (k === 'access' && pc[k] === 'public') || (k === 'registry' && pc[k] === 'https://registry.npmjs.org/') || (k === 'provenance' && pc[k] === true));
+    if (!okKeys) v.push('publishconfig');
+  }
+  if (JSON.stringify(pkg.files) !== JSON.stringify(['bin', 'skill'])) v.push('files');
+  return v;
 }

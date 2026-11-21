@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { checkWorkflow, normalizeForGolden, ALLOWED_ACTIONS } from './helpers/workflow-policy.mjs';
+import { checkWorkflow, checkPackagePolicy, normalizeForGolden, ALLOWED_ACTIONS } from './helpers/workflow-policy.mjs';
 
 const root = new URL('..', import.meta.url);
 const read = (p) => readFileSync(new URL(p, root), 'utf8');
@@ -74,9 +74,49 @@ test('golden: a harmless-looking edit (comment trick, changed step name) still f
     assert.notEqual(normalizeForGolden(bad), read('test/helpers/release.golden.yml'));
 });
 
+test('an invalid action ref also breaks the golden', () => {
+  assert.notEqual(normalizeForGolden(release().replace('actions/checkout@v4', 'actions/checkout@evil-branch')), read('test/helpers/release.golden.yml'));
+});
+
+test('SHA pin with a trailing version comment (the documented pinning flow) matches the golden and the checker', () => {
+  const sha = (c) => c.repeat(40);
+  let t = release().split('\n').filter((l) => !/# UNVERIFIED pin:/.test(l)).join('\n');
+  t = t.replaceAll('actions/checkout@v4', `actions/checkout@${sha('a')} # v4.1.0`).replaceAll('actions/setup-node@v4', `actions/setup-node@${sha('b')} # v4.0.2`);
+  assert.equal(normalizeForGolden(t), read('test/helpers/release.golden.yml'));
+  const r = checkWorkflow(t, 'release');
+  assert.deepEqual(r.violations, []);
+  assert.deepEqual(r.unpinned, []);
+});
+
+function npmrcFiles() {
+  const found = [];
+  const walk = (dir, rel) => {
+    for (const e of readdirSync(new URL(dir, root), { withFileTypes: true })) {
+      if (e.name === '.npmrc') found.push(rel + e.name);
+      if (e.isDirectory()) walk(`${dir}${e.name}/`, `${rel}${e.name}/`);
+    }
+  };
+  for (const d of ['bin/', 'skill/']) walk(d, d);
+  if (existsSync(new URL('.npmrc', root))) found.push('.npmrc');
+  return found;
+}
+test('no .npmrc and no publish redirection in the repository or package.json', () => {
+  assert.deepEqual(npmrcFiles(), []);
+  assert.deepEqual(checkPackagePolicy(pkg, npmrcFiles()), []);
+});
+test('negative: package policy reports .npmrc, publishConfig redirection and a changed files list', () => {
+  assert.deepEqual(checkPackagePolicy(pkg, ['.npmrc']), ['npmrc-present']);
+  assert.deepEqual(checkPackagePolicy(pkg, ['skill/.npmrc']), ['npmrc-present']);
+  assert.deepEqual(checkPackagePolicy({ ...pkg, publishConfig: { registry: 'https://evil.example/' } }, []), ['publishconfig']);
+  assert.deepEqual(checkPackagePolicy({ ...pkg, publishConfig: { registry: 'https://registry.npmjs.org/', tag: 'x' } }, []), ['publishconfig']);
+  assert.deepEqual(checkPackagePolicy({ ...pkg, publishConfig: { access: 'public' } }, []), []);
+  assert.deepEqual(checkPackagePolicy({ ...pkg, publishConfig: { registry: 'https://registry.npmjs.org/' } }, []), []);
+  assert.deepEqual(checkPackagePolicy({ ...pkg, files: ['bin', 'skill', 'dev'] }, []), ['files']);
+});
+
 test('CODEOWNERS covers the policy-bearing paths', () => {
   const c = read('.github/CODEOWNERS');
-  for (const p of ['/.github/', '/test/helpers/', '/package.json', '/test/release-policy.test.js']) assert.ok(c.includes(p), p);
+  for (const p of ['/.github/', '/test/helpers/', '/package.json', '/test/release-policy.test.js', '/SECURITY.md', '/.npmrc']) assert.ok(c.includes(p), p);
   assert.ok(c.includes('@alphadevthasa'));
 });
 
@@ -95,6 +135,19 @@ const mutations = [
   ['release', 'top-level write perms', R('permissions: {}', 'permissions:\n  contents: write'), 'release-top-permissions'],
   ['release', 'no provenance', RA('--provenance ', ''), 'run-not-allowed:publish'],
   ['release', 'publish without ignore-scripts', R(' --ignore-scripts', ''), 'run-not-allowed:publish'],
+  ['release', 'publish without pinned registry', R(' --registry https://registry.npmjs.org', ''), 'run-not-allowed:publish'],
+  ['release', 'publish to another registry', R('--registry https://registry.npmjs.org', '--registry https://evil.example'), 'run-not-allowed:publish'],
+  ['release', 'branch ref action', R('actions/checkout@v4', 'actions/checkout@evil-branch'), 'action-ref-format'],
+  ['release', 'main ref action', R('actions/setup-node@v4', 'actions/setup-node@main'), 'action-ref-format'],
+  ['release', 'v4-evil ref', R('actions/checkout@v4', 'actions/checkout@v4-evil'), 'action-ref-format'],
+  ['release', 'V4 ref', R('actions/checkout@v4', 'actions/checkout@V4'), 'action-ref-format'],
+  ['release', 'v4. ref', R('actions/checkout@v4', 'actions/checkout@v4.'), 'action-ref-format'],
+  ['release', 'bare 4 ref', R('actions/checkout@v4', 'actions/checkout@4'), 'action-ref-format'],
+  ['release', '39-hex ref', R('actions/checkout@v4', `actions/checkout@${'a'.repeat(39)}`), 'action-ref-format'],
+  ['release', '41-hex ref', R('actions/checkout@v4', `actions/checkout@${'a'.repeat(41)}`), 'action-ref-format'],
+  ['release', 'uppercase-hex ref', R('actions/checkout@v4', `actions/checkout@${'A'.repeat(40)}`), 'action-ref-format'],
+  ['ci', 'branch ref action', R('actions/checkout@v4', 'actions/checkout@evil-branch'), 'action-ref-format'],
+  ['ci', 'main ref action', R('actions/setup-node@v4', 'actions/setup-node@main'), 'action-ref-format'],
   ['release', 'no environment', R('    environment: release\n', ''), 'release-environment'],
   ['release', 'other environment', R('environment: release', 'environment: staging'), 'release-environment'],
   ['release', 'environment on verify', R('  verify:\n    runs-on: ubuntu-latest\n', '  verify:\n    environment: release\n    runs-on: ubuntu-latest\n'), 'release-environment'],
