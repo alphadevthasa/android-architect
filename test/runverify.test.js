@@ -174,7 +174,7 @@ test('a backgrounded grandchild is gone after a NORMAL exit (whole group killed)
   const root = project();
   const pidFile = path.join(root, 'bg.pid');
   const bg = script(root, 'bg.js', `require('fs').writeFileSync(${JSON.stringify(pidFile)},String(process.pid));setInterval(()=>{},1000)`);
-  const parent = script(root, 'p.js', `require('child_process').spawn(process.execPath,[${JSON.stringify(bg)}],{stdio:'ignore'}).unref();setTimeout(()=>{},400)`);
+  const parent = script(root, 'p.js', `require('child_process').spawn(process.execPath,[${JSON.stringify(bg)}],{stdio:'ignore'}).unref();const t=setInterval(()=>{if(require('fs').existsSync(${JSON.stringify(pidFile)})){clearInterval(t);setTimeout(()=>process.exit(0),100)}},50);setTimeout(()=>process.exit(0),20000)`);
   const r = await runVerification(root, cfg(node(parent)), { timeoutMs: 20000 });
   assert.equal(r.ok, true);
   for (let i = 0; i < 200 && !fs.existsSync(pidFile); i++) await new Promise((r) => setTimeout(r, 50));
