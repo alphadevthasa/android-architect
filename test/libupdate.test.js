@@ -215,11 +215,11 @@ test('loadVersions rejects malformed data with file-prefixed errors', () => {
   bad({ ...VERSIONS, extra: 1 }, /unknown key/);
 });
 
-test('the shipped versions.json is valid, marked unverified and vendored', () => {
+test('the shipped versions.json is valid, registry-verified and vendored', () => {
   const v = loadVersions();
-  assert.equal(v.verified, false);
-  assert.match(v.dataNote, /audit/);
-  assert.equal(v.asOf, '2026-11-20');
+  assert.equal(v.verified, true);
+  assert.match(v.dataNote, /Maven/);
+  assert.equal(v.asOf, '2026-11-21');
   assert.ok(v.libraries.length >= 25 && v.libraries.length <= 40);
   assert.ok('catalog/versions.json' in expectedToolHashes(SKILL, CATALOG_DIR));
   assert.ok('scripts/lib-update.js' in expectedToolHashes(SKILL, CATALOG_DIR));
@@ -265,5 +265,6 @@ test('CLI: json and md output, scope, exit codes, --out', () => {
 test('CLI: the shipped versions.json runs through the vendored default', () => {
   const r = spawnSync(process.execPath, ['--import', HELPER, CLI, path.resolve('test/fixtures/legacy-java-mvp'), '--format', 'md'], { encoding: 'utf8' });
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /unverified/i);
+  assert.ok(r.stdout.length > 0);
+  assert.doesNotMatch(r.stdout, /versions\.json is unverified/);
 });

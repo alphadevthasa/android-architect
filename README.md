@@ -115,7 +115,7 @@ After `recommend`, these commands turn the path into work. All scripts are offli
 
 `--out` of `scan.js`, `features.js`, `lib-update.js` and `migration-plan.js` must point outside the project and never follows symlinks or hard links.
 
-**Unverified data.** Playbooks (`verified: false`), library versions (`catalog/versions.json`, `verified: false`, marked `verify` when older than 90 days) and the compliance dates and links in the catalog were written from memory and have not been audited. Check the official documentation before relying on them.
+**Unverified data.** Playbooks (`verified: false`), and the compliance dates and links in the catalog were written from memory and have not been fully audited. Library versions (`catalog/versions.json`) were resolved from the Maven registries on their `asOf` date and are marked `verify` when older than 90 days. Check the official documentation before relying on them.
 
 ### Autonomous runs
 
