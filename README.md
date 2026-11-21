@@ -9,7 +9,7 @@ Requires Node 20 or newer. No dependencies.
 Pin the version you install:
 
 ```
-npx android-architect@0.5.0 install
+npx android-architect@0.5.1 install
 ```
 
 By default the skill is installed into the harnesses that already exist in your home directory (`~/.claude`, `~/.codex`). Flags:
@@ -22,7 +22,7 @@ By default the skill is installed into the harnesses that already exist in your 
 Other commands: `update` (see below), `init`, `refresh`, `uninstall`, `version`, and `doctor`, which reports which harnesses have the skill installed, with its version and catalog version, and flags a partial or foreign directory. `doctor --root <dir>` also checks that project's `.ai/`: it prints `tools: ok`, `tools: modified (<n> files)` or `tools: unverifiable (<reason>)`, verifying `.ai/tools` against the installed skill.
 
 ```
-npx android-architect@0.5.0 doctor
+npx android-architect@0.5.1 doctor
 ```
 
 ## Keep project knowledge: init, refresh, update
@@ -80,7 +80,7 @@ We recommend a CODEOWNERS entry for `.ai/workflows/` and `.ai/tools/` so changes
 
 ### update
 
-`update` reinstalls the skill into the harnesses that already have it (`~/.claude`, `~/.codex`), never creating a new one, and prints `claude: 0.2.0 (catalog 2026.11.1) -> 0.5.0 (catalog 2026.11.3)` per harness. Then run `refresh` in each project to re-assess it against the new catalog. With nothing installed it exits 1.
+`update` reinstalls the skill into the harnesses that already have it (`~/.claude`, `~/.codex`), never creating a new one, and prints `claude: 0.2.0 (catalog 2026.11.1) -> 0.5.1 (catalog 2026.11.3)` per harness. Then run `refresh` in each project to re-assess it against the new catalog. With nothing installed it exits 1.
 
 ### Workspace mode
 
@@ -245,7 +245,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for adding catalog entries and playbooks,
 
 ## Status
 
-Version 0.5.0 is a v1 feature-complete candidate: the audit, recommendation, planning and `run` features exist, and the guard rails are covered by tests. It is not yet 1.0.0, and no release has been published through the release pipeline. 1.0.0 is cut after the eval suite passes and a maintainer audits the data below.
+Version 0.5.1 is a v1 feature-complete candidate: the audit, recommendation, planning and `run` features exist, and the guard rails are covered by tests. It is not yet 1.0.0, and no release has been published through the release pipeline. 1.0.0 is cut after the eval suite passes and a maintainer audits the data below.
 
 Done: M1 and M2, M3 (secret redaction, gitignore-aware indexing, tamper verification of `.ai/tools`, injection rules, vulnerable-version data, catalog overrides), M4 (feature prioritization, reuse detection, 18 migration playbooks with security checklists, security-first `lib-update`, fitness checks, compliance and build-performance advice, migration plans) and M5 (the `run` loop, the eval suite, CI and the release workflow).
 

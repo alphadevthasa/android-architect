@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.5.1] - 2026-11-21
+
+Maintenance release: refreshed library data, a data audit, and a release pipeline that no longer needs a stored token.
+
+### Changed
+
+- `catalog/versions.json`: all 35 libraries re-resolved from Google Maven and Maven Central (stable versions only) and the file is marked `"verified": true` with `asOf` 2026-11-21. Several targets are major bumps (OkHttp 5, Retrofit 3, Glide 5) that were not checked for migration breakage.
+- Two dead documentation links in the Dagger-to-Hilt and Gson-to-Moshi playbooks were replaced.
+- Releases publish through npm trusted publishing (OIDC) on Node 24; the workflow policy forbids secrets in `release.yml`. Both workflows pin their actions to full commit SHAs.
+
+### Fixed
+
+- Tests for `run` no longer depend on a global git identity; they failed on CI runners that have none.
+
+### Unverified
+
+- The playbooks' steps and checklists, the update groups and `requires` data in `versions.json`, the compliance dates other than the Play targetSdk 36 date, and the default `codex` command line are still unaudited. The default `claude` command line was confirmed against version 2.1.329.
+
 ## [0.5.0] - 2026-11-21
 
 Release candidate for 1.0.0. 1.0.0 is cut only after the eval suite passes and a maintainer audits the unverified data listed at the end of this section.

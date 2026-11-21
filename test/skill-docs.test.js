@@ -401,8 +401,8 @@ test('M4: fitness docs match what generateFitness writes with and without rules'
 const readRepo = (f) => fs.readFileSync(new URL(`../${f}`, import.meta.url), 'utf8');
 const pkgJson = () => JSON.parse(readRepo('package.json'));
 
-test('M5: package.json version is 0.5.0 and the changelog covers it', () => {
-  assert.equal(pkgJson().version, '0.5.0');
+test('M5: the 0.5.0 changelog section covers the release and package.json is on the 0.5 line', () => {
+  assert.match(pkgJson().version, /^0\.5\.\d+$/);
   const log = readRepo('CHANGELOG.md');
   assert.match(log, /^## \[0\.5\.0\] - (?:Unreleased|\d{4}-\d{2}-\d{2})$/m);
   const section = log.slice(log.indexOf('## [0.5.0]'), log.indexOf('## [0.4.0]'));
