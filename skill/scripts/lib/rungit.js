@@ -773,6 +773,7 @@ export function argvLines(label, argv) {
     const line = `${i + 1}. ${showArg(a)}`;
     if (line.length > MAX_CONSENT_LINE) throw new RunRefusal(`${label}: argument ${i + 1} is too long to show in full; shorten it in ${RUN_CONFIG_FILE} (nothing is truncated in the confirmation text)`);
     out.push(line);
+    if (/[^\x00-\x7f]/.test(String(a))) out.push(`Note: ${label}, argument ${i + 1} contains non-ASCII characters: check it is the file you expect`);
   });
   return out;
 }
@@ -789,8 +790,11 @@ export function consentLines(shown, agentArgv, statements = []) {
   L.push(...argvLines('Agent command (placeholders are filled in at run time)', agentArgv));
   shown.verification.commands.forEach((c, i) => L.push(...argvLines(`Verification command ${i + 1} of ${shown.verification.commands.length}`, c)));
   L.push(`Verification timeout: ${Number(shown.verification.timeoutSeconds)} seconds per command`);
+  let header = '';
   for (const st of statements) {
-    if (st.length > MAX_CONSENT_LINE) throw new RunRefusal('a line of the confirmation text is too long to show in full; shorten the values in .ai/run.config.json');
+    if (!/^\s*-/.test(st)) header = st;
+    if (st.length > MAX_CONSENT_LINE) throw new RunRefusal(`the "${plainText(header.split(':')[0], 80)}" section of the confirmation text is too long to show in full; shorten the values in ${RUN_CONFIG_FILE}`);
+    if (/[^\x00-\x7f]/.test(st)) L.push(`Note: the next line contains non-ASCII characters: check it is what you expect`);
     L.push(st);
   }
   L.push('Confirm only if you trust this repository and its run.config.json.');

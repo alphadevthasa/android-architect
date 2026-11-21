@@ -141,6 +141,16 @@ export const deniedEnvName = (k) => {
   const u = String(k).toUpperCase();
   return DENIED_ENV_EXACT.includes(u) || DENIED_ENV_PREFIX.some((p) => u.startsWith(p)) || DENIED_ENV_SUFFIX.some((x) => u.endsWith(x));
 };
+// agent.env (values come from a PR) may only set harmless behavior variables; anything that can carry a credential, an
+// endpoint or a path is refused even when the name also matches the allowlist. Credentials go in the user's own
+// environment through agent.passEnv.
+const ENV_REJECT_SUFFIX = ['_KEY', '_TOKEN', '_SECRET', '_PASSWORD', '_URL', '_URI', '_ENDPOINT', '_HOST', '_PROXY', '_DIR', '_HOME', '_PATH'];
+/** True for a name agent.env may set: *_MODEL, *_MAX_*, *_TIMEOUT*, TERM, NO_COLOR, CI, minus credential/endpoint/path shapes. */
+export const envBehaviorAllowed = (k) => {
+  const u = String(k).toUpperCase();
+  if (ENV_REJECT_SUFFIX.some((x) => u.endsWith(x)) || u.includes('_CONFIG')) return false;
+  return u === 'TERM' || u === 'NO_COLOR' || u === 'CI' || u.endsWith('_MODEL') || u.includes('_MAX_') || u.includes('_TIMEOUT');
+};
 export const validEnvName = (k) => {
   if (k.length === 0 || k.length > 64) return false;
   for (let i = 0; i < k.length; i++) {
@@ -244,6 +254,7 @@ export function validateRunConfig(value, root) {
           for (const k of keys.slice(0, MAX_ENV)) {
             const v = a.env[k];
             if (validEnvName(k) && deniedEnvName(k)) bad(`agent.env.${k} is not allowed (reserved: PATH, HOME, loader and option variables such as LD_*, DYLD_*, NODE_*, JAVA_*, GRADLE_*, GIT_*, SSH_*, CLAUDE_*, CODEX_*, and proxy, *_URL and *_HOST variables)`);
+            else if (validEnvName(k) && !envBehaviorAllowed(k)) bad(`agent.env.${k} is not allowed (agent.env may only set behavior variables: *_MODEL, *_MAX_*, *_TIMEOUT*, TERM, NO_COLOR, CI, never keys, tokens, URLs, hosts, directories or config; put credentials in your own environment and list the name in agent.passEnv)`);
             else if (!validEnvName(k)) bad(`agent.env key ${JSON.stringify(k.slice(0, 40))} must be A-Z, 0-9 and "_" only`);
             else if (typeof v !== 'string' || v.length > MAX_ARG || hasControl(v)) bad(`agent.env.${k} must be a printable string of at most ${MAX_ARG} characters`);
             else env[k] = v;

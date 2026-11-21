@@ -9,10 +9,10 @@ import { readManifest } from './manifest.js';
 /**
  * Scripts that are never vendored into .ai/tools: the autonomous run loop (entry script and the libraries only it uses).
  * .ai/tools is PR-controlled and unguarded, and the loop's consent gate and guards must never run from it. A test derives
- * this list from the import graph (everything reachable from run.js and from no vendored tool).
+ * this list from the import graph (everything reachable from run.js, lib/runcli.js and from no vendored tool).
  */
 export const NOT_VENDORED = Object.freeze([
-  'run.js', 'lib/runreport.js', 'lib/rungit.js', 'lib/runconfig.js', 'lib/agent.js', 'lib/runstatus.js',
+  'run.js', 'lib/runcli.js', 'lib/runreport.js', 'lib/rungit.js', 'lib/runconfig.js', 'lib/agent.js', 'lib/runstatus.js',
   'lib/runverify.js', 'lib/runloop.js', 'lib/runguard.js', 'lib/stepbrief.js',
 ]);
 

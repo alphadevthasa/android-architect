@@ -59,7 +59,7 @@ test('rejections are file-prefixed errors', () => {
   rejects(cfg({ agent: { kind: 'nope', command: ['x'] } }), /agent\.kind/);
   rejects(cfg({ agent: { kind: 'claude', command: ['claude'], env: { 'PATH ': 'x' } } }), /agent\.env key/);
   rejects(cfg({ agent: { kind: 'claude', command: ['claude'], env: { lower: 'x' } } }), /agent\.env key/);
-  rejects(cfg({ agent: { kind: 'claude', command: ['claude'], env: { A: 'x\ny' } } }), /printable/);
+  rejects(cfg({ agent: { kind: 'claude', command: ['claude'], env: { AGENT_MODEL: 'x\ny' } } }), /printable/);
   rejects(cfg({ budgets: { maxIterations: 201 } }), /above the maximum of 200/);
   rejects(cfg({ budgets: { maxTotalTokens: 20_000_001 } }), /maxTotalTokens/);
   rejects(cfg({ budgets: { maxTurnsPerStep: 201 } }), /maxTurnsPerStep/);
@@ -102,7 +102,7 @@ test('agent kinds pin the executable; denied environment names are refused', () 
   for (const k of ['PATH', 'HOME', 'LD_PRELOAD', 'LD_LIBRARY_PATH', 'DYLD_INSERT_LIBRARIES', 'NODE_OPTIONS', 'GIT_SSH_COMMAND', 'GIT_DIR', 'HTTP_PROXY', 'ALL_PROXY', 'SSH_AUTH_SOCK']) {
     rejects(cfg({ agent: { kind: 'claude', command: ['claude'], env: { [k]: 'x' } } }), /not allowed|reserved/);
   }
-  assert.deepEqual(loadRunConfig(withConfig(cfg({ agent: { kind: 'claude', command: ['claude'], env: { MY_FLAG: '1' } } }))).agent.env, { MY_FLAG: '1' });
+  assert.deepEqual(loadRunConfig(withConfig(cfg({ agent: { kind: 'claude', command: ['claude'], env: { AGENT_MODEL: '1' } } }))).agent.env, { AGENT_MODEL: '1' });
 });
 
 test('custom agent keeps the defense-in-depth denylist', () => {
@@ -136,9 +136,9 @@ test('a symlinked .ai folder is refused', () => {
 });
 
 test('custom agent: project-relative path or bare name only', () => {
-  const ok = withConfig(cfg({ agent: { kind: 'custom', command: ['./tools/agent.sh', '--flag'], env: { MODE: 'fast' } } }));
+  const ok = withConfig(cfg({ agent: { kind: 'custom', command: ['./tools/agent.sh', '--flag'], env: { AGENT_MODEL: 'fast' } } }));
   const c = loadRunConfig(ok);
-  assert.deepEqual(c.agent, { kind: 'custom', command: ['./tools/agent.sh', '--flag'], requireArgs: [], passEnv: [], env: { MODE: 'fast' } });
+  assert.deepEqual(c.agent, { kind: 'custom', command: ['./tools/agent.sh', '--flag'], requireArgs: [], passEnv: [], env: { AGENT_MODEL: 'fast' } });
   assert.equal(loadRunConfig(withConfig(cfg({ agent: { kind: 'custom', command: ['myagent'] } }))).agent.command[0], 'myagent');
   rejects(cfg({ agent: { kind: 'custom', command: ['/opt/agent'] } }), /relative to the project root/);
   rejects(cfg({ agent: { kind: 'custom', command: ['tools/../../agent'] } }), /relative to the project root/);

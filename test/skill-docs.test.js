@@ -79,7 +79,7 @@ test('Not available to the agent: run is described, the agent never runs it', ()
 });
 
 test('run docs: every flag in SKILL.md, README and the CLI usage exists in the run.js parser, and every parser flag is documented', async () => {
-  const { BOOLEAN_FLAGS, VALUE_FLAGS, USAGE } = await import('../skill/scripts/run.js');
+  const { BOOLEAN_FLAGS, VALUE_FLAGS, USAGE } = await import('../skill/scripts/lib/runcli.js');
   const known = new Set([...BOOLEAN_FLAGS, ...VALUE_FLAGS]);
   const readme = fs.readFileSync(new URL('../README.md', import.meta.url), 'utf8');
   const start = readme.indexOf('### Autonomous runs');
@@ -102,7 +102,7 @@ test('run docs: every flag in SKILL.md, README and the CLI usage exists in the r
 });
 
 test('README documents the run consent flow, build-file approval and every exit code', async () => {
-  const { OUTCOME_EXIT, EXIT } = await import('../skill/scripts/run.js');
+  const { OUTCOME_EXIT, EXIT } = await import('../skill/scripts/lib/runcli.js');
   const readme = fs.readFileSync(new URL('../README.md', import.meta.url), 'utf8');
   const section = readme.slice(readme.indexOf('### Autonomous runs'), readme.indexOf('### Limits of the run loop'));
   assert.match(section, /interactive terminal/);

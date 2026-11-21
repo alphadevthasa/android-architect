@@ -14,10 +14,11 @@ import { loadRunConfig } from '../skill/scripts/lib/runconfig.js';
 import { effectiveAgent } from '../skill/scripts/lib/agent.js';
 import { confirmFirstUse } from '../skill/scripts/lib/rungit.js';
 import { NOT_VENDORED } from '../skill/scripts/lib/integrity.js';
-import { main, askTerminal, isVendoredPath, parseArgs, EXIT, OUTCOME_EXIT, BOOLEAN_FLAGS, VALUE_FLAGS, USAGE } from '../skill/scripts/run.js';
+import { main, askTerminal, isVendoredPath, parseArgs, EXIT, OUTCOME_EXIT, BOOLEAN_FLAGS, VALUE_FLAGS, USAGE } from '../skill/scripts/lib/runcli.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const RUN_JS = path.join(ROOT, 'skill/scripts/run.js');
+const RUNCLI_JS = path.join(ROOT, 'skill/scripts/lib/runcli.js');
 const CLI = path.join(ROOT, 'bin/cli.js');
 const tmps = [];
 after(() => {
@@ -436,15 +437,16 @@ test('the CLI installs no signal listeners and no process.exit in run.js', async
   await run(['--root', root], { root: os.tmpdir(), interactive: true, runLoop: async () => { during = sigs.map((s) => process.listenerCount(s)); return fakeResult(); } });
   assert.deepEqual(during, before);
   assert.deepEqual(sigs.map((s) => process.listenerCount(s)), before);
-  const src = fs.readFileSync(RUN_JS, 'utf8');
-  assert.doesNotMatch(src, /process\.(on|once|addListener|prependListener)\(/);
-  assert.doesNotMatch(src, /process\.exit\(/);
-  assert.doesNotMatch(src, /process\.env/, 'option values never come from the environment');
+  for (const f of [RUN_JS, RUNCLI_JS]) {
+    const src = fs.readFileSync(f, 'utf8');
+    assert.doesNotMatch(src, /process\.(on|once|addListener|prependListener)\(/);
+    assert.doesNotMatch(src, /process\.exit\(/);
+    assert.doesNotMatch(src, /process\.env/, 'option values never come from the environment');
+  }
 });
 
 test('run.js never reads approved hashes from config, env or files', () => {
-  const src = fs.readFileSync(RUN_JS, 'utf8');
-  assert.doesNotMatch(src, /readFileSync|process\.env|approvedBuildChanges\s*[:=]\s*(config|cfg)/);
+  for (const f of [RUN_JS, RUNCLI_JS]) assert.doesNotMatch(fs.readFileSync(f, 'utf8'), /readFileSync|process\.env|approvedBuildChanges\s*[:=]\s*(config|cfg)/);
 });
 
 // ---------- bin/cli.js ----------
@@ -605,7 +607,7 @@ test('the run loop is not vendored into .ai/tools', async () => {
   };
   const tools = fs.readdirSync(base).filter((f) => f.endsWith('.js') && f !== 'run.js').map((f) => path.join(base, f));
   const T = reach(tools);
-  const only = [...reach([path.join(base, 'run.js')])].filter((f) => !T.has(f)).map((f) => path.relative(base, f)).sort();
+  const only = [...reach([path.join(base, 'run.js'), path.join(base, 'lib/runcli.js')])].filter((f) => !T.has(f)).map((f) => path.relative(base, f)).sort();
   assert.deepEqual(only, [...NOT_VENDORED].sort());
 });
 
@@ -638,4 +640,56 @@ test('SIGINT through bin/cli.js run stops the loop, exits 4 and leaves a report'
   assert.equal(code, 4, err + out);
   assert.equal(JSON.parse(out).outcome, 'interrupted');
   noLeaks(out + err, root);
+});
+
+// ---------- round 2: env values shown, tiny entry, notices ----------
+test('agent.env values are shown in the consent and dry-run text, redacted, escaped, in full', async () => {
+  const root = project(CHAIN, { config: { agent: { kind: 'claude', command: ['claude'], env: { AGENT_MODEL: 'fast-one', MY_MAX_RETRIES: 'caf\u00e9 ghp_a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8', CI: '1' } } } });
+  const dry = await run(['--root', root, '--dry-run'], { root: os.tmpdir() });
+  const prompt = await run(['--root', root], { root: os.tmpdir(), interactive: true, answers: ['no'] });
+  for (const t of [dry.out, prompt.out]) {
+    assert.match(t, /SET by \.ai\/run\.config\.json for the agent \(name and value\):\n {0,2}- AGENT_MODEL="fast-one"\n/);
+    assert.match(t, /\n- CI="1"|\n {0,2}- CI="1"/);
+    assert.ok(!t.includes('ghp_a1B2c3D4'));
+    assert.match(t, /contains non-ASCII characters: check it is what you expect/);
+  }
+  const j = JSON.parse((await run(['--root', root, '--dry-run', '--json'], { root: os.tmpdir() })).out);
+  assert.equal(j.env.AGENT_MODEL, '"fast-one"');
+});
+
+test('agent.env is limited to behavior variables; credential, endpoint and path shapes are refused', async () => {
+  const { validateRunConfig } = await import('../skill/scripts/lib/runconfig.js');
+  const v = (env) => validateRunConfig({ schemaVersion: 1, agent: { kind: 'claude', command: ['claude'], env } }, os.tmpdir());
+  for (const ok of ['AGENT_MODEL', 'FOO_MAX_TOKENS', 'REQUEST_TIMEOUT_MS', 'TERM', 'NO_COLOR', 'CI']) assert.equal(v({ [ok]: 'x' }).problems.length, 0, ok);
+  for (const bad of ['MY_API_KEY', 'MODEL_KEY', 'X_MODEL_TOKEN', 'MY_FLAG', 'MODE', 'FOO_MODEL_URL', 'A_MAX_PATH', 'A_MODEL_DIR', 'A_MODEL_HOME', 'A_MODEL_HOST', 'A_MODEL_PROXY', 'A_MODEL_ENDPOINT', 'A_MODEL_URI', 'A_MODEL_SECRET', 'A_MODEL_PASSWORD', 'A_CONFIG_MODEL', 'ANTHROPIC_API_KEY', 'LANG', 'DEBUG']) {
+    assert.ok(v({ [bad]: 'x' }).problems.length > 0, bad);
+  }
+});
+
+test('over-cap refusals name the section; 64-char names are shown whole', async () => {
+  const names = Array.from({ length: 20 }, (_, i) => `ANTHROPIC_${'N'.repeat(40)}${String(i).padStart(2, '0')}`);
+  const root = project(CHAIN, { config: { agent: { kind: 'claude', command: ['claude'], passEnv: names }, protectedBranches: Array.from({ length: 20 }, (_, i) => `release/${'b'.repeat(80)}${i}`) } });
+  const r = await run(['--root', root, '--dry-run'], { root: os.tmpdir() });
+  assert.equal(r.code, 0, r.all);
+  for (const n of names) assert.ok(r.out.includes(`  - ${n}\n`));
+  const tooLong = project(CHAIN, { config: { agent: { kind: 'claude', command: ['claude'], env: { AGENT_MODEL: 'v'.repeat(300) } } } });
+  const long = await run(['--root', tooLong, '--dry-run'], { root: os.tmpdir() });
+  assert.equal(long.code, 0);
+  const big = project(CHAIN, { config: { agent: { kind: 'claude', command: ['claude'], env: { AGENT_MODEL: 'w'.repeat(480) } } } });
+  const refused = await run(['--root', big, '--dry-run'], { root: os.tmpdir() });
+  assert.equal(refused.code, 2);
+  assert.match(refused.err, /"Environment variables SET by \.ai\/run\.config\.json[^\n]*" section[^\n]*too long/);
+});
+
+test('run.js imports no library statically and a refused vendored copy executes none of its libs', () => {
+  assert.doesNotMatch(fs.readFileSync(RUN_JS, 'utf8'), /from '\.\.?\//);
+  const root = project(CHAIN, { config: CONFIG });
+  const copy = path.join(root, '.ai/tools/scripts');
+  fs.cpSync(path.join(ROOT, 'skill/scripts'), copy, { recursive: true });
+  fs.writeFileSync(path.join(root, '.ai/tools/package.json'), '{"type":"module","private":true}\n');
+  for (const lib of ['rungit.js', 'init.js', 'runcli.js', 'runloop.js', 'redact.js']) fs.appendFileSync(path.join(copy, 'lib', lib), "\nconsole.log('LIB-EXECUTED-AT-IMPORT');\n");
+  const c = spawnSync(process.execPath, [path.join(copy, 'run.js'), '--root', root, '--dry-run'], { encoding: 'utf8' });
+  assert.equal(c.status, 2);
+  assert.ok(!(c.stdout + c.stderr).includes('LIB-EXECUTED-AT-IMPORT'));
+  assert.match(c.stderr, /installed skill/);
 });
