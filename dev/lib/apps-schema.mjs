@@ -6,8 +6,14 @@ const COMMIT_RE = /^[0-9a-f]{40}$/;
 const APP_KEYS = new Set(['id', 'era', 'repo', 'commit', 'license', 'notes']);
 const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 
+// The URL must already be in WHATWG-normalized form (repo === new URL(repo).href), so the string git receives is the
+// string that was validated. No userinfo, default port only, a dotted DNS name (no IP literal, no localhost).
 function repoError(repo) {
   if (typeof repo !== 'string' || repo === '') return 'repo must be a non-empty string';
+  for (let i = 0; i < repo.length; i++) {
+    const c = repo.charCodeAt(i);
+    if (c <= 0x20 || c === 0x7f) return 'repo must not contain whitespace or control characters';
+  }
   let u;
   try {
     u = new URL(repo);
@@ -15,8 +21,13 @@ function repoError(repo) {
     return 'repo must be a valid URL';
   }
   if (u.protocol !== 'https:') return 'repo must be an https:// URL';
-  if (u.hostname === '') return 'repo must have a host';
+  if (u.href !== repo) return 'repo must be written in normalized form (https://host/path, no dot segments)';
   if (u.username !== '' || u.password !== '') return 'repo must not embed credentials';
+  if (u.port !== '') return 'repo must use the default https port';
+  if (u.search !== '' || u.hash !== '') return 'repo must not have a query or fragment';
+  const h = u.hostname;
+  if (h === '' || h.startsWith('[') || /^[0-9.]+$/.test(h)) return 'repo host must be a DNS name, not an IP literal';
+  if (h === 'localhost' || h.endsWith('.localhost') || !h.includes('.')) return 'repo host must be a public dotted DNS name';
   return null;
 }
 

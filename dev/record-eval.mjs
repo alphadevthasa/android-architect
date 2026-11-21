@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Maintainer-only (not packaged, not part of npm test).
 // Usage: node dev/record-eval.mjs <fixture-or-app-id> [--force]
+//        node dev/record-eval.mjs --update-recs   (after a catalog bump: set catalogVersion in golden/recs/*.json)
 // Runs skill/scripts/scan.js and candidates.js on test/fixtures/<name> (or test/eval/apps/<name>) and writes the golden
 // to test/eval/golden/<name>.json (apps: golden/apps/<name>.json) for human review. It never overwrites without --force;
 // with --force the existing hand-written "rules" are kept. Review the diff before committing; a catalog bump changes
@@ -9,13 +10,28 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { projectProfile, projectCandidates } from '../test/eval/project.mjs';
+import { projectProfile, projectCandidates } from './lib/project.mjs';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
-const USAGE = 'usage: node dev/record-eval.mjs <fixture-or-app-id> [--force]';
+const USAGE = 'usage: node dev/record-eval.mjs <fixture-or-app-id> [--force] | --update-recs';
 const die = (m) => { process.stderr.write(`${m}\n`); process.exit(1); };
 
 const args = process.argv.slice(2);
+if (args.length === 1 && args[0] === '--update-recs') {
+  const { loadCatalog } = await import('../skill/scripts/lib/catalog.js');
+  const version = loadCatalog().catalogVersion;
+  const dir = path.join(root, 'test', 'eval', 'golden', 'recs');
+  for (const f of fs.readdirSync(dir).filter((n) => n.endsWith('.json')).sort()) {
+    const recs = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
+    if (recs.catalogVersion === version) continue;
+    // A deliberately stale file (the R5-shape case) keeps its stale marker.
+    if (f.includes('stale-catalog')) continue;
+    recs.catalogVersion = version;
+    fs.writeFileSync(path.join(dir, f), JSON.stringify(recs, null, 2) + '\n');
+    process.stdout.write(`${path.join(dir, f)}\n`);
+  }
+  process.exit(0);
+}
 const force = args.includes('--force');
 const names = args.filter((a) => a !== '--force');
 if (names.length !== 1 || names[0].startsWith('-')) die(USAGE);

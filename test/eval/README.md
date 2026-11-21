@@ -7,12 +7,12 @@
 1. **Golden profiles.** For each in-repo fixture (`legacy-java-mvp`, `modern-compose`, `mixed`, `feature-app`, `reuse-app`, `secrets`, `insecure-app`) `golden/<fixture>.json` holds the expected `scan.js` profile subset, asserted exactly: per dimension the entry ids and shares, modules and their project deps, sdk levels and size counts. Evidence lists, the root and any timestamps are deliberately not recorded.
 2. **Candidate paths.** The same file holds `candidates`: for each dimension with a detected entry, `current`, `next`, `reachable` and the ids that are blocked by unmet prerequisites. The order is the catalog's order and is asserted as a list, so a change in ordering fails.
 3. **Recommendation rules.** `rules` in each golden file point at canned recommendation files in `golden/recs/<fixture>.<case>.json` (the exact input of `recommend-check.js`). Rule kinds:
-   - `guardrail`: each case expects `pass` (exit 0, no violations) or `fail` (exit 1, and exactly the listed R-rules fire).
+   - `guardrail`: each case expects `pass` (exit 0, no violations) or `fail` (exit 1, and exactly the listed R-rules fire). A case may name `adr`, a folder under `golden/adr/` passed as `--adr-dir`: the rejected-ADR cases pin R7 (a rejected target is not repeated, and is allowed again once its `reopenIf` holds). R1 to R7 are all exercised by at least one case.
    - `must-not-recommend`: `forbid` lists `{dimension, to[]}` targets that no step may reach without a 20+ character justification. A `violate` case must contain such a step and the guardrail must reject it with the listed rules; a `pass` case must not. The legacy Java+MVP fixture must never receive an unjustified jump to Compose or MVI.
    - `must-recommend`: `require` is `{dimension, anyOf[]}`; at least one step must reach one of the ids (`pass`), or the case is a deliberately lacking file (`fail`).
 4. **Pinned real apps.** `apps.json` is validated against the schema below. For every listed app whose `test/eval/apps/<id>` folder exists, the golden `golden/apps/<id>.json` is asserted the same way; if the folder is absent the test is skipped with a notice.
 
-Recommendation files carry the catalog version. After a catalog bump (profile `catalogVersion`, new or renamed entries), re-record the goldens with `node dev/record-eval.mjs <name> --force` (existing `rules` are kept), update `catalogVersion` in the files under `golden/recs/`, and review the whole diff before committing.
+Recommendation files carry the catalog version. After a catalog bump (profile `catalogVersion`, new or renamed entries), re-record the goldens with `node dev/record-eval.mjs <name> --force` (existing `rules` are kept), run `node dev/record-eval.mjs --update-recs` (sets `catalogVersion` in the files under `golden/recs/`, except the deliberately stale one), and review the whole diff before committing.
 
 ## `apps.json` format
 
@@ -24,7 +24,7 @@ Recommendation files carry the catalog version. After a catalog bump (profile `c
 
 - `id`: lowercase letters, digits and `-`, up to 64 characters, unique.
 - `era`: one of `legacy-java-mvp`, `mvvm-rxjava`, `modern-compose`.
-- `repo`: an `https://` URL without embedded credentials.
+- `repo`: an `https://` URL already in normalized form (the text must equal what `new URL(repo).href` returns, so what is validated is exactly what git receives): no whitespace or control characters, no credentials, default port only, no query or fragment, a dotted DNS host (no IP literal, no `localhost`).
 - `commit`: a full 40-character lowercase hex commit (a branch or tag name is rejected).
 - `license`: non-empty (record the SPDX id after checking the repository).
 - `notes`: optional.
@@ -35,7 +35,10 @@ The shipped list is empty on purpose: the repository and commit choices are a ma
 
 1. Choose the repository, pin a commit (40 hex) and check the license.
 2. Add the entry to `apps.json`.
-3. `node dev/fetch-eval-apps.mjs` validates the manifest and clones each pinned commit into `test/eval/apps/<id>` (gitignored) with `git clone --no-checkout` plus `git checkout`, https only, hooks disabled, a sanitized environment, and verifies HEAD equals the pin. It never runs repository scripts. It needs the network and is never run by `npm test`. It removes `.js`, `.mjs` and `.cjs` files from the checkout, because node's test discovery executes any `.js` file under `test/`; the eval fails if any remain.
+3. `node dev/fetch-eval-apps.mjs` validates the manifest and clones each pinned commit into `test/eval/apps/<id>` (gitignored) with `git clone --no-checkout` plus `git checkout`, https only, hooks, LFS filters, credential helpers and submodule recursion disabled, an empty temporary HOME and a sanitized environment, and verifies HEAD equals the pin. It never runs repository scripts. It needs the network and is never run by `npm test`. An existing folder is re-verified (must be under `test/eval/apps`, HEAD equal to the pin) and re-stripped, never trusted.
+   - The sanitized environment drops proxy and CA variables. On a proxy-only network pass `--proxy-env`, which forwards `HTTPS_PROXY`, `https_proxy`, `NO_PROXY`, `no_proxy`, `SSL_CERT_FILE` and `GIT_SSL_CAINFO`.
+   - Preventive control: after checkout the tree is reduced by an allowlist (`dev/lib/strip.mjs`): only regular files the scan reads are kept (`.java .kt .kts .gradle .xml .toml .properties .pro .yml .yaml`, `.editorconfig`, `.gitignore`, `README*`, `LICENSE*`); everything else (scripts, js/ts, symlinks, binaries, `.github`) and `.git/hooks` is deleted. This matters because node's test discovery executes any js or ts file under `test/`.
+   - Detective control: `eval.test.js` fails if any file with a node-discoverable extension (js, mjs, cjs, ts, mts, cts, jsx, tsx) remains in an app folder.
 4. `node dev/record-eval.mjs <id>` runs `scan.js` and `candidates.js` and writes `golden/apps/<id>.json`. It refuses to overwrite without `--force`.
 5. Review the diff of the golden, then commit it. The checked-out app itself is never committed.
 

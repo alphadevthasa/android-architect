@@ -9,8 +9,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { validateApps, ERAS } from './apps-schema.mjs';
-import { projectProfile, projectCandidates } from './project.mjs';
+import { validateApps, ERAS } from '../../dev/lib/apps-schema.mjs';
+import { stripToAllowlist, findNodeDiscoverable } from '../../dev/lib/strip.mjs';
+import { projectProfile, projectCandidates } from '../../dev/lib/project.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const scripts = path.join(here, '..', '..', 'skill', 'scripts');
@@ -43,8 +44,8 @@ function analyse(name, dir) {
   return cache.get(name);
 }
 
-function guardrail(profileFile, recsFile) {
-  const r = node('recommend-check.js', recsFile, '--profile', profileFile);
+function guardrail(profileFile, recsFile, adrDir = null) {
+  const r = node('recommend-check.js', recsFile, '--profile', profileFile, ...(adrDir ? ['--adr-dir', adrDir] : []));
   let out = null;
   try { out = JSON.parse(r.stdout); } catch { /* exit 2 prints no JSON */ }
   return { status: r.status, out, rules: out ? [...new Set(out.violations.map((v) => v.rule))].sort() : [] };
@@ -67,6 +68,14 @@ test('rule evaluators detect what they claim to (negative controls)', () => {
   const req = { require: { dimension: 'language', anyOf: ['kotlin'] } };
   assert.equal(satisfiesRequire(req, { steps: [{ dimension: 'language', to: 'kotlin' }] }), true);
   assert.equal(satisfiesRequire(req, bad), false);
+});
+
+test('justification threshold: 19 characters fail, 20 pass', () => {
+  const rule = { forbid: [{ dimension: 'presentation', to: ['udf-stateflow'] }] };
+  const step = (n) => ({ steps: [{ dimension: 'presentation', to: 'udf-stateflow', justification: 'x'.repeat(n) }] });
+  assert.equal(violatesForbid(rule, step(MIN_JUSTIFICATION - 1)), true);
+  assert.equal(violatesForbid(rule, step(MIN_JUSTIFICATION)), false);
+  assert.equal(MIN_JUSTIFICATION, 20);
 });
 
 test('every in-repo fixture has a golden file and nothing else sits in golden/', () => {
@@ -100,7 +109,7 @@ for (const name of FIXTURES) {
       test(`${name}: ${rule.kind} ${rule.id} (${c.recs}, expect ${c.expect})`, () => {
         const recsFile = path.join(goldenDir, c.recs);
         const recs = json(recsFile);
-        const g = guardrail(analyse(name, dir).profileFile, recsFile);
+        const g = guardrail(analyse(name, dir).profileFile, recsFile, c.adr ? path.join(goldenDir, c.adr) : null);
         if (rule.kind === 'guardrail') {
           if (c.expect === 'pass') {
             assert.equal(g.status, 0, JSON.stringify(g.out));
@@ -141,6 +150,12 @@ test('every rule kind has a passing and a deliberately violating canned file', (
   assert.deepEqual([...seen.guardrail].sort(), ['fail', 'pass']);
   assert.deepEqual([...seen['must-not-recommend']].sort(), ['pass', 'violate']);
   assert.deepEqual([...seen['must-recommend']].sort(), ['fail', 'pass']);
+});
+
+test('the canned cases exercise R1, R2, R3, R4, R5, R6 and R7', () => {
+  const fired = new Set();
+  for (const name of FIXTURES) for (const r of json(path.join(goldenDir, `${name}.json`)).rules) for (const c of r.cases) for (const x of c.rules ?? []) fired.add(x);
+  assert.deepEqual([...fired].sort(), ['R1-hop', 'R2-prereq', 'R3-order', 'R4-unknown-id', 'R5-shape', 'R6-anchor', 'R7-rejected']);
 });
 
 test('every canned recs file is referenced by a golden rule, and at least three fixtures have recs', () => {
@@ -189,6 +204,23 @@ test('apps.json validator rejects each kind of bad input', () => {
     [with_({ repo: 'http://example.invalid/a' }), /https/],
     [with_({ repo: 'git@example.invalid:a/b.git' }), /valid URL/],
     [with_({ repo: 'file:///tmp/x' }), /https/],
+    [with_({ repo: 'https:host.example/a' }), /normalized/],
+    [with_({ repo: 'https:/host.example/a' }), /normalized/],
+    [with_({ repo: 'https://host.example/a\n' }), /whitespace or control/],
+    [with_({ repo: 'https://host.example/a b' }), /whitespace or control/],
+    [with_({ repo: 'https://host.example/a\u0000' }), /whitespace or control/],
+    [with_({ repo: 'https://host.example:8443/a' }), /default https port/],
+    [with_({ repo: 'https://host.example:443/a' }), /normalized/],
+    [with_({ repo: 'https://host.example/a/../b' }), /normalized/],
+    [with_({ repo: 'https://HOST.example/a' }), /normalized/],
+    [with_({ repo: 'https://127.0.0.1/a' }), /IP literal/],
+    [with_({ repo: 'https://0x7f.1/a' }), /normalized/],
+    [with_({ repo: 'https://[::1]/a' }), /IP literal/],
+    [with_({ repo: 'https://localhost/a' }), /dotted DNS/],
+    [with_({ repo: 'https://app.localhost/a' }), /dotted DNS/],
+    [with_({ repo: 'https://intranet/a' }), /dotted DNS/],
+    [with_({ repo: 'https://host.example/a?x=1' }), /query or fragment/],
+    [with_({ repo: 'https://host.example/a#f' }), /query or fragment/],
     [with_({ repo: 'https://user:pw@example.invalid/a' }), /credentials/],
     [with_({ commit: 'A'.repeat(40) }), /40 lowercase hex/],
     [with_({ commit: 'abc123' }), /40 lowercase hex/],
@@ -206,15 +238,38 @@ test('apps.json validator rejects each kind of bad input', () => {
   assert.deepEqual(ERAS, ['legacy-java-mvp', 'mvvm-rxjava', 'modern-compose']);
 });
 
-const JS_EXT = new Set(['.js', '.mjs', '.cjs']);
-function hasJs(dir) {
-  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-    if (e.name === '.git') continue;
-    const p = path.join(dir, e.name);
-    if (e.isDirectory()) { if (hasJs(p)) return true; } else if (JS_EXT.has(path.extname(e.name))) return true;
-  }
-  return false;
-}
+test('the allowlist strip removes everything the scan does not read (synthetic tree)', () => {
+  const dir = fs.mkdtempSync(path.join(tmp, 'strip-'));
+  const put = (rel, content = 'x') => { fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); fs.writeFileSync(path.join(dir, rel), content); };
+  for (const rel of ['build.gradle', 'settings.gradle.kts', 'gradle.properties', 'gradle/libs.versions.toml', 'app/src/main/A.kt', 'app/src/main/B.java',
+    'app/src/main/AndroidManifest.xml', 'app/proguard-rules.pro', 'README.md', 'LICENSE', '.gitignore', 'config/detekt.yml', 'test/Keep.kt']) put(rel);
+  for (const rel of ['run.js', 'a.mjs', 'b.cjs', 'c.ts', 'd.mts', 'e.cts', 'f.jsx', 'g.tsx', 'x.test.ts', 'app/y.test.js', 'test/z.js', 'test/deep/w.mjs',
+    '.github/workflows/ci.yml.sh', 'gradlew', 'gradlew.bat', 'bin/tool', 'logo.png', 'lib.jar', '.gitmodules', 'node_modules/p/index.js']) put(rel);
+  put('script', '#!/usr/bin/env node\nconsole.log(1)\n');
+  fs.symlinkSync('run.js', path.join(dir, 'link.js'));
+  fs.symlinkSync('build.gradle', path.join(dir, 'link.gradle'));
+  fs.symlinkSync('test', path.join(dir, 'dirlink'));
+  fs.mkdirSync(path.join(dir, '.git', 'hooks'), { recursive: true });
+  fs.writeFileSync(path.join(dir, '.git', 'hooks', 'post-checkout'), '#!/bin/sh\n');
+  fs.writeFileSync(path.join(dir, '.git', 'HEAD'), 'ref: refs/heads/x\n');
+  assert.ok(findNodeDiscoverable(dir).length >= 9, 'detective check sees the planted files');
+  stripToAllowlist(dir);
+  const left = [];
+  const walk = (d, rel) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const r = rel ? `${rel}/${e.name}` : e.name; if (e.isDirectory()) walk(path.join(d, e.name), r); else left.push(r); } };
+  walk(dir, '');
+  assert.deepEqual(left.sort(), ['.git/HEAD', '.gitignore', 'LICENSE', 'README.md', 'app/proguard-rules.pro', 'app/src/main/A.kt', 'app/src/main/AndroidManifest.xml', 'app/src/main/B.java',
+    'build.gradle', 'config/detekt.yml', 'gradle.properties', 'gradle/libs.versions.toml', 'settings.gradle.kts', 'test/Keep.kt']);
+  assert.equal(fs.existsSync(path.join(dir, '.git', 'hooks')), false);
+  assert.equal(fs.lstatSync(dir).isDirectory(), true);
+  assert.deepEqual(findNodeDiscoverable(dir), []);
+});
+
+test('the detective check flags every node-discoverable extension', () => {
+  const dir = fs.mkdtempSync(path.join(tmp, 'detect-'));
+  const exts = ['js', 'mjs', 'cjs', 'ts', 'mts', 'cts', 'jsx', 'tsx'];
+  for (const e of exts) fs.writeFileSync(path.join(dir, `f.${e}`), '');
+  assert.deepEqual(findNodeDiscoverable(dir), exts.map((e) => `f.${e}`).sort());
+});
 
 for (const app of validateApps(apps).length === 0 ? apps.apps : []) {
   const dir = path.join(here, 'apps', app.id);
@@ -223,8 +278,8 @@ for (const app of validateApps(apps).length === 0 ? apps.apps : []) {
       t.skip(`apps/${app.id} not fetched; run node dev/fetch-eval-apps.mjs to enable`);
       return;
     }
-    // node's test discovery runs any .js under test/, so a fetched app must contain none (fetch-eval-apps strips them).
-    assert.equal(hasJs(dir), false, `apps/${app.id} contains JavaScript files that node --test would execute`);
+    // Detective control: node's test discovery runs any js/ts file under test/. The preventive control is the allowlist strip.
+    assert.deepEqual(findNodeDiscoverable(dir), [], `apps/${app.id} holds files that node --test would execute; re-run dev/fetch-eval-apps.mjs`);
     const golden = json(path.join(goldenDir, 'apps', `${app.id}.json`));
     assert.equal(golden.fixture, app.id);
     const a = analyse(`app-${app.id}`, dir);

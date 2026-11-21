@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "catalogVersion": "2026.11.3",
+  "generatedAt": "2026-01-01",
+  "dimensions": [
+    {
+      "dimension": "presentation",
+      "current": [
+        "mvp"
+      ],
+      "target": "mvvm-clean",
+      "label": "must",
+      "rationale": "Canned eval rationale."
+    }
+  ],
+  "steps": [
+    {
+      "id": "pres1",
+      "dimension": "presentation",
+      "from": "mvp",
+      "to": "mvvm-clean",
+      "dependsOn": [],
+      "justification": "Skip the interim st"
+    }
+  ]
+}
