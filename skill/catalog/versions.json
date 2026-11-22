@@ -99,7 +99,7 @@
       "stable": "1.13.0",
       "group": "kotlinx",
       "requires": {
-        "kotlin": ">=1.9"
+        "kotlin": ">=2.3"
       }
     },
     {
@@ -125,12 +125,12 @@
     {
       "coord": "com.squareup.moshi:moshi",
       "stable": "1.15.2",
-      "group": "json"
+      "group": "json-moshi"
     },
     {
       "coord": "com.google.code.gson:gson",
       "stable": "2.15.0",
-      "group": "json"
+      "group": "json-gson"
     },
     {
       "coord": "io.ktor:ktor-client-core",
@@ -140,17 +140,17 @@
     {
       "coord": "io.coil-kt:coil",
       "stable": "2.7.0",
-      "group": "images"
+      "group": "images-coil"
     },
     {
       "coord": "io.coil-kt:coil-compose",
       "stable": "2.7.0",
-      "group": "images"
+      "group": "images-coil"
     },
     {
       "coord": "com.github.bumptech.glide:glide",
       "stable": "5.0.10",
-      "group": "images"
+      "group": "images-glide"
     },
     {
       "coord": "com.google.dagger:hilt-android",

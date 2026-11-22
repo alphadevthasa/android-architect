@@ -19,7 +19,8 @@
       "successors": [],
       "detect": {
         "computed": true
-      }
+      },
+      "source": "https://developer.android.com/google/play/requirements/target-sdk"
     },
     {
       "id": "target-sdk-36",
@@ -35,7 +36,8 @@
       "successors": [],
       "detect": {
         "computed": true
-      }
+      },
+      "source": "https://developer.android.com/google/play/requirements/target-sdk"
     },
     {
       "id": "page-size-16kb",
@@ -131,7 +133,7 @@
       "appliesWhen": {
         "usesNotifications": true
       },
-      "source": "https://developer.android.com/develop/ui/views/notifications/notification-permission",
+      "source": "https://developer.android.com/develop/ui/compose/notifications/notification-permission",
       "successors": [],
       "detect": {
         "computed": true
