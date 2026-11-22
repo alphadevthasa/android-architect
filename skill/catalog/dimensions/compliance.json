@@ -3,7 +3,7 @@
   "name": "Platform compliance",
   "asOf": "2026-11-20",
   "verified": false,
-  "dataNote": "Checked 2026-11-22 against Android and Play docs: target API 35 and 36, 16 KB pages (updates blocked from 2027-02-01), edge-to-edge, predictive back. Other entries (foreground service types, notification and media permissions, exact alarms) are still from memory.",
+  "dataNote": "Checked 2026-11-22 against Android and Play docs: target API 35 and 36, 16 KB pages (updates blocked from 2027-02-01), edge-to-edge, predictive back. Foreground service types, notification and media permissions and exact alarms were checked too (exact alarm default-deny applies from target 33).",
   "entries": [
     {
       "id": "target-sdk-35",
@@ -165,8 +165,8 @@
       "since": "2021-10",
       "policy": {
         "kind": "targetSdkEnforced",
-        "value": 34,
-        "effective": "2024-08-31"
+        "value": 33,
+        "effective": "2023-08-31"
       },
       "appliesWhen": {
         "usesExactAlarm": true

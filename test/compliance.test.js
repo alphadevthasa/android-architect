@@ -90,7 +90,8 @@ test('notification, media and exact alarm advice', () => {
   withProject({ ...base(34), 'app/src/main/AndroidManifest.xml': '<manifest>\n<uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>\n<uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>\n</manifest>\n' }, (p) => assert.equal(item(p, 'media-permissions').status, 'ok'));
   withProject({ ...base(34), ...kt('alarm.setExactAndAllowWhileIdle(a, b, c)\n') }, (p) => assert.equal(item(p, 'exact-alarm').status, 'check'));
   withProject({ ...base(34), ...kt('if (alarm.canScheduleExactAlarms()) alarm.setExact(a, b, c)\n') }, (p) => assert.equal(item(p, 'exact-alarm').status, 'ok'));
-  withProject({ ...base(33), ...kt('alarm.setExact(a, b, c)\n') }, (p) => assert.equal(item(p, 'exact-alarm').status, 'ok'));
+  withProject({ ...base(32), ...kt('alarm.setExact(a, b, c)\n') }, (p) => assert.equal(item(p, 'exact-alarm').status, 'ok'));
+  withProject({ ...base(33), ...kt('alarm.setExact(a, b, c)\n') }, (p) => assert.equal(item(p, 'exact-alarm').status, 'check'));
 });
 
 test('edge-to-edge and predictive back are check items from their target level, ok with evidence', () => {
