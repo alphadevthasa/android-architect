@@ -14,7 +14,7 @@ Moves a Realm database to Room with a one-time copy into a new Room database fil
 
 ## When it is worth it
 
-The project wants plain SQLite tooling, a Room-based test and migration story, or one persistence stack shared with other modules, or needs to leave Realm because of its support status or licensing and sync changes. Realm's live objects and thread-confined model also make it hard to fit clean architecture layers.
+The project wants plain SQLite tooling, a Room-based test and migration story, or one persistence stack shared with other modules, or needs to leave Realm because of its support status (MongoDB deprecated the Atlas Device SDKs, including the Realm Java SDK, in September 2024 and ended support on 30 September 2025; Device Sync is deprecated too) or licensing and sync changes. Realm's live objects and thread-confined model also make it hard to fit clean architecture layers.
 
 ## When not to
 

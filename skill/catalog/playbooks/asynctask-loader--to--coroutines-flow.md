@@ -23,7 +23,7 @@ Dead code that is scheduled for deletion; or a screen about to be rewritten anyw
 ## Preconditions
 
 - Every `AsyncTask` subclass and Loader is listed, with its trigger, its inputs, what it does in `onPostExecute` and what happens on cancel.
-- The coroutines dependencies and `lifecycle-viewmodel-ktx` or `lifecycle-runtime-ktx` are available in the module.
+- The coroutines dependencies and the lifecycle `lifecycle-viewmodel` and `lifecycle-runtime` artifacts are available in the module (the `-ktx` variants are empty since Lifecycle 2.8.0 and only matter on older versions).
 - Long-running work that must outlive the screen (uploads, downloads, sync) is identified, because a screen-scoped coroutine does not outlive the screen.
 
 ## Steps

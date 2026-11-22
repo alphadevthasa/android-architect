@@ -10,7 +10,7 @@ asOf: 2026-11-20
 verified: false
 ---
 
-Moves in-app navigation from XML navigation graphs (with Safe Args or bundle arguments) to Navigation Compose with type-safe routes: route classes or objects annotated with `@Serializable` from kotlinx.serialization. The type-safe API arrived in a Navigation 2.x release (2.8.0, as far as the author remembers; check the current documentation for the minimum version). Written from memory of https://developer.android.com/guide/navigation and https://developer.android.com/guide/navigation/design/type-safety; check the current documentation before relying on a detail. Run this after most screens use Compose (see the XML to Compose playbook); the string-route Compose step is skipped here.
+Moves in-app navigation from XML navigation graphs (with Safe Args or bundle arguments) to Navigation Compose with type-safe routes: route classes or objects annotated with `@Serializable` from kotlinx.serialization. The type-safe API arrived in a Navigation 2.x release (2.8.0, as far as the author remembers; check the current documentation for the minimum version). Navigation 3, a separate library, is the newer option for Compose-only apps; check whether it fits before choosing Navigation Compose for a new target. Written from memory of https://developer.android.com/guide/navigation and https://developer.android.com/guide/navigation/design/type-safety; check the current documentation before relying on a detail. Run this after most screens use Compose (see the XML to Compose playbook); the string-route Compose step is skipped here.
 
 ## When it is worth it
 

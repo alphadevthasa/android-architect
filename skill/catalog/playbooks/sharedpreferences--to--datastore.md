@@ -61,7 +61,7 @@ One safe ordering applies: (1) the migration is one-way per file, with a single 
 
 ## Security checklist
 
-- The old SharedPreferences XML file is deleted after migration: the built-in migration only empties it, so call `Context.deleteSharedPreferences(name)` once the migration is verified (in Mode B, in the deletion release), and check the file under the app's `shared_prefs` folder is gone.
+- The old SharedPreferences XML file is deleted after migration: the built-in migration clears the migrated keys and then attempts to delete the file once it is empty, so call `Context.deleteSharedPreferences(name)` once the migration is verified if the file is still there (in Mode B, in the deletion release), and check the file under the app's `shared_prefs` folder is gone.
 - Sensitive values (tokens, identifiers, flags that gate security) are not placed in DataStore as plain text: Preferences DataStore stores plaintext on disk, so such values stay in an encrypted store or are encrypted before writing (see the EncryptedSharedPreferences playbook).
 - Backup rules: `android:allowBackup`, `dataExtractionRules` and `fullBackupContent` are reviewed so the new `datastore` folder is excluded if the old file was excluded, and so a restored old file cannot re-trigger a Mode B migration with stale values.
 - Values are not logged by migration or debug code.
