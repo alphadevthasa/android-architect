@@ -29,8 +29,12 @@ const BASE_ENV = ['PATH', 'HOME', 'LANG'];
 const ID_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-';
 
 /**
- * Default argv templates per agent kind. THESE ARE UNVERIFIED: they were written from memory without access to the
- * CLIs, and agent CLI flags change between releases (check the current CLI help). They are data, not logic: the user
+ * Default argv templates per agent kind. The `claude` flags were confirmed with a real run (claude 2.1.329). The `codex`
+ * template matches the published non-interactive docs (`codex exec`), but the binary was never run here, so it stays
+ * marked unverified. Note: per those docs `codex exec` runs in a READ-ONLY sandbox by default, so the default template
+ * cannot edit files; a team that wants edits sets agent.command explicitly (for example adding `--sandbox
+ * workspace-write`, with `--ask-for-approval never` when no human is present). Agent CLI flags change between releases
+ * (check the current CLI help). They are data, not logic: the user
  * overrides the whole argv in .ai/run.config.json (agent.command), and `run` prints the effective argv before starting.
  * Placeholders (substituted by runAgent AFTER the config is validated, as plain data, never through a shell):
  *   {prompt}   a short fixed prompt that points at the brief file by its project-relative path
