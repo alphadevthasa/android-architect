@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "asOf": "2026-11-21",
   "verified": true,
-  "dataNote": "Stable versions resolved on 2026-11-21 from Google Maven and Maven Central metadata (highest version without alpha/beta/rc/milestone/dev/preview markers). Major bumps (OkHttp 5, Retrofit 3, Glide 5) were not checked for migration breakage.",
+  "dataNote": "Stable versions resolved on 2026-11-21 from Google Maven and Maven Central metadata (no alpha/beta/rc/milestone/dev/preview). Major bumps (OkHttp 5, Retrofit 3, Glide 5) were read from changelogs only; see CONTRIBUTING.",
   "libraries": [
     {
       "coord": "androidx.core:core-ktx",
