@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.5.2] - 2026-11-22
+
+Data corrections from auditing the compliance catalog against the Android and Google Play documentation.
+
+### Fixed
+
+- `page-size-16kb`: the effective date is 2027-02-01, when Google Play blocks updates that do not support 16 KB page sizes. The catalog carried the original 2025-11-01.
+- `exact-alarm`: `SCHEDULE_EXACT_ALARM` is no longer pre-granted to newly installed apps that target Android 13 (API 33) or higher, so the policy level is 33, not 34. A project targeting API 33 now gets a `check` item instead of `ok`.
+
+### Changed
+
+- The compliance catalog `dataNote` and `CONTRIBUTING.md` record what was checked: target API 35 and 36, 16 KB pages, edge-to-edge, predictive back, foreground service types, the notification and granular media permissions, and exact alarms. The source links were not re-fetched.
+- `catalog/versions.json` `dataNote` and `CONTRIBUTING.md` record a changelog review of the OkHttp 5, Retrofit 3 and Glide 5 bumps (no migration was built or tested).
+- The default `codex` command line is documented as read-only: `codex exec` runs in a read-only sandbox, so editing needs `--sandbox workspace-write` in `agent.command`. The default argv is unchanged.
+
+### Unverified
+
+- The playbooks' steps and checklists, the update groups and `requires` data in `versions.json`, the compliance source links, and the default `codex` command line (never run here) are still unaudited.
+
 ## [0.5.1] - 2026-11-21
 
 Maintenance release: refreshed library data, a data audit, and a release pipeline that no longer needs a stored token.
