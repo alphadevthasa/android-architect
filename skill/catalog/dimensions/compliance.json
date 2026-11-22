@@ -3,7 +3,7 @@
   "name": "Platform compliance",
   "asOf": "2026-11-20",
   "verified": false,
-  "dataNote": "Policy values, effective dates and source links written from memory; maintainers must audit before release",
+  "dataNote": "Checked 2026-11-22 against Android and Play docs: target API 35 and 36, 16 KB pages (updates blocked from 2027-02-01), edge-to-edge, predictive back. Other entries (foreground service types, notification and media permissions, exact alarms) are still from memory.",
   "entries": [
     {
       "id": "target-sdk-35",
@@ -46,7 +46,7 @@
       "policy": {
         "kind": "pageSizeBytes",
         "value": 16384,
-        "effective": "2025-11-01"
+        "effective": "2027-02-01"
       },
       "successors": [],
       "detect": {
